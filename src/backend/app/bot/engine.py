@@ -45,8 +45,17 @@ from app.bot.auto_reply_rules import (
     detect_message_channel,
     match_auto_reply_rules,
 )
+from app.bot import chat_extensions
 
 _HISTORY_MESSAGE_LIMIT = 30
+
+
+def _history_message_limit(conversation: Conversation) -> int:
+    """Edition extensions may raise the limit for studio chats."""
+    custom = chat_extensions.history_message_limit(conversation)
+    if custom is not None:
+        return custom
+    return _HISTORY_MESSAGE_LIMIT
 
 
 def _format_structured_tool_dict(result: dict[str, Any]) -> str:
@@ -286,7 +295,10 @@ async def process_message(
         if tool_guidance:
             system_prompt += tool_guidance
 
-        tools = build_openai_tools(tool_skills)
+        studio_ctx = chat_extensions.prepare_studio_context(conversation)
+
+        tools = list(build_openai_tools(tool_skills))
+        tools.extend(chat_extensions.extra_tools(conversation, studio_ctx))
         system_prompt = append_patent_tool_hints(system_prompt, tool_skills)
         patent_links = patent_link_settings_from_skills(tool_skills)
 
@@ -306,6 +318,10 @@ async def process_message(
             conversation_id=conversation.id,
         )
 
+        system_prompt = chat_extensions.augment_system_prompt(
+            conversation, studio_ctx, system_prompt
+        )
+
         auto_reply_matches = await match_auto_reply_rules(
             message.content,
             getattr(customer_config, "auto_reply_rules", None),
@@ -320,7 +336,7 @@ async def process_message(
             select(Message)
             .where(Message.conversation_id == conversation.id)
             .order_by(Message.created_at.desc(), Message.id.desc())
-            .limit(_HISTORY_MESSAGE_LIMIT)
+            .limit(_history_message_limit(conversation))
         )
         history = list(reversed(history_result.scalars().all()))
 
@@ -425,6 +441,7 @@ async def process_message(
                         tool_args,
                         tool_skills,
                         db_session,
+                        studio_ctx=studio_ctx,
                     )
                 except BaseException as e:
                     logger.error(f"Tool execution crashed: {e}", exc_info=True)
@@ -554,6 +571,14 @@ async def process_message(
             )
             db_session.add(assistant_msg)
 
+            if message.content:
+                chat_extensions.after_assistant_turn(
+                    conversation,
+                    studio_ctx,
+                    message.content,
+                    full_response,
+                )
+
             # Increment token usage on the associated channel
             customer_id = getattr(conversation, "customer_id", None)
             if customer_id:
@@ -592,8 +617,16 @@ async def _execute_tool(
     tool_args: dict[str, Any],
     skills: list[Skill],
     db_session: AsyncSession,
+    *,
+    studio_ctx: Any | None = None,
 ) -> Any:
     """Execute a skill tool function."""
+    extension_result = chat_extensions.execute_extension_tool(
+        tool_name, tool_args, studio_ctx
+    )
+    if extension_result is not None:
+        return extension_result
+
     for skill in skills:
         if skill.name == tool_name and skill.enabled:
             try:

@@ -509,54 +509,6 @@ class ChatService:
         await self.db.refresh(conversation)
         return ConversationResponse.model_validate(conversation)
 
-    async def get_or_resume_channel_conversation(
-        self,
-        user_id: str,
-        channel_id: str,
-        title: str | None = None,
-    ) -> ConversationResponse:
-        """Latest active conversation for this user's channel, or create a new one."""
-        from app.models.customer import CustomerConfig
-
-        channel_result = await self.db.execute(
-            select(CustomerConfig).where(
-                CustomerConfig.id == channel_id,
-                CustomerConfig.user_id == user_id,
-                CustomerConfig.enabled == True,
-            )
-        )
-        channel = channel_result.scalar_one_or_none()
-        if channel is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Channel not found",
-            )
-        from app.services.subscription_gate import ensure_channel_subscription_active
-
-        ensure_channel_subscription_active(channel)
-
-        result = await self.db.execute(
-            select(Conversation)
-            .where(
-                Conversation.user_id == user_id,
-                Conversation.customer_id == channel_id,
-                Conversation.status == "active",
-            )
-            .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
-            .limit(1)
-        )
-        existing = result.scalar_one_or_none()
-        if existing is not None:
-            loaded = await self.get_conversation(existing.id, user_id=user_id)
-            if loaded is not None:
-                return loaded
-
-        return await self.create_conversation(
-            user_id=user_id,
-            title=title,
-            customer_id=channel_id,
-        )
-
     async def close_conversation(
         self,
         conversation_id: str,
