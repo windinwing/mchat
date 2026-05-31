@@ -21,7 +21,7 @@ from app.core.config import settings
 from app.models.skill import Skill
 from app.schemas.skill import SkillCatalogItem, SkillResponse, SkillUpdate
 from app.skill.loader import SkillLoader
-from app.skill.ops_policy import SCOPE_SERVER_OPS, is_server_ops_skill
+from app.skill.ops_policy import SCOPE_NOTIFICATION, SCOPE_SERVER_OPS, is_server_ops_skill
 from app.skill.zip_utils import extract_skill_zip, read_skill_meta_from_zip
 
 
@@ -71,7 +71,9 @@ class SkillService:
 
     @staticmethod
     def _skills_root() -> Path:
-        return Path(settings.skills_dir).resolve()
+        from app.core.skills_paths import resolve_skills_root
+
+        return resolve_skills_root()
 
     @staticmethod
     def _skill_directory(skill: Skill) -> Path | None:
@@ -375,6 +377,10 @@ class SkillService:
             is_server_ops = (
                 str(disk_cfg.get("scope") or "").strip().lower() == SCOPE_SERVER_OPS
             )
+            is_notification = (
+                str(disk_cfg.get("scope") or "").strip().lower() == SCOPE_NOTIFICATION
+            )
+            restricted = is_server_ops or is_notification
             if existing:
                 existing.description = skill_data.get("description")
                 existing.skill_type = skill_data.get("type", "tool")
@@ -388,7 +394,7 @@ class SkillService:
                     }
                 )
                 existing.config = merged
-                if not is_server_ops:
+                if not restricted:
                     existing.enabled = True
             else:
                 skill = Skill(
@@ -398,7 +404,7 @@ class SkillService:
                     skill_type=skill_data.get("type", "tool"),
                     path=skill_data.get("path"),
                     config=skill_data.get("config"),
-                    enabled=False if is_server_ops else True,
+                    enabled=False if restricted else True,
                 )
                 self.db.add(skill)
             if is_server_ops or (

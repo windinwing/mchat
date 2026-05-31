@@ -15,6 +15,7 @@ from app.services.field_encryption import decrypt_skill_bindings
 from app.core.config import settings
 from app.skill.ops_policy import (
     filter_skills_by_ops_policy,
+    notification_enabled_for_user,
     server_ops_enabled_for_user,
 )
 from app.skill.utils import get_prompt_body, has_executable_script
@@ -110,13 +111,18 @@ async def load_skills_for_chat(
 
     # Never expose server_ops tools on widget / portal / multi-tenant channels.
     allow_server_ops = await server_ops_enabled_for_user(db, user_id)
+    allow_notification = await notification_enabled_for_user(db, user_id)
     if customer_config is not None:
         allow_server_ops = False
+        allow_notification = False
     allowlist = getattr(settings, "server_ops_skill_allowlist", None)
+    notification_allowlist = getattr(settings, "notification_skill_allowlist", None)
     all_skills = filter_skills_by_ops_policy(
         all_skills,
         allow_server_ops=allow_server_ops,
         allowlist=allowlist,
+        allow_notification=allow_notification,
+        notification_allowlist=notification_allowlist,
     )
 
     all_skills = _merge_channel_skill_bindings(all_skills, customer_config)
@@ -256,6 +262,52 @@ _DEFAULT_TOOL_PARAMETERS: dict[str, dict[str, Any]] = {
             },
         },
         "required": ["command"],
+    },
+    "patent-report": {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "enum": ["chart", "excel", "word", "ppt", "all"],
+                "description": "chart=PNG 图表；excel/word/ppt=单格式；all=图表+Office 全套",
+            },
+            "sections": {
+                "type": "object",
+                "description": "merge 节点 sections（工作流 ${nodes.merge.sections}）",
+            },
+            "title": {"type": "string", "description": "报告标题"},
+            "filename": {
+                "type": "string",
+                "description": "输出文件名（不含扩展名）",
+            },
+            "charts": {
+                "type": "array",
+                "description": "上游 chart 节点 charts（可选 ${nodes.chart.charts}）",
+            },
+        },
+        "required": ["command"],
+    },
+    "mchat-notify": {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "enum": ["ping", "send", "workflow_alert"],
+                "description": "ping=测试；send=自定义内容；workflow_alert=工作流告警模板",
+            },
+            "phone": {"type": "string", "description": "11 位手机号（须在系统白名单）"},
+            "provider": {
+                "type": "string",
+                "enum": ["dev", "auto"],
+                "description": "dev=仅日志；auto=尝试 skills/mchat-notify/providers/ 下已安装插件",
+            },
+            "content": {"type": "string", "description": "command=send 时的正文（≤500 字）"},
+            "workflow_name": {"type": "string"},
+            "event": {"type": "string"},
+            "run_id": {"type": "string"},
+            "message": {"type": "string"},
+        },
+        "required": ["command", "phone"],
     },
     "mchat-ops": {
         "type": "object",

@@ -42,6 +42,15 @@ import {
   type WorkflowSkillOption,
 } from '@/lib/workflowSkillMeta'
 import { getSkillDisplayName } from '@/lib/skillDisplay'
+import {
+  buildPatentWorkflowPresets,
+  getPatentPresetById,
+  getPatentPresetDescription,
+  getPatentPresetTitle,
+  type PatentShowcaseConfig,
+  type PatentWorkflowPreset,
+} from '@/lib/patentWorkflowPresets'
+import api from '@/lib/api'
 import { PayloadMapper } from '@/components/workflow/PayloadMapper'
 import { workflowNodeTypes } from '@/components/workflow/WorkflowCanvasNode'
 import {
@@ -265,6 +274,31 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   const [contextMenu, setContextMenu] = useState<GraphContextMenuState>(null)
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('pointer')
   const isPointerTool = canvasTool === 'pointer'
+  const [showcaseConfig, setShowcaseConfig] = useState<PatentShowcaseConfig | null>(null)
+
+  const patentPresets = useMemo(
+    () =>
+      buildPatentWorkflowPresets(
+        showcaseConfig?.search_skill,
+        showcaseConfig?.report_skill,
+      ),
+    [showcaseConfig?.search_skill, showcaseConfig?.report_skill],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get<PatentShowcaseConfig>('/workflows/showcase-config')
+      .then((data) => {
+        if (!cancelled) setShowcaseConfig(data)
+      })
+      .catch(() => {
+        if (!cancelled) setShowcaseConfig(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const filteredSkills = useMemo(() => {
     const q = skillSearch.trim().toLowerCase()
@@ -375,6 +409,44 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
     setPropsOpen(true)
   }
 
+  const buildPresetNode = (preset: PatentWorkflowPreset, position: { x: number; y: number }): Node => {
+    const skill =
+      skills.find((s) => s.name === preset.skillName) ||
+      skills.find((s) => s.name === 'patent-search' && preset.skillName === 'patent-search')
+    const id = `${preset.id}_${Date.now()}`
+    const label = getPatentPresetTitle(preset, uiLocale)
+    const skillLabel = skill ? getSkillDisplayName(skill, uiLocale) : preset.skillName
+    const skillMissing = preset.skillName
+      ? !skills.some((s) => s.name === preset.skillName)
+      : false
+    return {
+      id,
+      type: 'workflowNode',
+      position,
+      data: {
+        label,
+        nodeType: 'skill',
+        config: {
+          skill_id: skill?.id || '',
+          skill_name: preset.skillName,
+          workflow_role: preset.workflowRole,
+          payload_template: { ...preset.payloadTemplate },
+        },
+        skillLabel: skillMissing ? preset.skillName : skillLabel,
+        categoryLabel: t(`workflows.skillCategory.${preset.workflowRole}`),
+        skillMissing,
+      },
+    }
+  }
+
+  const addPresetNodeAt = (preset: PatentWorkflowPreset, position: { x: number; y: number }) => {
+    const next = buildPresetNode(preset, position)
+    setNodes((prev) => [...prev, next])
+    setSelectedNodeId(next.id)
+    setSelectedEdgeId(null)
+    setPropsOpen(true)
+  }
+
   const buildSkillNode = (
     skill: WorkflowSkillOption | null,
     position: { x: number; y: number },
@@ -481,15 +553,23 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
       if (payload.kind === 'skill' && payload.skillId) {
         const skill = skills.find((s) => s.id === payload.skillId)
         if (skill) addSkillNodeAt(skill, position)
+      } else if (payload.kind === 'patent-preset' && payload.presetId) {
+        const preset = getPatentPresetById(payload.presetId, patentPresets)
+        if (preset) addPresetNodeAt(preset, position)
       } else if (payload.kind === 'skill-empty') {
         addEmptySkillNodeAt(position)
       }
     },
-    [edges, nodes.length, skills, screenToFlowPosition, t],
+    [edges, nodes.length, patentPresets, skills, screenToFlowPosition, t, uiLocale],
   )
 
   const beginSkillDrag = (event: React.DragEvent, skill: WorkflowSkillOption) => {
     event.dataTransfer.setData(DRAG_MIME, JSON.stringify({ kind: 'skill', skillId: skill.id }))
+    event.dataTransfer.effectAllowed = 'move'
+  }
+
+  const beginPresetDrag = (event: React.DragEvent, presetId: string) => {
+    event.dataTransfer.setData(DRAG_MIME, JSON.stringify({ kind: 'patent-preset', presetId }))
     event.dataTransfer.effectAllowed = 'move'
   }
 
@@ -666,6 +746,53 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
                   ))}
                 </div>
               </div>
+
+              {showcaseConfig?.enabled !== false ? (
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                  {t('workflows.palettePatentPresets')}
+                </p>
+                <p className="mb-2 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">
+                  {t('workflows.palettePatentPresetsHint')}
+                </p>
+                {showcaseConfig && !showcaseConfig.ready ? (
+                  <p className="mb-2 text-[10px] leading-relaxed text-amber-600 dark:text-amber-400">
+                    {t('workflows.patentShowcaseNotReady')}
+                  </p>
+                ) : null}
+                <div className="flex flex-col gap-1">
+                  {patentPresets.map((preset) => {
+                    const missing = !skills.some((s) => s.name === preset.skillName)
+                    return (
+                      <div
+                        key={preset.id}
+                        draggable
+                        onDragStart={(e) => beginPresetDrag(e, preset.id)}
+                        title={t('workflows.dragPresetHint')}
+                        className="flex cursor-grab items-start gap-1.5 rounded-md border border-gray-200 px-2 py-1.5 active:cursor-grabbing hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                        style={{
+                          borderLeftWidth: 3,
+                          borderLeftColor: NODE_COLORS.skill,
+                        }}
+                      >
+                        <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-40" />
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium">
+                            {getPatentPresetTitle(preset, uiLocale)}
+                          </span>
+                          <span className="block truncate text-[10px] text-gray-400">
+                            {getPatentPresetDescription(preset, uiLocale)}
+                          </span>
+                          {missing ? (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400">⚠</span>
+                          ) : null}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+              ) : null}
 
               <div>
                 <div className="mb-1 flex items-center justify-between gap-1">

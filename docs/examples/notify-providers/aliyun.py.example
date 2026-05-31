@@ -1,0 +1,101 @@
+"""Aliyun SMS provider — copy to skills/mchat-notify/providers/aliyun.py (local only)."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import os
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+from urllib.parse import quote
+
+import httpx
+
+from app.core.config import settings
+from app.services.sms.base import SmsSendResult
+
+
+def _percent_encode(value: str) -> str:
+    return quote(str(value), safe="~")
+
+
+def _sign(params: dict[str, str], secret: str) -> str:
+    items = sorted(params.items())
+    canonical = "&".join(f"{_percent_encode(k)}={_percent_encode(v)}" for k, v in items)
+    string_to_sign = f"GET&{_percent_encode('/')}&{_percent_encode(canonical)}"
+    digest = hmac.new(
+        (secret + "&").encode("utf-8"),
+        string_to_sign.encode("utf-8"),
+        hashlib.sha1,
+    ).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+class Provider:
+    name = "aliyun"
+
+    def send_text(self, phone: str, content: str) -> SmsSendResult:
+        return SmsSendResult(
+            ok=False,
+            provider=self.name,
+            message="阿里云仅支持模板短信",
+            provider_code="unsupported",
+        )
+
+    def send_template(
+        self,
+        phone: str,
+        *,
+        template_code: str,
+        template_params: dict[str, Any],
+    ) -> SmsSendResult:
+        ak = (settings.aliyun_sms_access_key_id or "").strip()
+        sk = (settings.aliyun_sms_access_key_secret or "").strip()
+        sign_name = (settings.aliyun_sms_sign_name or "").strip()
+        region = (settings.aliyun_sms_region or "cn-hangzhou").strip()
+        tpl = (template_code or settings.aliyun_sms_alert_template_code or settings.aliyun_sms_template_code or "").strip()
+        if not ak or not sk or not sign_name or not tpl:
+            return SmsSendResult(
+                ok=False,
+                provider=self.name,
+                message="阿里云 SMS 未配置",
+                provider_code="config",
+            )
+        params: dict[str, str] = {
+            "AccessKeyId": ak,
+            "Action": "SendSms",
+            "Format": "JSON",
+            "PhoneNumbers": phone,
+            "SignName": sign_name,
+            "SignatureMethod": "HMAC-SHA1",
+            "SignatureNonce": str(uuid.uuid4()),
+            "SignatureVersion": "1.0",
+            "TemplateCode": tpl,
+            "TemplateParam": json.dumps(template_params, ensure_ascii=False),
+            "Timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "Version": "2017-05-25",
+        }
+        params["Signature"] = _sign(params, sk)
+        url = f"https://dysmsapi.{region}.aliyuncs.com/"
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(url, params=params)
+            data = resp.json()
+            code = str(data.get("Code") or "")
+            ok = code == "OK"
+            return SmsSendResult(
+                ok=ok,
+                provider=self.name,
+                message=str(data.get("Message") or ("ok" if ok else resp.text[:200])),
+                provider_code=code,
+            )
+        except (httpx.HTTPError, json.JSONDecodeError) as e:
+            return SmsSendResult(
+                ok=False,
+                provider=self.name,
+                message=str(e),
+                provider_code="http_error",
+            )

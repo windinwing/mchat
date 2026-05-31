@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Eye, Network, Play, Plus, RefreshCw, Trash2, Workflow } from 'lucide-react'
+import { Eye, LayoutTemplate, Network, Play, Plus, RefreshCw, Trash2, Workflow } from 'lucide-react'
 
 import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
@@ -29,6 +29,7 @@ interface WorkflowTemplate {
   category: string
   locale?: string | null
   node_count: number
+  builtin?: boolean
 }
 
 interface WorkflowItem {
@@ -126,6 +127,11 @@ export function WorkflowsPage() {
   const [runTarget, setRunTarget] = useState<WorkflowItem | null>(null)
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [creatingTemplateId, setCreatingTemplateId] = useState<string | null>(null)
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
+  const [saveTemplateTarget, setSaveTemplateTarget] = useState<WorkflowItem | null>(null)
+  const [templateNameInput, setTemplateNameInput] = useState('')
+  const [templateDescInput, setTemplateDescInput] = useState('')
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null)
 
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowItem | null>(null)
   const [selectedRunDetail, setSelectedRunDetail] = useState<WorkflowRunDetail | null>(null)
@@ -286,6 +292,100 @@ export function WorkflowsPage() {
     }
   }
 
+  const openSaveTemplate = (row: WorkflowItem) => {
+    if (!row.graph_json?.nodes?.length) {
+      toast(t('workflows.saveTemplateNeedGraph'), { type: 'error' })
+      return
+    }
+    setSaveTemplateTarget(row)
+    setTemplateNameInput(`${row.name} ${t('workflows.templateNameSuffix')}`)
+    setTemplateDescInput(row.description || '')
+    setSaveTemplateOpen(true)
+  }
+
+  const confirmSaveTemplate = async () => {
+    if (!saveTemplateTarget || !templateNameInput.trim()) return
+    setSaving(true)
+    try {
+      await api.post(`/workflows/${saveTemplateTarget.id}/save-as-template`, {
+        name: templateNameInput.trim(),
+        description: templateDescInput.trim() || null,
+        category: 'custom',
+        locale: uiLocale,
+      })
+      toast(t('workflows.toastTemplateSaved'), { type: 'success' })
+      setSaveTemplateOpen(false)
+      setSaveTemplateTarget(null)
+      await loadAll()
+    } catch (err: any) {
+      toast(t('workflows.toastTemplateSaveFailed'), { type: 'error', message: err.message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteUserTemplate = async (tpl: WorkflowTemplate) => {
+    if (!window.confirm(t('workflows.deleteTemplateConfirm', { name: tpl.name }))) return
+    setDeletingTemplateId(tpl.id)
+    try {
+      await api.delete(`/workflows/templates/${tpl.id}`)
+      toast(t('workflows.toastTemplateDeleted'), { type: 'success' })
+      await loadAll()
+    } catch (err: any) {
+      toast(t('workflows.toastTemplateDeleteFailed'), { type: 'error', message: err.message })
+    } finally {
+      setDeletingTemplateId(null)
+    }
+  }
+
+  const renderTemplateCard = (tpl: WorkflowTemplate) => (
+    <div key={tpl.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{tpl.name}</p>
+            {tpl.builtin ? (
+              <Badge variant="info" size="sm">{t('workflows.templateBuiltin')}</Badge>
+            ) : (
+              <Badge variant="default" size="sm">{t('workflows.templateCustom')}</Badge>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{tpl.description}</p>
+        </div>
+        <Badge variant="info" size="sm">{tpl.node_count} nodes</Badge>
+      </div>
+      {tpl.builtin && tpl.category === 'patent' ? (
+        <p className="text-[10px] text-amber-600 dark:text-amber-400">{t('workflows.templatePatentHint')}</p>
+      ) : null}
+      {tpl.builtin && tpl.category === 'notification' ? (
+        <p className="text-[10px] text-blue-600 dark:text-blue-400">{t('workflows.templateNotifyHint')}</p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          isLoading={creatingTemplateId === tpl.id}
+          onClick={() => createFromTemplate(tpl.id)}
+        >
+          {t('workflows.useTemplate')}
+        </Button>
+        {!tpl.builtin ? (
+          <Button
+            size="sm"
+            variant="danger"
+            isLoading={deletingTemplateId === tpl.id}
+            onClick={() => deleteUserTemplate(tpl)}
+          >
+            {t('common.delete')}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  )
+
+  const builtinTemplates = templates.filter((t) => t.builtin !== false)
+  const myTemplates = templates.filter((t) => t.builtin === false)
+
   const openGraphEditor = (row: WorkflowItem) => {
     setSelectedWorkflow(row)
     setGraphDraft(row.graph_json || { version: 1, nodes: [], edges: [] })
@@ -383,34 +483,42 @@ export function WorkflowsPage() {
         </div>
       </div>
 
-      {templates.length > 0 && (
+      {builtinTemplates.some((tpl) => tpl.category === 'notification') ? (
         <Card>
-          <CardHeader>{t('workflows.templatesTitle')}</CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
-            {templates.map((tpl) => (
-              <div key={tpl.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{tpl.name}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{tpl.description}</p>
-                  </div>
-                  <Badge variant="info" size="sm">{tpl.node_count} nodes</Badge>
-                </div>
-                {tpl.id.endsWith('_en') ? (
-                  <p className="text-[10px] text-amber-600 dark:text-amber-400">{t('workflows.templateDemoHint')}</p>
-                ) : null}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  isLoading={creatingTemplateId === tpl.id}
-                  onClick={() => createFromTemplate(tpl.id)}
-                >
-                  {t('workflows.useTemplate')}
-                </Button>
-              </div>
-            ))}
+          <CardHeader>{t('workflows.notifyTestCardTitle')}</CardHeader>
+          <CardContent className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
+            <ol className="list-decimal list-inside space-y-1">
+              <li>{t('workflows.notifyTestStep1')}</li>
+              <li>{t('workflows.notifyTestStep2')}</li>
+              <li>{t('workflows.notifyTestStep3')}</li>
+            </ol>
+            <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">{t('workflows.notifyTestDoc')}</p>
           </CardContent>
         </Card>
+      ) : null}
+
+      {(builtinTemplates.length > 0 || myTemplates.length > 0) && (
+        <div className="space-y-4">
+          {builtinTemplates.length > 0 && (
+            <Card>
+              <CardHeader>{t('workflows.templatesTitle')}</CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2">
+                {builtinTemplates.map(renderTemplateCard)}
+              </CardContent>
+            </Card>
+          )}
+          <Card>
+            <CardHeader>{t('workflows.myTemplatesTitle')}</CardHeader>
+            <CardContent>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('workflows.myTemplatesHint')}</p>
+              {myTemplates.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">{t('workflows.myTemplatesEmpty')}</p>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">{myTemplates.map(renderTemplateCard)}</div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       <Card>
@@ -452,6 +560,14 @@ export function WorkflowsPage() {
                     </Button>
                     <Button size="sm" variant="outline" leftIcon={<Network className="w-4 h-4" />} onClick={() => openGraphEditor(row)}>
                       {t('workflows.editGraph')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      leftIcon={<LayoutTemplate className="w-4 h-4" />}
+                      onClick={() => openSaveTemplate(row)}
+                    >
+                      {t('workflows.saveAsTemplate')}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => openEdit(row)}>
                       {t('common.edit')}
@@ -711,6 +827,17 @@ export function WorkflowsPage() {
             <Button onClick={confirmRun} isLoading={runTarget ? runningMap[runTarget.id] : false}>
               {t('workflows.runOnce')}
             </Button>
+          </div>
+        </div>
+      </Dialog>
+      <Dialog open={saveTemplateOpen} onClose={() => setSaveTemplateOpen(false)} title={t('workflows.saveTemplateTitle')} size="md">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('workflows.saveTemplateHint')}</p>
+          <Input label={t('workflows.formName')} value={templateNameInput} onChange={(e) => setTemplateNameInput(e.target.value)} />
+          <Input label={t('workflows.formDescription')} value={templateDescInput} onChange={(e) => setTemplateDescInput(e.target.value)} />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setSaveTemplateOpen(false)}>{t('common.cancel')}</Button>
+            <Button onClick={confirmSaveTemplate} isLoading={saving} disabled={!templateNameInput.trim()}>{t('common.save')}</Button>
           </div>
         </div>
       </Dialog>

@@ -12,7 +12,12 @@ from app.utils.upload_paths import resolve_upload_root
 from app.utils.secret_mask import is_secret_mask, mask_secret
 from app.knowledge.milvus_client import milvus_client
 from app.knowledge.milvus_runtime import apply_milvus_runtime
-from app.skill.ops_policy import sync_server_ops_settings_from_db
+from app.skill.ops_policy import (
+    SCOPE_SERVER_OPS,
+    is_server_ops_skill,
+    sync_notification_settings_from_db,
+    sync_server_ops_settings_from_db,
+)
 from app.skill.shell_allowlist import normalize_allowlist_entries
 from app.models.setting import Setting
 from app.schemas.settings import AppSettingsResponse, AppSettingsUpdate
@@ -137,6 +142,41 @@ class SettingsService:
             shell_allowlist=server_ops_shell_allowlist,
         )
 
+        notification_skills_enabled = get_val(
+            "notification_skills_enabled", DEFAULT_SETTINGS.notification_skills_enabled
+        )
+        notification_skill_allowlist = get_val(
+            "notification_skill_allowlist", DEFAULT_SETTINGS.notification_skill_allowlist
+        )
+        if not isinstance(notification_skill_allowlist, list):
+            notification_skill_allowlist = ["mchat-notify"]
+        sms_default_provider = get_val(
+            "sms_default_provider", DEFAULT_SETTINGS.sms_default_provider
+        )
+        sms_phone_allowlist = get_val(
+            "sms_phone_allowlist", DEFAULT_SETTINGS.sms_phone_allowlist
+        )
+        if not isinstance(sms_phone_allowlist, list):
+            sms_phone_allowlist = []
+        sms_alert_phones = get_val("sms_alert_phones", DEFAULT_SETTINGS.sms_alert_phones)
+        if not isinstance(sms_alert_phones, list):
+            sms_alert_phones = []
+        sms_send_cooldown_seconds = get_val(
+            "sms_send_cooldown_seconds", DEFAULT_SETTINGS.sms_send_cooldown_seconds
+        )
+        sms_workflow_alert_enabled = get_val(
+            "sms_workflow_alert_enabled", DEFAULT_SETTINGS.sms_workflow_alert_enabled
+        )
+        sync_notification_settings_from_db(
+            enabled=notification_skills_enabled,
+            allowlist=notification_skill_allowlist or None,
+            sms_default_provider=str(sms_default_provider),
+            sms_phone_allowlist=sms_phone_allowlist,
+            sms_alert_phones=sms_alert_phones,
+            sms_workflow_alert_enabled=sms_workflow_alert_enabled,
+            sms_send_cooldown_seconds=int(sms_send_cooldown_seconds),
+        )
+
         # Keep runtime storage settings in sync with persisted settings.
         settings.storage_backend = storage_backend
         settings.upload_dir = upload_dir
@@ -193,6 +233,13 @@ class SettingsService:
             worker_log_cleanup_enabled=worker_log_cleanup_enabled,
             worker_log_retention_days=worker_log_retention_days,
             worker_usage_reset_enabled=worker_usage_reset_enabled,
+            notification_skills_enabled=notification_skills_enabled,
+            notification_skill_allowlist=notification_skill_allowlist,
+            sms_default_provider=str(sms_default_provider),
+            sms_phone_allowlist=sms_phone_allowlist,
+            sms_alert_phones=sms_alert_phones,
+            sms_send_cooldown_seconds=int(sms_send_cooldown_seconds),
+            sms_workflow_alert_enabled=sms_workflow_alert_enabled,
         )
 
     async def update_settings(self, data: AppSettingsUpdate) -> AppSettingsResponse:

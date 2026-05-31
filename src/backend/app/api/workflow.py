@@ -20,6 +20,8 @@ from app.schemas.workflow import (
     WorkflowRunResponse,
     WorkflowStepResponse,
     WorkflowStepsPutRequest,
+    WorkflowPatentShowcaseConfig,
+    WorkflowSaveAsTemplateRequest,
     WorkflowTemplateSummary,
     WorkflowUpdate,
 )
@@ -45,12 +47,33 @@ async def create_workflow(
     return await WorkflowService(db).create_workflow(user_id=admin.id, data=request)
 
 
+@router.get("/showcase-config", response_model=WorkflowPatentShowcaseConfig)
+async def get_patent_showcase_config(
+    admin: User = Depends(require_permission(Permission.SKILLS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await WorkflowService(db).get_patent_showcase_config(user_id=admin.id)
+
+
 @router.get("/templates", response_model=list[WorkflowTemplateSummary])
 async def list_workflow_templates(
     locale: str | None = None,
     admin: User = Depends(require_permission(Permission.SKILLS_READ)),
+    db: AsyncSession = Depends(get_db),
 ):
-    return WorkflowService.list_templates(locale=locale)
+    return await WorkflowService(db).list_templates(user_id=admin.id, locale=locale)
+
+
+@router.delete("/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workflow_template(
+    template_id: str,
+    admin: User = Depends(require_permission(Permission.SKILLS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    await WorkflowService(db).delete_user_template(
+        user_id=admin.id, template_id=template_id
+    )
+    return None
 
 
 @router.post("/from-template/{template_id}", response_model=WorkflowResponse, status_code=status.HTTP_201_CREATED)
@@ -66,6 +89,24 @@ async def create_workflow_from_template(
         name=request.name,
         description=request.description,
         enabled=request.enabled,
+    )
+
+
+@router.post(
+    "/{workflow_id}/save-as-template",
+    response_model=WorkflowTemplateSummary,
+    status_code=status.HTTP_201_CREATED,
+)
+async def save_workflow_as_template(
+    workflow_id: str,
+    request: WorkflowSaveAsTemplateRequest,
+    admin: User = Depends(require_permission(Permission.SKILLS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await WorkflowService(db).save_workflow_as_template(
+        user_id=admin.id,
+        workflow_id=workflow_id,
+        data=request,
     )
 
 

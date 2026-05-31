@@ -21,11 +21,16 @@ async def main() -> None:
 
     from app.core.config import settings
     from app.core.database import async_session_factory
+    from app.core.skills_paths import iter_skills_roots
     from app.models.skill import Skill
     from app.models.user import User
     from app.services.skill_service import SkillService
 
-    print(f"SKILLS_DIR={Path(settings.skills_dir).resolve()}")
+    roots = iter_skills_roots()
+    print("Skill roots:")
+    for root in roots:
+        print(f"  - {root}")
+    print(f"SKILLS_DIR (primary)={roots[0] if roots else Path(settings.skills_dir).resolve()}")
 
     async with async_session_factory() as db:
         user_result = await db.execute(

@@ -10,33 +10,54 @@ from typing import Any
 from loguru import logger
 
 from app.core.config import settings
+from app.core.skills_paths import iter_skills_roots, resolve_skills_root
 
 
 class SkillLoader:
     """Scans the skills directory for SKILL.md files and parses them."""
 
     def __init__(self, skills_dir: str | None = None) -> None:
-        self.skills_dir = Path(skills_dir or settings.skills_dir)
+        if skills_dir is not None:
+            from app.core.skills_paths import resolve_skills_root
+
+            self.skills_roots = [resolve_skills_root(skills_dir)]
+        else:
+            self.skills_roots = iter_skills_roots()
+        # Back-compat: first root
+        self.skills_dir = self.skills_roots[0] if self.skills_roots else resolve_skills_root()
 
     def scan_skills(self) -> list[dict[str, Any]]:
         """Scan for SKILL.md files and parse skill definitions."""
-        skills = []
+        skills: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
 
-        if not self.skills_dir.exists():
-            logger.warning(
-                f"Skills directory not found: {self.skills_dir}"
-            )
-            return skills
+        for root in self.skills_roots:
+            if not root.exists():
+                logger.warning(f"Skills directory not found: {root}")
+                continue
 
-        for item in self.skills_dir.iterdir():
-            if item.is_dir():
+            for item in root.iterdir():
+                if not item.is_dir():
+                    continue
                 skill_md = item / "SKILL.md"
-                if skill_md.exists():
-                    skill_data = self._parse_skill_md(skill_md)
-                    if skill_data:
-                        skills.append(skill_data)
+                if not skill_md.exists():
+                    continue
+                skill_data = self._parse_skill_md(skill_md)
+                if not skill_data:
+                    continue
+                name = str(skill_data.get("name") or item.name)
+                if name in seen_names:
+                    logger.debug(
+                        "Skipping duplicate skill {} from {} (already loaded)",
+                        name,
+                        root,
+                    )
+                    continue
+                seen_names.add(name)
+                skills.append(skill_data)
 
-        logger.info(f"Loaded {len(skills)} skills from {self.skills_dir}")
+        roots_label = ", ".join(str(r) for r in self.skills_roots)
+        logger.info(f"Loaded {len(skills)} skills from [{roots_label}]")
         return skills
 
     @staticmethod

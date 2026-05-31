@@ -42,6 +42,13 @@ interface AppSettings {
   worker_log_cleanup_enabled: boolean
   worker_log_retention_days: number
   worker_usage_reset_enabled: boolean
+  notification_skills_enabled: boolean
+  notification_skill_allowlist: string[]
+  sms_default_provider: string
+  sms_phone_allowlist: string[]
+  sms_alert_phones: string[]
+  sms_send_cooldown_seconds: number
+  sms_workflow_alert_enabled: boolean
 }
 
 interface AppLogResponse {
@@ -103,6 +110,13 @@ export function SettingsPage() {
     worker_log_cleanup_enabled: true,
     worker_log_retention_days: 14,
     worker_usage_reset_enabled: true,
+    notification_skills_enabled: false,
+    notification_skill_allowlist: ['mchat-notify'],
+    sms_default_provider: 'dev',
+    sms_phone_allowlist: [],
+    sms_alert_phones: [],
+    sms_send_cooldown_seconds: 60,
+    sms_workflow_alert_enabled: false,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -531,6 +545,84 @@ export function SettingsPage() {
                   rows={6}
                   placeholder={t('settings.serverOpsShellAllowlistPlaceholder')}
                 />
+              )}
+              <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-700 pt-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {t('settings.notificationSkills')}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('settings.notificationSkillsHint')}
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.notification_skills_enabled}
+                  onChange={(checked) =>
+                    setSettings({ ...settings, notification_skills_enabled: checked })
+                  }
+                />
+              </div>
+              {settings.notification_skills_enabled && (
+                <>
+                  <div>
+                    <Select
+                      label={t('settings.smsDefaultProvider')}
+                      value={settings.sms_default_provider || 'dev'}
+                      options={[
+                        { value: 'dev', label: 'dev (log only)' },
+                        { value: 'auto', label: 'auto (local plugins)' },
+                      ]}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                        setSettings({ ...settings, sms_default_provider: e.target.value })
+                      }
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {t('settings.smsDefaultProviderHint')}
+                    </p>
+                  </div>
+                  <Input
+                    label={t('settings.smsPhoneAllowlist')}
+                    value={(settings.sms_phone_allowlist || []).join(', ')}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setSettings({
+                        ...settings,
+                        sms_phone_allowlist: e.target.value
+                          .split(',')
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    placeholder="13800138000"
+                  />
+                  <Input
+                    label={t('settings.smsAlertPhones')}
+                    value={(settings.sms_alert_phones || []).join(', ')}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setSettings({
+                        ...settings,
+                        sms_alert_phones: e.target.value
+                          .split(',')
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    placeholder={t('settings.smsAlertPhonesPlaceholder')}
+                  />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {t('settings.smsWorkflowAlert')}
+                      </p>
+                      <p className="text-xs text-gray-500">{t('settings.smsWorkflowAlertHint')}</p>
+                    </div>
+                    <Switch
+                      checked={settings.sms_workflow_alert_enabled}
+                      onChange={(checked) =>
+                        setSettings({ ...settings, sms_workflow_alert_enabled: checked })
+                      }
+                    />
+                  </div>
+                </>
               )}
             </div>
           </TabPanel>

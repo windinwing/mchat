@@ -11,6 +11,8 @@
 |-------------|-----------|------|
 | `openpyxl` | `openpyxl` | 工具导出 `.xlsx` |
 | `python-docx` | `docx` | 工具导出 `.docx` |
+| `matplotlib` | `matplotlib` | 工作流图表 PNG（`patent-report`） |
+| `python-pptx` | `pptx` | 工作流 PPT（`patent-report`） |
 
 `requirements.txt` / `requirements-lite.txt` 已声明上述版本；**发布镜像仍建议显式打进依赖**，不要只靠运行时 pip。
 
@@ -21,7 +23,7 @@
 ### 1）Core 执行器（`app/skill/deps.py`）
 
 - 入口：`executor._execute_python_tool()` 里调用 `warm_skill_export_deps(skill_name, skill_dir)`。
-- 行为：对配置了导出能力的技能名（`patent-search` / `patent-transaction` / `patent-disclosure`），在跑工具前尝试 `import`；失败则：
+- 行为：对配置了导出能力的技能名（`patent-search` / `patent-transaction` / `patent-disclosure` / `patent-report`），在跑工具前尝试 `import`；失败则：
   1. `uv pip install <包> -q`（若 PATH 有 `uv`）
   2. 否则 `python -m pip install <包> -q`（当前进程的解释器）
 - 失败：**只打日志**，不抛错，**不阻塞**该技能的其它子命令（如检索 `search`）。

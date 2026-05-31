@@ -54,7 +54,17 @@ class Settings(BaseSettings):
     aliyun_sms_access_key_secret: str = ""
     aliyun_sms_sign_name: str = "笑溢网络"
     aliyun_sms_template_code: str = "SMS_289525897"
+    aliyun_sms_alert_template_code: str = ""
     aliyun_sms_region: str = "cn-hangzhou"
+
+    # Notification (runtime synced from settings DB; default dev=log only)
+    sms_default_provider: str = "dev"
+    sms_phone_allowlist: list[str] | None = None
+    sms_alert_phones: list[str] | None = None
+    sms_send_cooldown_seconds: int = 60
+    sms_workflow_alert_enabled: bool = False
+    notification_skills_enabled: bool = False
+    notification_skill_allowlist: list[str] | None = None
 
     # Patent portal / SSO (optional; set in .env for your deployment)
     patent9235_base_url: str = ""
@@ -111,8 +121,16 @@ class Settings(BaseSettings):
     login_rate_limit: int = 5
     login_rate_limit_period: int = 60
 
-    # Skills
+    # Skills — platform dir + optional external packs (e.g. separate patent repo)
     skills_dir: str = "../../skills"
+    # Comma/colon-separated extra roots scanned after SKILLS_DIR (absolute path recommended)
+    extra_skills_dirs: str = ""
+    # Patent workflow showcase (templates/presets reference these skill names; not bundled in mchat)
+    patent_workflow_showcase_enabled: bool = True
+    patent_workflow_search_skill: str = "patent-search"
+    patent_workflow_report_skill: str = "patent-report"
+    # Optional note for ops/docs (e.g. /path/to/skills/patents)
+    patent_skills_source: str = ""
 
     # File uploads
     upload_dir: str = "../../uploads"
@@ -166,7 +184,9 @@ class Settings(BaseSettings):
 
     @property
     def skills_path(self) -> Path:
-        return Path(self.skills_dir)
+        from app.core.skills_paths import resolve_skills_root
+
+        return resolve_skills_root(self.skills_dir)
 
 
 settings = Settings()

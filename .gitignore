@@ -62,6 +62,10 @@ skills/*
 !skills/mchat-help/**
 !skills/mchat-ops/
 !skills/mchat-ops/**
+!skills/mchat-notify/
+!skills/mchat-notify/**
+skills/mchat-notify/providers/*.py
+!skills/mchat-notify/providers/README.md
 src/backend/skills/*
 !src/backend/skills/.gitkeep
 

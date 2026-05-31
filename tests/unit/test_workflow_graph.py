@@ -21,7 +21,12 @@ def test_list_patent_report_template():
     en_tpl = get_workflow_template("patent_report_multidim_en")
     assert en_tpl is not None
     en_search = next(n for n in en_tpl["graph_json"]["nodes"] if n["id"] == "search")
-    assert en_search["config"]["skill_name"] == "patent-industry-search"
+    assert en_search["config"]["skill_name"] == "patent-search"
+    en_export = next(n for n in en_tpl["graph_json"]["nodes"] if n["id"] == "export")
+    assert en_export["config"]["skill_name"] == "patent-report"
+    assert en_export["config"]["payload_template"]["command"] == "all"
+    en_chart = next(n for n in en_tpl["graph_json"]["nodes"] if n["id"] == "chart")
+    assert en_chart["config"]["skill_name"] == "patent-report"
 
 
 def test_list_templates_by_locale():
@@ -56,3 +61,23 @@ def test_render_template_input_and_nodes_path():
 def test_resolve_path_nested():
     context = {"nodes": {"merge": {"sections": {"a": 1}}}}
     assert _resolve_path("nodes.merge.sections", context) == {"a": 1}
+
+
+def test_graph_for_template_export_strips_skill_id():
+    from app.services.workflow_service import graph_for_template_export
+
+    graph = {
+        "version": 1,
+        "nodes": [
+            {
+                "id": "n1",
+                "type": "skill",
+                "config": {"skill_id": "skill-uuid-1", "skill_name": "patent-search"},
+            }
+        ],
+        "edges": [],
+    }
+    exported = graph_for_template_export(graph, {"skill-uuid-1": "patent-search"})
+    cfg = exported["nodes"][0]["config"]
+    assert "skill_id" not in cfg
+    assert cfg["skill_name"] == "patent-search"

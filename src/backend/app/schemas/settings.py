@@ -42,6 +42,13 @@ class AppSettingsResponse(BaseModel):
     worker_log_cleanup_enabled: bool = True
     worker_log_retention_days: int = 14
     worker_usage_reset_enabled: bool = True
+    notification_skills_enabled: bool = False
+    notification_skill_allowlist: list[str] = Field(default_factory=lambda: ["mchat-notify"])
+    sms_default_provider: str = "dev"
+    sms_phone_allowlist: list[str] = Field(default_factory=list)
+    sms_alert_phones: list[str] = Field(default_factory=list)
+    sms_send_cooldown_seconds: int = 60
+    sms_workflow_alert_enabled: bool = False
 
 
 class AppSettingsUpdate(BaseModel):
@@ -83,6 +90,13 @@ class AppSettingsUpdate(BaseModel):
     worker_log_cleanup_enabled: bool | None = None
     worker_log_retention_days: int | None = Field(None, ge=1, le=3650)
     worker_usage_reset_enabled: bool | None = None
+    notification_skills_enabled: bool | None = None
+    notification_skill_allowlist: list[str] | None = None
+    sms_default_provider: str | None = None
+    sms_phone_allowlist: list[str] | None = None
+    sms_alert_phones: list[str] | None = None
+    sms_send_cooldown_seconds: int | None = Field(None, ge=30, le=3600)
+    sms_workflow_alert_enabled: bool | None = None
 
 
 class AppLogResponse(BaseModel):

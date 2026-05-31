@@ -196,6 +196,38 @@ class ChannelWorkflowBinding(Base):
     workflow = relationship("SkillWorkflow", back_populates="channel_bindings")
 
 
+class SkillWorkflowTemplate(Base):
+    """User-saved workflow graph templates (reusable like built-in patent report templates)."""
+
+    __tablename__ = "skill_workflow_templates"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(40), nullable=False, default="custom")
+    locale: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    graph_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    source_workflow_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("skill_workflows.id"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    user = relationship("User", back_populates="workflow_templates")
+    source_workflow = relationship("SkillWorkflow", foreign_keys=[source_workflow_id])
+
+
 class SkillWorkflowApproval(Base):
     __tablename__ = "skill_workflow_approvals"
 

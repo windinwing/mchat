@@ -172,9 +172,36 @@ class WorkflowTemplateSummary(BaseModel):
     category: str = "general"
     locale: str | None = None
     node_count: int = 0
+    builtin: bool = True
+
+
+class WorkflowTemplateCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str | None = None
+    category: str = Field(default="custom", max_length=40)
+    locale: str | None = Field(default=None, max_length=8)
+
+
+class WorkflowSaveAsTemplateRequest(WorkflowTemplateCreate):
+    """Save an existing workflow graph as a reusable template."""
 
 
 class WorkflowCreateFromTemplateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
     enabled: bool = True
+
+
+class WorkflowPatentShowcaseConfig(BaseModel):
+    """Configurable patent workflow demo — skills live outside mchat repo."""
+
+    enabled: bool = True
+    search_skill: str = "patent-search"
+    report_skill: str = "patent-report"
+    skills_dir: str = ""
+    extra_skills_dirs: list[str] = Field(default_factory=list)
+    patent_skills_source: str = ""
+    installed: dict[str, bool] = Field(default_factory=dict)
+    on_disk: dict[str, bool] = Field(default_factory=dict)
+    ready: bool = False
+

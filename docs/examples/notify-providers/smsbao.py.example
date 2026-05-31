@@ -1,0 +1,72 @@
+"""SMSbao provider — copy to skills/mchat-notify/providers/smsbao.py (local only, do not commit)."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+
+import httpx
+
+from app.services.sms.base import SmsSendResult
+
+
+class Provider:
+    name = "smsbao"
+
+    def __init__(self) -> None:
+        self.username = (os.environ.get("SMSBAO_USERNAME") or "").strip()
+        self.password = os.environ.get("SMSBAO_PASSWORD") or ""
+        self.api_url = (
+            os.environ.get("SMSBAO_API_URL") or "https://api.smsbao.com/sms"
+        ).strip()
+
+    def _password_param(self) -> str:
+        md5 = (os.environ.get("SMSBAO_PASSWORD_MD5") or "").strip()
+        if md5:
+            return md5
+        return hashlib.md5(self.password.encode("utf-8")).hexdigest()
+
+    def send_text(self, phone: str, content: str) -> SmsSendResult:
+        if not self.username or not self.password:
+            return SmsSendResult(
+                ok=False,
+                provider=self.name,
+                message="SMSbao 未配置 SMSBAO_USERNAME / SMSBAO_PASSWORD",
+                provider_code="config",
+            )
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(
+                    self.api_url,
+                    params={
+                        "u": self.username,
+                        "p": self._password_param(),
+                        "m": phone,
+                        "c": content,
+                    },
+                )
+            code = (resp.text or "").strip().splitlines()[0].strip()
+            ok = code == "0"
+            return SmsSendResult(
+                ok=ok,
+                provider=self.name,
+                message="发送成功" if ok else f"SMSbao 错误: {code}",
+                provider_code=code,
+            )
+        except httpx.HTTPError as e:
+            return SmsSendResult(
+                ok=False,
+                provider=self.name,
+                message=str(e),
+                provider_code="http_error",
+            )
+
+    def send_template(
+        self,
+        phone: str,
+        *,
+        template_code: str,
+        template_params: dict,
+    ) -> SmsSendResult:
+        body = " ".join(f"{k}={v}" for k, v in template_params.items())
+        return self.send_text(phone, f"【{template_code}】{body}")

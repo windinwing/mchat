@@ -1,4 +1,4 @@
-.PHONY: help install install-git-hooks dev dev-worker dev-stop cloud cloud-stop worker dev-backend deploy-core deploy-cloud dev-frontend build start docker-up docker-down docker-build clean test lint coverage db-init db-seed fmt
+.PHONY: help install install-git-hooks dev dev-worker dev-stop cloud cloud-stop worker dev-backend deploy-core deploy-cloud dev-frontend build start docker-up docker-down docker-build clean test lint coverage db-init db-seed fmt patent-skills-env patent-skills-reload patent-skills-prune test-patent-showcase
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -96,3 +96,21 @@ db-migrate: ## Apply schema patches (new columns, etc.)
 
 db-seed: ## Seed database with default data
 	cd src/backend && python -c "from app.cli import _cmd_db; import asyncio, argparse; asyncio.run(_cmd_db(argparse.Namespace(db_action='seed')))"
+
+PATENT_SKILLS_DIR ?= $(HOME)/dev/skills/patents
+
+patent-skills-env: ## Print/write .env snippet for external patent skills repo
+	@PATENT_SKILLS_DIR="$(PATENT_SKILLS_DIR)" bash scripts/setup-patent-skills-env.sh $(if $(WRITE),--write,)
+
+patent-skills-prune: ## Remove patent-* copies from mchat/skills (use EXTRA_SKILLS_DIRS)
+	@bash scripts/prune-local-patent-skills.sh
+
+patent-skills-reload: ## Reload skills from SKILLS_DIR + EXTRA_SKILLS_DIRS into DB
+	cd src/backend && source venv/bin/activate && \
+		EXTRA_SKILLS_DIRS="$(PATENT_SKILLS_DIR)" python ../../scripts/reload-patent-skills.py
+
+test-patent-showcase: ## Run patent workflow + report unit tests
+	cd src/backend && source venv/bin/activate && \
+		EXTRA_SKILLS_DIRS="$(PATENT_SKILLS_DIR)" \
+		PYTHONPATH=. python -m pytest ../../tests/unit/test_patent_workflow_showcase.py \
+		../../tests/unit/test_patent_report_skill.py ../../tests/unit/test_workflow_graph.py -q

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
+
+from app.data.patent_workflow_showcase import (
+    apply_showcase_to_template,
+    filter_showcase_templates,
+)
 
 PATENT_REPORT_MULTIDIM: dict[str, Any] = {
     "id": "patent_report_multidim",
@@ -124,9 +128,10 @@ PATENT_REPORT_MULTIDIM: dict[str, Any] = {
                 "name": "图表生成",
                 "position": {"x": 1080, "y": 220},
                 "config": {
-                    "skill_name": "patent-chart-generate",
+                    "skill_name": "patent-report",
                     "workflow_role": "visualize",
                     "payload_template": {
+                        "command": "chart",
                         "sections": "${nodes.merge.sections}",
                         "title": "${input.keyword} 专利分析",
                     },
@@ -138,11 +143,13 @@ PATENT_REPORT_MULTIDIM: dict[str, Any] = {
                 "name": "报告导出",
                 "position": {"x": 1320, "y": 220},
                 "config": {
-                    "skill_name": "patent-search",
+                    "skill_name": "patent-report",
                     "workflow_role": "export",
                     "payload_template": {
-                        "command": "export_analysis",
-                        "query": "${input.keyword}",
+                        "command": "all",
+                        "sections": "${nodes.merge.sections}",
+                        "charts": "${nodes.chart.charts}",
+                        "title": "${input.keyword} 专利分析",
                         "filename": "${input.keyword}-patent-report",
                     },
                 },
@@ -172,12 +179,12 @@ PATENT_REPORT_MULTIDIM: dict[str, Any] = {
     },
 }
 
-# English demo template: same topology, English labels & placeholder skill names (⚠ when not installed).
+# English template: same executable topology as zh (patent-search + analysis); chart node remains optional placeholder.
 PATENT_REPORT_MULTIDIM_EN: dict[str, Any] = {
     "id": "patent_report_multidim_en",
     "locale": "en",
     "name": "Patent Multi-Dimension Report",
-    "description": "Search industry patents, run parallel applicant/year/company/strength analyses, merge, chart, and export.",
+    "description": "Executable report flow: patent-search search + parallel analysis dimensions, merge, chart (patent-report), full Office export.",
     "category": "patent",
     "graph_json": {
         "version": 1,
@@ -210,7 +217,7 @@ PATENT_REPORT_MULTIDIM_EN: dict[str, Any] = {
                 "name": "Industry Patent Search",
                 "position": {"x": 280, "y": 220},
                 "config": {
-                    "skill_name": "patent-industry-search",
+                    "skill_name": "patent-search",
                     "workflow_role": "search",
                     "payload_template": {
                         "command": "search",
@@ -225,10 +232,11 @@ PATENT_REPORT_MULTIDIM_EN: dict[str, Any] = {
                 "name": "Applicant Analysis",
                 "position": {"x": 560, "y": 40},
                 "config": {
-                    "skill_name": "patent-applicant-analysis",
+                    "skill_name": "patent-search",
                     "workflow_role": "analyze",
                     "payload_template": {
-                        "patent_ids": "${nodes.search.patent_ids}",
+                        "command": "analysis",
+                        "query": "${input.keyword}",
                         "dimension": "applicant",
                     },
                 },
@@ -239,38 +247,42 @@ PATENT_REPORT_MULTIDIM_EN: dict[str, Any] = {
                 "name": "Application Year Trend",
                 "position": {"x": 560, "y": 140},
                 "config": {
-                    "skill_name": "patent-year-trend-analysis",
+                    "skill_name": "patent-search",
                     "workflow_role": "analyze",
                     "payload_template": {
-                        "patent_ids": "${nodes.search.patent_ids}",
-                        "dimension": "year",
+                        "command": "analysis",
+                        "query": "${input.keyword}",
+                        "dimension": "applicationYear",
                     },
                 },
             },
             {
                 "id": "company",
                 "type": "skill",
-                "name": "Company Analysis",
+                "name": "Regional Distribution",
                 "position": {"x": 560, "y": 240},
                 "config": {
-                    "skill_name": "patent-company-analysis",
+                    "skill_name": "patent-search",
                     "workflow_role": "analyze",
                     "payload_template": {
-                        "patent_ids": "${nodes.search.patent_ids}",
-                        "dimension": "company",
+                        "command": "analysis",
+                        "query": "${input.keyword}",
+                        "dimension": "province",
                     },
                 },
             },
             {
                 "id": "strength",
                 "type": "skill",
-                "name": "Strength Summary",
+                "name": "Legal Status",
                 "position": {"x": 560, "y": 340},
                 "config": {
-                    "skill_name": "patent-strength-summary",
+                    "skill_name": "patent-search",
                     "workflow_role": "analyze",
                     "payload_template": {
-                        "patent_ids": "${nodes.search.patent_ids}",
+                        "command": "analysis",
+                        "query": "${input.keyword}",
+                        "dimension": "legalStatus",
                     },
                 },
             },
@@ -287,9 +299,10 @@ PATENT_REPORT_MULTIDIM_EN: dict[str, Any] = {
                 "name": "Chart Generation",
                 "position": {"x": 1080, "y": 220},
                 "config": {
-                    "skill_name": "patent-chart-generate",
+                    "skill_name": "patent-report",
                     "workflow_role": "visualize",
                     "payload_template": {
+                        "command": "chart",
                         "sections": "${nodes.merge.sections}",
                         "title": "${input.keyword} patent analysis",
                     },
@@ -301,11 +314,13 @@ PATENT_REPORT_MULTIDIM_EN: dict[str, Any] = {
                 "name": "Report Export",
                 "position": {"x": 1320, "y": 220},
                 "config": {
-                    "skill_name": "patent-report-export",
+                    "skill_name": "patent-report",
                     "workflow_role": "export",
                     "payload_template": {
-                        "charts": "${nodes.chart.charts}",
+                        "command": "all",
                         "sections": "${nodes.merge.sections}",
+                        "charts": "${nodes.chart.charts}",
+                        "title": "${input.keyword} patent analysis",
                         "filename": "${input.keyword}-patent-report",
                     },
                 },
@@ -335,9 +350,99 @@ PATENT_REPORT_MULTIDIM_EN: dict[str, Any] = {
     },
 }
 
+NOTIFY_PING_TEST: dict[str, Any] = {
+    "id": "notify_ping_test",
+    "locale": "zh",
+    "name": "短信通知 Ping 测试",
+    "description": "验证 mchat-notify：dev 模式写后端日志；真发短信需本地安装 provider 插件。",
+    "category": "notification",
+    "graph_json": {
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": "输入手机号",
+                "position": {"x": 40, "y": 120},
+                "config": {
+                    "input_fields": [
+                        {
+                            "key": "alert_phone",
+                            "label": "告警手机号（须在白名单）",
+                            "placeholder": "13800138000",
+                            "required": True,
+                        },
+                    ]
+                },
+            },
+            {
+                "id": "notify",
+                "type": "skill",
+                "name": "短信 Ping",
+                "position": {"x": 320, "y": 120},
+                "config": {
+                    "skill_name": "mchat-notify",
+                    "payload_template": {
+                        "command": "ping",
+                        "phone": "${input.alert_phone}",
+                        "provider": "dev",
+                    },
+                },
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "完成",
+                "position": {"x": 560, "y": 120},
+                "config": {},
+            },
+        ],
+        "edges": [
+            {"id": "e_start_notify", "source": "start", "target": "notify"},
+            {"id": "e_notify_end", "source": "notify", "target": "end"},
+        ],
+    },
+}
+
+NOTIFY_PING_TEST_EN: dict[str, Any] = {
+    **NOTIFY_PING_TEST,
+    "locale": "en",
+    "name": "SMS notify ping test",
+    "description": "Verify mchat-notify: dev mode logs only; install a local provider plugin for real SMS.",
+    "graph_json": {
+        **NOTIFY_PING_TEST["graph_json"],
+        "nodes": [
+            {
+                **NOTIFY_PING_TEST["graph_json"]["nodes"][0],
+                "name": "Phone input",
+                "config": {
+                    "input_fields": [
+                        {
+                            "key": "alert_phone",
+                            "label": "Alert phone (must be allowlisted)",
+                            "placeholder": "13800138000",
+                            "required": True,
+                        },
+                    ]
+                },
+            },
+            {
+                **NOTIFY_PING_TEST["graph_json"]["nodes"][1],
+                "name": "SMS ping",
+            },
+            {
+                **NOTIFY_PING_TEST["graph_json"]["nodes"][2],
+                "name": "Done",
+            },
+        ],
+    },
+}
+
 _BUILTIN_TEMPLATES: dict[str, dict[str, Any]] = {
     PATENT_REPORT_MULTIDIM["id"]: PATENT_REPORT_MULTIDIM,
     PATENT_REPORT_MULTIDIM_EN["id"]: PATENT_REPORT_MULTIDIM_EN,
+    NOTIFY_PING_TEST["id"]: NOTIFY_PING_TEST,
+    NOTIFY_PING_TEST_EN["id"]: NOTIFY_PING_TEST_EN,
 }
 
 
@@ -353,6 +458,7 @@ def list_workflow_templates(*, locale: str | None = None) -> list[dict[str, Any]
         }
         for tpl in _BUILTIN_TEMPLATES.values()
     ]
+    rows = filter_showcase_templates(rows)
     if not locale:
         return rows
     lang = "zh" if locale.lower().startswith("zh") else "en"
@@ -361,4 +467,6 @@ def list_workflow_templates(*, locale: str | None = None) -> list[dict[str, Any]
 
 def get_workflow_template(template_id: str) -> dict[str, Any] | None:
     tpl = _BUILTIN_TEMPLATES.get(template_id)
-    return deepcopy(tpl) if tpl else None
+    if not tpl:
+        return None
+    return apply_showcase_to_template(tpl)

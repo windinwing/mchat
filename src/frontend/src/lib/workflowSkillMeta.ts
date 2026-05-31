@@ -65,25 +65,65 @@ export function groupSkillsByCategory(skills: WorkflowSkillOption[]) {
 
 export function defaultPayloadForSkill(skill: WorkflowSkillOption, upstreamNodeIds: string[]): Record<string, unknown> {
   const category = inferSkillCategory(skill)
-  const searchRef = upstreamNodeIds.includes('search') ? '${nodes.search.patent_ids}' : '${nodes.search.result}'
+  const isPatentSearch = skill.name === 'patent-search'
+  const isPatentReport = skill.name === 'patent-report'
   switch (category) {
     case 'search':
+      if (isPatentSearch) {
+        return {
+          command: 'search',
+          query: '${input.keyword}',
+          industry: '${input.industry}',
+        }
+      }
       return {
         command: 'search',
         query: '${input.keyword}',
         industry: '${input.industry}',
       }
     case 'analyze':
+      if (isPatentSearch) {
+        return {
+          command: 'analysis',
+          query: '${input.keyword}',
+          dimension: 'applicant',
+        }
+      }
       return {
-        patent_ids: searchRef,
+        patent_ids: upstreamNodeIds.includes('search')
+          ? '${nodes.search.patent_ids}'
+          : '${nodes.search.result}',
         dimension: skill.name.includes('year') || skill.name.includes('年份') ? 'year' : 'applicant',
       }
     case 'visualize':
+      if (isPatentReport) {
+        return {
+          command: 'chart',
+          sections: '${nodes.merge.sections}',
+          title: '${input.keyword}',
+        }
+      }
       return {
         sections: '${nodes.merge.sections}',
         title: '${input.keyword}',
       }
     case 'export':
+      if (isPatentReport) {
+        return {
+          command: 'all',
+          sections: '${nodes.merge.sections}',
+          charts: '${nodes.chart.charts}',
+          title: '${input.keyword}',
+          filename: '${input.keyword}-patent-report',
+        }
+      }
+      if (isPatentSearch) {
+        return {
+          command: 'export_analysis',
+          query: '${input.keyword}',
+          filename: '${input.keyword}-patent-report',
+        }
+      }
       return {
         sections: '${nodes.merge.sections}',
         charts: '${nodes.chart.charts}',

@@ -10,7 +10,12 @@ from pathlib import Path
 from loguru import logger
 
 _EXPORT_SKILL_NAMES = frozenset(
-    {"patent-search", "patent-transaction", "patent-disclosure"}
+    {
+        "patent-search",
+        "patent-transaction",
+        "patent-disclosure",
+        "patent-report",
+    }
 )
 _warmed = False
 
@@ -44,6 +49,8 @@ def ensure_backend_export_packages() -> None:
     for package, import_name in (
         ("openpyxl", "openpyxl"),
         ("python-docx", "docx"),
+        ("matplotlib", "matplotlib"),
+        ("python-pptx", "pptx"),
     ):
         try:
             __import__(import_name)

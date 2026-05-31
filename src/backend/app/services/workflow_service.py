@@ -6,6 +6,7 @@ import re
 import asyncio
 import logging
 import os
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,6 +24,7 @@ from app.models.workflow import (
     SkillWorkflowRun,
     SkillWorkflowStep,
     SkillWorkflowStepRun,
+    SkillWorkflowTemplate,
 )
 from app.schemas.workflow import (
     WorkflowApprovalDecisionRequest,
@@ -36,13 +38,48 @@ from app.schemas.workflow import (
     WorkflowStepInput,
     WorkflowStepResponse,
     WorkflowStepRunResponse,
+    WorkflowSaveAsTemplateRequest,
+    WorkflowTemplateSummary,
     WorkflowUpdate,
 )
+from app.data.patent_workflow_showcase import (
+    resolve_showcase_skill_name,
+    showcase_enabled,
+)
+from app.core.skills_paths import (
+    PATENT_SHOWCASE_REPORT_SKILL,
+    PATENT_SHOWCASE_SEARCH_SKILL,
+    iter_skills_roots,
+    resolve_skills_root,
+)
+from app.core.config import settings
 from app.data.workflow_templates import get_workflow_template, list_workflow_templates
+from app.skill.loader import SkillLoader
 from app.skill.executor import execute_skill
 
 _TEMPLATE_RE = re.compile(r"\$\{([^}]+)\}")
 logger = logging.getLogger(__name__)
+
+
+def graph_for_template_export(
+    graph_json: dict | None, skill_id_to_name: dict[str, str] | None = None
+) -> dict:
+    """Strip skill_id from skill nodes; keep skill_name for cross-workflow reuse."""
+    graph = deepcopy(graph_json or {})
+    mapping = skill_id_to_name or {}
+    nodes: list[dict[str, Any]] = []
+    for node in graph.get("nodes") or []:
+        item = dict(node)
+        if item.get("type") == "skill":
+            cfg = dict(item.get("config") or {})
+            skill_id = str(cfg.get("skill_id") or "").strip()
+            if skill_id and not str(cfg.get("skill_name") or "").strip():
+                cfg["skill_name"] = mapping.get(skill_id, "")
+            cfg.pop("skill_id", None)
+            item["config"] = cfg
+        nodes.append(item)
+    graph["nodes"] = nodes
+    return graph
 
 
 def _ensure_graph_valid(graph_json: dict | None) -> dict | None:
@@ -239,6 +276,30 @@ class WorkflowService:
         except Exception as e:
             logger.warning("workflow alert webhook failed: run=%s err=%s", run.id, e)
 
+        if getattr(settings, "sms_workflow_alert_enabled", False):
+            try:
+                from app.services.notification_service import NotificationService
+
+                notifier = NotificationService(db=self.db)
+                sms_results = notifier.send_workflow_alert_sms(
+                    event=event,
+                    workflow_name=workflow.name,
+                    run_id=run.id,
+                    message=message,
+                )
+                if sms_results:
+                    await self.db.flush()
+                for item in sms_results:
+                    if not item.get("ok"):
+                        logger.warning(
+                            "workflow alert sms failed: run=%s phone=%s err=%s",
+                            run.id,
+                            item.get("phone"),
+                            item.get("message"),
+                        )
+            except Exception as e:
+                logger.warning("workflow alert sms error: run=%s err=%s", run.id, e)
+
     async def list_workflows(self, *, user_id: str) -> list[WorkflowResponse]:
         result = await self.db.execute(
             select(SkillWorkflow)
@@ -282,8 +343,142 @@ class WorkflowService:
         )
 
     @staticmethod
-    def list_templates(*, locale: str | None = None) -> list[dict[str, Any]]:
-        return list_workflow_templates(locale=locale)
+    def _template_summary_from_builtin(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **row,
+            "builtin": True,
+        }
+
+    @staticmethod
+    def _template_summary_from_model(row: SkillWorkflowTemplate) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "name": row.name,
+            "description": row.description or "",
+            "category": row.category,
+            "locale": row.locale,
+            "node_count": len((row.graph_json or {}).get("nodes") or []),
+            "builtin": False,
+        }
+
+    async def list_templates(
+        self, *, user_id: str, locale: str | None = None
+    ) -> list[dict[str, Any]]:
+        builtin = [
+            self._template_summary_from_builtin(t)
+            for t in list_workflow_templates(locale=locale)
+        ]
+        result = await self.db.execute(
+            select(SkillWorkflowTemplate)
+            .where(SkillWorkflowTemplate.user_id == user_id)
+            .order_by(SkillWorkflowTemplate.updated_at.desc())
+        )
+        lang = None
+        if locale:
+            lang = "zh" if locale.lower().startswith("zh") else "en"
+        custom: list[dict[str, Any]] = []
+        for row in result.scalars().all():
+            if lang and row.locale and row.locale != lang:
+                continue
+            custom.append(self._template_summary_from_model(row))
+        return builtin + custom
+
+    async def get_patent_showcase_config(self, *, user_id: str) -> dict[str, Any]:
+        search_skill = resolve_showcase_skill_name(PATENT_SHOWCASE_SEARCH_SKILL)
+        report_skill = resolve_showcase_skill_name(PATENT_SHOWCASE_REPORT_SKILL)
+
+        result = await self.db.execute(
+            select(Skill.name, Skill.enabled).where(Skill.user_id == user_id)
+        )
+        installed_enabled = {
+            str(name): bool(enabled)
+            for name, enabled in result.all()
+            if name
+        }
+        disk_names = {str(s.get("name") or "") for s in SkillLoader().scan_skills()}
+
+        installed = {
+            "search": installed_enabled.get(search_skill, False),
+            "report": installed_enabled.get(report_skill, False),
+        }
+        on_disk = {
+            "search": search_skill in disk_names,
+            "report": report_skill in disk_names,
+        }
+        roots = iter_skills_roots()
+        return {
+            "enabled": showcase_enabled(),
+            "search_skill": search_skill,
+            "report_skill": report_skill,
+            "skills_dir": str(resolve_skills_root()),
+            "extra_skills_dirs": [str(p) for p in roots[1:]],
+            "patent_skills_source": (settings.patent_skills_source or "").strip(),
+            "installed": installed,
+            "on_disk": on_disk,
+            "ready": installed["search"] and installed["report"],
+        }
+
+    async def _get_user_template(
+        self, *, template_id: str, user_id: str
+    ) -> SkillWorkflowTemplate | None:
+        result = await self.db.execute(
+            select(SkillWorkflowTemplate).where(
+                SkillWorkflowTemplate.id == template_id,
+                SkillWorkflowTemplate.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def save_workflow_as_template(
+        self,
+        *,
+        user_id: str,
+        workflow_id: str,
+        data: WorkflowSaveAsTemplateRequest,
+    ) -> WorkflowTemplateSummary:
+        workflow = await self._get_workflow(workflow_id=workflow_id, user_id=user_id)
+        if not workflow.graph_json or not (workflow.graph_json.get("nodes") or []):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workflow has no graph to save as template",
+            )
+        skill_ids = [
+            str((n.get("config") or {}).get("skill_id") or "").strip()
+            for n in workflow.graph_json.get("nodes") or []
+            if n.get("type") == "skill"
+        ]
+        skill_ids = [sid for sid in skill_ids if sid]
+        skill_map: dict[str, str] = {}
+        if skill_ids:
+            res = await self.db.execute(
+                select(Skill).where(Skill.id.in_(skill_ids))  # type: ignore[arg-type]
+            )
+            skill_map = {s.id: s.name for s in res.scalars().all()}
+        graph = graph_for_template_export(workflow.graph_json, skill_map)
+        _ensure_graph_valid(graph)
+        locale = (data.locale or "").strip() or None
+        row = SkillWorkflowTemplate(
+            user_id=user_id,
+            name=data.name.strip(),
+            description=(data.description or "").strip() or None,
+            category=(data.category or "custom").strip() or "custom",
+            locale=locale,
+            graph_json=graph,
+            source_workflow_id=workflow_id,
+        )
+        self.db.add(row)
+        await self.db.flush()
+        return WorkflowTemplateSummary(**self._template_summary_from_model(row))
+
+    async def delete_user_template(self, *, user_id: str, template_id: str) -> None:
+        row = await self._get_user_template(template_id=template_id, user_id=user_id)
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workflow template not found",
+            )
+        await self.db.delete(row)
+        await self.db.flush()
 
     async def create_from_template(
         self,
@@ -295,19 +490,35 @@ class WorkflowService:
         enabled: bool = True,
     ) -> WorkflowResponse:
         tpl = get_workflow_template(template_id)
-        if tpl is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Workflow template not found",
+        tpl_name: str | None = None
+        tpl_desc: str | None = None
+        graph_source: dict | None = None
+        if tpl is not None:
+            graph_source = tpl["graph_json"]
+            tpl_name = tpl.get("name")
+            tpl_desc = tpl.get("description")
+        else:
+            user_tpl = await self._get_user_template(
+                template_id=template_id, user_id=user_id
             )
+            if user_tpl is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Workflow template not found",
+                )
+            graph_source = user_tpl.graph_json
+            tpl_name = user_tpl.name
+            tpl_desc = user_tpl.description
         graph_json = await self._resolve_graph_skill_ids(
-            tpl["graph_json"], user_id=user_id
+            graph_source, user_id=user_id
         )
         graph_json = _ensure_graph_valid(graph_json)
         workflow = SkillWorkflow(
             user_id=user_id,
-            name=(name or tpl["name"]).strip(),
-            description=(description if description is not None else tpl.get("description")),
+            name=(name or tpl_name or "Workflow").strip(),
+            description=(
+                description if description is not None else tpl_desc
+            ),
             enabled=enabled,
             graph_json=graph_json,
         )
