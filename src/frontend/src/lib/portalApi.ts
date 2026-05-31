@@ -164,6 +164,16 @@ export interface OrderStatus {
   channel_id?: string | null
 }
 
+export interface StudioMemory {
+  memory_md: string
+  daily_dates: string[]
+}
+
+export interface StudioDailyMemory {
+  date: string
+  content: string
+}
+
 export const portalApi = {
   getTemplates: () => api.get<ChannelTemplate[]>('/templates'),
   getTemplate: (id: string) => api.get<ChannelTemplate>(`/templates/${id}`),
@@ -223,11 +233,28 @@ export const portalApi = {
 
   getEmbedCode: (id: string) => api.get<EmbedCode>(`/portal/channels/${id}/embed`),
 
-  /** Resume persistent portal chat for a channel (same thread across visits). */
-  resumeChannelConversation: (channelId: string) =>
-    api.post<{ id: string; messages?: unknown[] }>(
-      `/portal/channels/${channelId}/conversation/resume`,
-    ),
+  /** Resume persistent portal chat for a channel (Markdown memory + same thread). */
+  resumeChannelChat: (
+    channelId: string,
+    options?: { title?: string; forceNew?: boolean },
+  ) =>
+    api.post<{
+      id: string
+      title: string | null
+      customer_id?: string | null
+      messages?: Array<{
+        id: string
+        conversation_id: string
+        role: string
+        content: string
+        created_at: string
+      }>
+      total_message_count?: number
+    }>(`/portal/channels/${channelId}/chat/resume`, {
+      title: options?.title,
+      force_new: options?.forceNew ?? false,
+    }),
+
   getDashboardStats: () => api.get<PortalDashboardStats>('/portal/dashboard'),
 
   getOrders: () => api.get<PortalOrder[]>('/portal/orders'),
@@ -264,4 +291,11 @@ export const portalApi = {
     form.append('file', file)
     return api.upload(`/portal/channels/${channelId}/knowledge-bases/${kbId}/import-file`, form)
   },
+
+  getChannelMemory: (channelId: string) =>
+    api.get<StudioMemory>(`/portal/channels/${channelId}/memory`),
+  updateChannelMemory: (channelId: string, content: string) =>
+    api.put<StudioMemory>(`/portal/channels/${channelId}/memory`, { content }),
+  getChannelDailyMemory: (channelId: string, date: string) =>
+    api.get<StudioDailyMemory>(`/portal/channels/${channelId}/memory/daily/${date}`),
 }

@@ -14,6 +14,9 @@ from cloud.api.portal import router as portal_router
 from cloud.api.templates import router as templates_router
 from cloud.api.admin_templates import router as admin_templates_router
 from cloud.api.admin_orders import router as admin_orders_router
+from cloud.bot.studio_memory import register_cloud_chat_extensions
+
+register_cloud_chat_extensions()
 
 
 def create_app() -> FastAPI:

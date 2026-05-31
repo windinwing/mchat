@@ -7,7 +7,7 @@ from app.core.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.user import User
 from app.schemas.chat import ConversationResponse
-from app.services.chat_service import ChatService
+from app.services.maintenance_gate import ensure_public_api_available
 from cloud.schemas.portal import (
     ChannelIntegrationsResponse,
     EmbedCodeResponse,
@@ -21,10 +21,15 @@ from cloud.schemas.portal import (
     PortalOrderDetailResponse,
     PortalOrderResponse,
     RentChannelRequest,
+    ResumeChannelChatRequest,
+    StudioDailyMemoryResponse,
+    StudioMemoryResponse,
+    StudioMemoryUpdate,
 )
+from cloud.services.portal_chat_service import PortalChatService
 from cloud.services.portal_payment_service import PortalPaymentService
 from cloud.services.portal_service import PortalService
-from app.services.maintenance_gate import ensure_public_api_available
+from cloud.services.studio_memory_service import StudioMemoryService
 
 router = APIRouter()
 
@@ -174,26 +179,6 @@ async def delete_my_channel(
     await PortalService(db).delete_my_channel(current_user, channel_id)
 
 
-@router.post(
-    "/channels/{channel_id}/conversation/resume",
-    response_model=ConversationResponse,
-)
-async def resume_channel_conversation(
-    channel_id: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> ConversationResponse:
-    """Resume the user's persistent chat thread for this channel (or create once)."""
-    _block_portal_during_maintenance()
-    chat_service = ChatService(db)
-    channel = await PortalService(db).get_my_channel(current_user, channel_id)
-    return await chat_service.get_or_resume_channel_conversation(
-        user_id=current_user.id,
-        channel_id=channel_id,
-        title=channel.name,
-    )
-
-
 @router.get("/channels/{channel_id}/embed", response_model=EmbedCodeResponse)
 async def get_embed_code(
     channel_id: str,
@@ -268,3 +253,75 @@ async def import_channel_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Import failed: {e}",
         ) from e
+
+
+@router.post(
+    "/channels/{channel_id}/chat/resume",
+    response_model=ConversationResponse,
+)
+async def resume_channel_chat(
+    channel_id: str,
+    request: ResumeChannelChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ConversationResponse:
+    """Resume portal studio chat (persistent thread + Markdown memory)."""
+    _block_portal_during_maintenance()
+    await PortalService(db).get_my_channel(current_user, channel_id)
+    return await PortalChatService(db).get_or_resume_channel_conversation(
+        user_id=current_user.id,
+        channel_id=channel_id,
+        title=request.title,
+        force_new=request.force_new,
+    )
+
+
+@router.get("/channels/{channel_id}/memory", response_model=StudioMemoryResponse)
+async def get_channel_memory(
+    channel_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StudioMemoryResponse:
+    """Get MEMORY.md and recent daily log dates for a channel."""
+    await PortalService(db).get_my_channel(current_user, channel_id)
+    service = StudioMemoryService(current_user.id, channel_id)
+    return StudioMemoryResponse(
+        memory_md=service.read_memory_file(),
+        daily_dates=service.list_daily_dates(),
+    )
+
+
+@router.put("/channels/{channel_id}/memory", response_model=StudioMemoryResponse)
+async def update_channel_memory(
+    channel_id: str,
+    request: StudioMemoryUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StudioMemoryResponse:
+    """Replace MEMORY.md for a channel."""
+    await PortalService(db).get_my_channel(current_user, channel_id)
+    service = StudioMemoryService(current_user.id, channel_id)
+    service.write_memory_file(request.content, mode="replace")
+    return StudioMemoryResponse(
+        memory_md=service.read_memory_file(),
+        daily_dates=service.list_daily_dates(),
+    )
+
+
+@router.get(
+    "/channels/{channel_id}/memory/daily/{date_key}",
+    response_model=StudioDailyMemoryResponse,
+)
+async def get_channel_daily_memory(
+    channel_id: str,
+    date_key: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StudioDailyMemoryResponse:
+    """Get a daily memory log file."""
+    await PortalService(db).get_my_channel(current_user, channel_id)
+    service = StudioMemoryService(current_user.id, channel_id)
+    return StudioDailyMemoryResponse(
+        date=date_key,
+        content=service.read_daily_file(date_key),
+    )

@@ -1,15 +1,15 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Plus } from 'lucide-react'
-import api from '@/lib/api'
-import { Conversation } from '@/stores/chat'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { AssistantChatSidebar } from '@/components/portal/AssistantChatSidebar'
 import { useChat } from '@/hooks/useChat'
 import { ChatSendOptions } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
+import { portalApi } from '@/lib/portalApi'
+import { Button } from '@/components/ui/Button'
 
 const PORTAL_CHANNEL_KEY = 'mchat_portal_channel_id'
 
@@ -25,6 +25,7 @@ export function ChatPage() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
   const chat = useChat(conversationId)
+  const [startingNewChat, setStartingNewChat] = useState(false)
 
   const channelFromUrl =
     searchParams.get('channel') || readChannelIdFromUrl() || undefined
@@ -43,8 +44,11 @@ export function ChatPage() {
   }
 
   const isPortalChat = Boolean(channelId)
+  const isPortalStudio = user?.role === 'user' && isPortalChat
   const title =
     chat.currentConversation?.title || t('chat.defaultTitle')
+  const messageCount =
+    chat.currentConversation?.total_message_count ?? chat.messages.length
 
   const handleSend = (content: string, options?: ChatSendOptions) => {
     if (conversationId) {
@@ -54,14 +58,18 @@ export function ChatPage() {
 
   const handleNewChat = async () => {
     if (!channelId) return
+    setStartingNewChat(true)
+    chat.setError(null)
     try {
-      const conv = await api.post<Conversation>('/chat/conversations', {
+      const conv = await portalApi.resumeChannelChat(channelId, {
         title: t('portal.newChatTitle', 'New chat'),
-        customer_id: channelId,
+        forceNew: true,
       })
       navigate(`/chat/${conv.id}?channel=${channelId}`)
-    } catch {
-      /* ignore */
+    } catch (e: any) {
+      chat.setError(e.message || t('portal.rentFailed'))
+    } finally {
+      setStartingNewChat(false)
     }
   }
 
@@ -101,21 +109,23 @@ export function ChatPage() {
             {isPortalChat && (
               <p className="text-xs text-gray-500 truncate">
                 {t('portal.chatSubtitle', {
-                  count: chat.messages.length,
+                  count: messageCount,
                   defaultValue: '{{count}} messages',
                 })}
               </p>
             )}
           </div>
-          {isPortalChat && channelId && (
-            <button
-              type="button"
+          {isPortalStudio && channelId && (
+            <Button
               onClick={handleNewChat}
-              className="md:hidden inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-primary-600 text-white"
+              isLoading={startingNewChat}
+              size="sm"
+              variant="outline"
+              className="gap-1 shrink-0"
             >
               <Plus className="w-3.5 h-3.5" />
               {t('portal.newChat', 'New')}
-            </button>
+            </Button>
           )}
           <LanguageSwitcher variant="ghost" />
         </header>

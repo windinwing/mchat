@@ -219,3 +219,33 @@ class PortalDashboardStats(BaseModel):
     total_tokens_month: int = 0
     plan: str | None = None
     trial_ends_at: datetime | None = None
+
+
+class StudioMemoryResponse(BaseModel):
+    """Markdown memory workspace summary for a channel."""
+
+    memory_md: str = ""
+    daily_dates: list[str] = Field(default_factory=list)
+
+
+class StudioMemoryUpdate(BaseModel):
+    """User-edited long-term MEMORY.md content."""
+
+    content: str = ""
+
+
+class StudioDailyMemoryResponse(BaseModel):
+    """Single daily memory log file."""
+
+    date: str
+    content: str = ""
+
+
+class ResumeChannelChatRequest(BaseModel):
+    """Resume portal studio chat for a channel."""
+
+    title: str | None = Field(None, max_length=200)
+    force_new: bool = Field(
+        False,
+        description="Close the current active channel chat and start a new conversation",
+    )

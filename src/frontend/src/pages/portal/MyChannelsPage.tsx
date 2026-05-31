@@ -49,7 +49,7 @@ export function MyChannelsPage() {
 
   const handleStartChat = async (channel: MyChannel) => {
     try {
-      const conv = await portalApi.resumeChannelConversation(channel.id)
+      const conv = await portalApi.resumeChannelChat(channel.id, { title: channel.name })
       sessionStorage.setItem('mchat_portal_channel_id', channel.id)
       navigate(`/chat/${conv.id}?channel=${channel.id}`)
     } catch (e: any) {

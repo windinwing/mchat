@@ -42,6 +42,12 @@ export function ChannelDetailPage() {
   const [aiConfigId, setAiConfigId] = useState('')
   const [savingBindings, setSavingBindings] = useState(false)
   const [savingAi, setSavingAi] = useState(false)
+  const [memoryMd, setMemoryMd] = useState('')
+  const [dailyDates, setDailyDates] = useState<string[]>([])
+  const [selectedDaily, setSelectedDaily] = useState<string | null>(null)
+  const [dailyContent, setDailyContent] = useState('')
+  const [memoryLoading, setMemoryLoading] = useState(false)
+  const [memorySaving, setMemorySaving] = useState(false)
 
   const aiSelectOptions = useMemo(() => {
     const opts = aiConfigs.map((c) => ({
@@ -66,8 +72,9 @@ export function ChannelDetailPage() {
       portalApi.getEmbedCode(id).catch(() => null),
       portalApi.getChannelIntegrations(id).catch(() => null),
       portalApi.listAiConfigs().catch(() => [] as PortalAiConfigOption[]),
+      portalApi.getChannelMemory(id).catch(() => null),
     ])
-      .then(([ch, em, integ, aiList]) => {
+      .then(([ch, em, integ, aiList, mem]) => {
         setChannel(ch)
         setEmbed(em)
         setForm({ name: ch.name, welcome_message: ch.welcome_message || '' })
@@ -76,6 +83,10 @@ export function ChannelDetailPage() {
         setAiConfigs(aiList)
         setAiOverride(!!ch.ai_override)
         setAiConfigId(ch.ai_config_id || '')
+        if (mem) {
+          setMemoryMd(mem.memory_md || '')
+          setDailyDates(mem.daily_dates || [])
+        }
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
@@ -94,6 +105,34 @@ export function ChannelDetailPage() {
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [id])
+
+  const loadDaily = async (date: string) => {
+    if (!id) return
+    setSelectedDaily(date)
+    setMemoryLoading(true)
+    try {
+      const data = await portalApi.getChannelDailyMemory(id, date)
+      setDailyContent(data.content || '')
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setMemoryLoading(false)
+    }
+  }
+
+  const handleSaveMemory = async () => {
+    if (!id) return
+    setMemorySaving(true)
+    try {
+      const updated = await portalApi.updateChannelMemory(id, memoryMd)
+      setMemoryMd(updated.memory_md || '')
+      setDailyDates(updated.daily_dates || [])
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setMemorySaving(false)
+    }
+  }
 
   const handleSave = async () => {
     if (!id) return
@@ -120,7 +159,7 @@ export function ChannelDetailPage() {
     if (!id) return
     setStartingChat(true)
     try {
-      const conv = await portalApi.resumeChannelConversation(id)
+      const conv = await portalApi.resumeChannelChat(id, { title: channel?.name || 'Chat' })
       sessionStorage.setItem('mchat_portal_channel_id', id)
       navigate(`/chat/${conv.id}?channel=${id}`)
     } catch (e: any) {
@@ -250,6 +289,65 @@ export function ChannelDetailPage() {
               {(channel.usage_tokens_month ?? 0) >= 1000 ? `${((channel.usage_tokens_month ?? 0) / 1000).toFixed(1)}k` : (channel.usage_tokens_month ?? 0)}
               <span className="text-xs font-normal text-gray-400 ml-1">/ {((channel.usage_tokens_limit ?? 0) >= 1000 ? `${((channel.usage_tokens_limit ?? 0) / 1000).toFixed(0)}k` : (channel.usage_tokens_limit ?? 0))}</span>
             </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Memory files */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
+          {t('portal.chatHistory')}
+        </h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          {t('portal.persistentChatHint')}
+        </p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              MEMORY.md
+            </label>
+            <textarea
+              value={memoryMd}
+              onChange={(e) => setMemoryMd(e.target.value)}
+              rows={8}
+              className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100"
+              placeholder={t('portal.chatEmpty')}
+            />
+            <div className="mt-2">
+              <Button onClick={handleSaveMemory} isLoading={memorySaving} size="sm">
+                {t('common.save')}
+              </Button>
+            </div>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              {t('portal.chatHistory')}
+            </p>
+            {dailyDates.length === 0 ? (
+              <p className="text-sm text-gray-500">{t('portal.noChatHistory')}</p>
+            ) : (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {dailyDates.map((date) => (
+                  <button
+                    key={date}
+                    type="button"
+                    onClick={() => loadDaily(date)}
+                    className={`px-3 py-1 rounded-lg text-xs border transition-colors ${
+                      selectedDaily === date
+                        ? 'bg-primary-100 dark:bg-primary-900/40 border-primary-300 text-primary-700 dark:text-primary-300'
+                        : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-900/50'
+                    }`}
+                  >
+                    {date}
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedDaily && (
+              <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg text-xs overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap">
+                {memoryLoading ? '…' : dailyContent || t('portal.noChatHistory')}
+              </pre>
+            )}
           </div>
         </div>
       </div>
