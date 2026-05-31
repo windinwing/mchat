@@ -396,6 +396,45 @@
 
 ---
 
+## 工作流（Beta）
+
+> 编排多个 Skill 为流程，支持线性步骤与 `graph_json` 图 DAG。详见 [workflow-orchestrator.zh.md](./workflow-orchestrator.zh.md)。
+
+权限：`skills:read` / `skills:write`。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/workflows/templates` | 内置工作流模板列表 |
+| POST | `/workflows/from-template/{template_id}` | 从模板创建工作流（自动解析 skill_name） |
+| GET | `/workflows` | 工作流列表 |
+| POST | `/workflows` | 创建工作流 |
+| PATCH | `/workflows/{workflow_id}` | 更新（含 `graph_json`） |
+| DELETE | `/workflows/{workflow_id}` | 删除 |
+| GET | `/workflows/{workflow_id}/steps` | 线性步骤列表 |
+| PUT | `/workflows/{workflow_id}/steps` | 替换线性步骤 |
+| POST | `/workflows/{workflow_id}/run-once` | 手动执行一次 |
+| GET | `/workflows/runs/list` | 运行记录（可选 `?workflow_id=`） |
+| GET | `/workflows/runs/{run_id}` | 运行详情（含 `step_runs` / `node_runs`） |
+| POST | `/workflows/runs/{run_id}/resume` | 审批通过后续跑 |
+| GET | `/workflows/approvals/pending` | 待审批列表 |
+| POST | `/workflows/approvals/{approval_id}/approve` | 批准 |
+| POST | `/workflows/approvals/{approval_id}/reject` | 拒绝 |
+
+**POST /workflows/{workflow_id}/run-once 请求体:**
+```json
+{
+  "payload": { "query": "示例输入" }
+}
+```
+
+运行状态：`running` / `success` / `failed` / `paused`（等待审批）。
+
+**频道工作流规则**（绑定、预览、模板、统计）见渠道 API 扩展路径 `/channels/{channel_id}/workflows/*` 与 `/channels/templates/workflow`。
+
+**定时触发**见 `/skill-schedules`（可指定 `workflow_id`）。
+
+---
+
 ## 渠道管理
 
 | 方法 | 路径 | 说明 |

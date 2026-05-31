@@ -12,6 +12,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@xyflow/react": "^12.10.2",
     "clsx": "^2.1.1",
     "i18next": "^26.2.0",
     "lucide-react": "^0.555.0",

@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { ToastContainer } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
+import { ThemeToggle } from '@/components/common/ThemeToggle'
 
 interface AdminLayoutProps {
   children: React.ReactNode
@@ -30,11 +31,14 @@ export function AdminLayout({ children }: AdminLayoutProps) {
   }, [isLoading, isAuthenticated, navigate, location.pathname])
 
   useEffect(() => {
-    if (isLoading || !isAuthenticated || user?.role === 'admin') return
+    // Wait until user profile is loaded; otherwise refresh can briefly redirect to /admin.
+    if (isLoading || !isAuthenticated || !user || user.role === 'admin') return
 
     const adminOnlyPrefixes = [
       '/admin/knowledge',
       '/admin/skills',
+      '/admin/workflows',
+      '/admin/schedules',
       '/admin/agents',
       '/admin/customer-agents',
       '/admin/settings',
@@ -101,12 +105,10 @@ export function AdminLayout({ children }: AdminLayoutProps) {
 
           <div className="flex items-center gap-3">
             <LanguageSwitcher className="shrink-0" />
-            <div className="min-h-[42px] px-4 py-1.5 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/50 text-sm text-right flex flex-col justify-center">
+            <ThemeToggle className="shrink-0" />
+            <div className="px-4 py-1.5 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/50 text-sm text-right">
               <p className="font-medium text-gray-900 dark:text-gray-100 leading-tight">
-                {user?.username || t('common.admin')}
-              </p>
-              <p className="text-xs text-gray-500 leading-tight mt-0.5">
-                {user?.display_name || user?.role}
+                {user?.display_name || user?.username || t('common.admin')}
               </p>
             </div>
             <button

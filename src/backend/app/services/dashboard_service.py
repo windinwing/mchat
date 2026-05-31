@@ -77,20 +77,35 @@ class DashboardService:
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         period_start = now - timedelta(days=period_days)
 
-        base_conv = select(Conversation)
+        total_conv_stmt = select(func.count()).select_from(Conversation)
+        active_conv_stmt = (
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.status == "active")
+        )
+        closed_conv_stmt = (
+            select(func.count())
+            .select_from(Conversation)
+            .where(
+                Conversation.created_at >= period_start,
+                Conversation.status == "closed",
+            )
+        )
+        period_total_stmt = (
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.created_at >= period_start)
+        )
         if user_id is not None:
-            base_conv = base_conv.where(Conversation.user_id == user_id)
+            total_conv_stmt = total_conv_stmt.where(Conversation.user_id == user_id)
+            active_conv_stmt = active_conv_stmt.where(Conversation.user_id == user_id)
+            closed_conv_stmt = closed_conv_stmt.where(Conversation.user_id == user_id)
+            period_total_stmt = period_total_stmt.where(Conversation.user_id == user_id)
 
-        period_conv = base_conv.where(Conversation.created_at >= period_start)
-
-        total_conv = await self._scalar_count(select(func.count()).select_from(base_conv.subquery()))
-        active_conv = await self._scalar_count(
-            select(func.count()).select_from(base_conv.subquery()).where(Conversation.status == "active")
-        )
-        closed_conv = await self._scalar_count(
-            select(func.count()).select_from(period_conv.subquery()).where(Conversation.status == "closed")
-        )
-        period_total = await self._scalar_count(select(func.count()).select_from(period_conv.subquery()))
+        total_conv = await self._scalar_count(total_conv_stmt)
+        active_conv = await self._scalar_count(active_conv_stmt)
+        closed_conv = await self._scalar_count(closed_conv_stmt)
+        period_total = await self._scalar_count(period_total_stmt)
 
         resolution_rate = (closed_conv / period_total) if period_total > 0 else 0.0
 
@@ -100,12 +115,17 @@ class DashboardService:
             else select(func.count()).select_from(Message)
         )
 
-        base_msg = select(Message).join(Conversation)
-        if user_id is not None:
-            base_msg = base_msg.where(Conversation.user_id == user_id)
-        messages_today = await self._scalar_count(
-            select(func.count()).select_from(base_msg.subquery()).where(Message.created_at >= today_start)
+        messages_today_stmt = (
+            select(func.count())
+            .select_from(Message)
+            .join(Conversation)
+            .where(Message.created_at >= today_start)
         )
+        if user_id is not None:
+            messages_today_stmt = messages_today_stmt.where(
+                Conversation.user_id == user_id
+            )
+        messages_today = await self._scalar_count(messages_today_stmt)
 
         total_agents = await self._scalar_count(
             select(func.count()).select_from(CustomerConfig).where(CustomerConfig.user_id == user_id)
@@ -196,10 +216,18 @@ class DashboardService:
 
         agent_stats: list[AgentStats] = []
         for c in customers:
-            conv_base = select(Conversation).where(Conversation.customer_id == c.id)
-            total_conv = await self._scalar_count(select(func.count()).select_from(conv_base.subquery()))
+            total_conv = await self._scalar_count(
+                select(func.count())
+                .select_from(Conversation)
+                .where(Conversation.customer_id == c.id)
+            )
             active_conv = await self._scalar_count(
-                select(func.count()).select_from(conv_base.subquery()).where(Conversation.status == "active")
+                select(func.count())
+                .select_from(Conversation)
+                .where(
+                    Conversation.customer_id == c.id,
+                    Conversation.status == "active",
+                )
             )
             msgs_today = await self._scalar_count(
                 select(func.count()).select_from(Message).join(Conversation)

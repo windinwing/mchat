@@ -9,6 +9,8 @@ const ROUTE_TITLE_KEYS: Array<{ pattern: string; key: string }> = [
   { pattern: '/admin/conversations', key: 'meta.titleConversations' },
   { pattern: '/admin/knowledge', key: 'meta.titleKnowledge' },
   { pattern: '/admin/skills', key: 'meta.titleSkills' },
+  { pattern: '/admin/workflows', key: 'meta.titleWorkflows' },
+  { pattern: '/admin/schedules', key: 'meta.titleSchedules' },
   { pattern: '/admin/agents', key: 'meta.titleAgents' },
   { pattern: '/admin/customer-agents', key: 'meta.titleCustomerAgents' },
   { pattern: '/admin/users', key: 'meta.titleUsers' },

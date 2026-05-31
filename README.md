@@ -6,16 +6,28 @@
 
 **[中文文档](README.zh.md)** · **[GitHub](https://github.com/windinwing/mchat)**
 
-MChat is a **lightweight, embeddable, multi-tenant vertical RAG platform**. It combines a streaming Bot engine, RAG knowledge base, Skill plugin system, and an embeddable chat Widget — with support for **10+ LLM providers** and multi-channel connectivity (Web Widget, WebSocket, REST API, WeChat Official Account, and more).
+MChat is a **lightweight, embeddable, multi-tenant vertical RAG platform**. It combines a streaming Bot engine, production-grade RAG knowledge base, hot-reload Skill plugins, **visual Workflow orchestration (Beta)**, and a one-line embeddable Widget — with **10+ LLM providers** and multi-channel delivery (Web Widget, WebSocket, REST, WeChat Official Account, and more).
 
-The platform ships with **AI customer service** as a built-in base channel, and supports **custom vertical channels** — pre-configured domain RAG packages (e.g. patent search, medical consultation, legal Q&A) that bundle domain knowledge bases, specialized skill packs, and tuned retrieval strategies. Embed with a single `<script>` tag.
+Built-in **AI customer service** works out of the box. Extend the same stack into **vertical channels** — patent search, medical, legal, and other domain RAG packages with dedicated knowledge bases, skill packs, and tuned retrieval — embed anywhere with a single `<script>` tag.
+
+## Why MChat?
+
+| Strength | What you get |
+|----------|----------------|
+| **Vertical RAG in one stack** | Bot + hybrid retrieval (vector + BM25 + RRF) + rerank + query rewrite + parent-child chunks — not a thin chatbot wrapper |
+| **Skills that ship** | Hot-reload `SKILL.md`, OpenClaw-compatible packs, URL/zip install, ClawHub (`patent-search`, etc.) |
+| **Workflow orchestration (Beta)** | ComfyUI-style graph editor (pointer/pan), DAG runs, merge nodes, approval gates, channel & schedule triggers |
+| **Embed & multi-tenant** | Branded Widget per channel; isolated agents, skills, and knowledge bases |
+| **Operator-friendly** | Full admin UI in **English & 简体中文**, dashboards, channel rules, skill schedules |
+| **Developer-friendly** | FastAPI + React, Swagger, Docker Compose, MIT license |
 
 ## Live websites
 
 - [English main site](http://mchat.chat)
 - [Chinese main site](https://mchat.9235.net)
 - [Full screenshot tour](docs/product-tour.en.md)
-- [Product roadmap](docs/roadmap.en.md) (knowledge base, Widget, channels, API, ops, RBAC)
+- [Product roadmap](docs/roadmap.en.md)
+- [Workflow orchestrator (Beta)](docs/workflow-orchestrator.zh.md)
 
 ## UI preview
 
@@ -49,18 +61,25 @@ Click any screenshot to open the full image.
 
 [![Channel management](docs/images/mchat.channel.en.png)](docs/images/mchat.channel.en.png)
 
+### Workflow orchestration (Beta)
+
+[![Workflow list and templates](docs/images/workflow.en.png)](docs/images/workflow.en.png)
+
+[![Workflow graph editor](docs/images/workflow.graph.en.png)](docs/images/workflow.graph.en.png)
+
 ## Features
 
 - **Bot engine** — Streaming LLM inference + tool calling; OpenAI, Anthropic, Google, DeepSeek, Ollama, Groq, and more
-- **Skill plugins** — Hot-reload `SKILL.md` packages from disk/zip/URL, including OpenClaw-compatible formats. Premium skill packs available as vertical channel add-ons
-- **RAG knowledge base** — Multi-strategy chunking, multi-provider embeddings (OpenAI / local / Ollama), hybrid retrieval (vector + BM25 + RRF), multi-provider rerank, query rewriting, parent-child context
+- **Skill plugins** — Hot-reload `SKILL.md` from disk/zip/URL, OpenClaw-compatible formats; premium packs as vertical add-ons
+- **RAG knowledge base** — Multi-strategy chunking, multi-provider embeddings, hybrid retrieval (vector + BM25 + RRF), rerank, query rewriting, parent-child context
+- **Workflow orchestration (Beta)** — React Flow DAG editor, linear or graph execution, merge/condition/approval nodes, built-in report templates, manual/schedule/channel triggers
 - **Embeddable Widget** — One `<script>` tag for branded vertical RAG chat on any website
-- **Multi-tenant** — Independent channel configurations with isolated AI config, skills, and knowledge bases
-- **Vertical channels** — Pre-configured domain RAG packages: AI model, system prompt, knowledge base, rerank strategy, skill packs, widget theme — one-click creation
-- **Multi-channel** — Web Widget, REST, WebSocket, WeChat Official Account (DingTalk/WhatsApp/Telegram [planned](docs/roadmap.en.md#3-channels))
-- **Speech input** — Voice-to-text via OpenAI Whisper (optional local models)
-- **Security** — JWT authentication, API key management, RBAC
-- **Docker** — `docker compose up -d` for full stack deployment
+- **Multi-tenant** — Independent channel configs with isolated AI, skills, and knowledge bases
+- **Vertical channels** — One-click domain templates: model, prompt, KB, rerank, skills, widget theme
+- **Multi-channel** — Web Widget, REST, WebSocket, WeChat (DingTalk/WhatsApp/Telegram [planned](docs/roadmap.en.md#3-channels))
+- **Speech input** — OpenAI Whisper (optional local models)
+- **Security** — JWT, API keys, RBAC
+- **Docker** — `docker compose up -d` full stack
 
 ## Quick start
 
@@ -118,6 +137,7 @@ mchat/
 │   │       ├── bot/      # Bot engine + LLM providers
 │   │       ├── knowledge/# RAG + Milvus
 │   │       ├── skill/    # Skill system
+│   │       ├── worker/   # Schedules & workflow jobs
 │   │       └── channels/ # WeChat & channel adapters
 │   └── frontend/         # React + Vite + Tailwind
 │       └── src/
@@ -125,7 +145,7 @@ mchat/
 │           └── pages/    # Landing + admin console
 ├── skills/               # Skill packages
 ├── channel_templates/    # Vertical channel templates (patent, medical, etc.)
-├── docs/                 # Architecture, API, deployment
+├── docs/                 # Architecture, API, deployment, roadmap
 ├── ops/docker/           # Docker Compose
 └── Makefile
 ```
@@ -152,6 +172,7 @@ mchat/
 | Knowledge | `/api/knowledge/*` | Documents and retrieval |
 | Widget | `/api/widget/*` | Embedded chat API |
 | Skills | `/api/skills/*` | Skill management |
+| Workflows | `/api/workflows/*` | Workflow CRUD, runs, templates (Beta) |
 | Channels | `/api/channels/*` | WeChat and other channels |
 | Channel Templates | `/api/channels/templates/*` | One-click vertical channel creation |
 | Speech | `/api/speech/*` | Voice transcription |
@@ -180,10 +201,11 @@ mchat db seed
 ## Skill compatibility
 
 - Supports standard frontmatter `SKILL.md` skill packages
-- Supports OpenClaw-style `SKILL.md` locale blocks
+- Supports OpenClaw-style `SKILL.md` locale blocks (auto `config.i18n` for UI display names)
 - Admin can install skills by zip upload or URL (`/api/skills/install-url`)
 - CLI supports direct URL or ClawHub name install, for example: `mchat skill install patent-search`
 - **Premium skill packs**: Vertical channels can bundle specialized skills as value-added services
+- **Workflow reuse**: One skill (e.g. `patent-search`) can appear in multiple DAG nodes with different `command` / `dimension` payloads
 
 ## Docker variants
 
@@ -198,7 +220,7 @@ mchat db seed
 
 **Backend:** FastAPI, SQLAlchemy 2.0, Milvus, OpenAI / Anthropic SDKs, JWT, Loguru  
 
-**Frontend:** React 19, TypeScript, Vite, Tailwind CSS 4, Zustand, react-i18next
+**Frontend:** React 19, TypeScript, Vite, Tailwind CSS 4, Zustand, react-i18next, React Flow
 
 ## License
 

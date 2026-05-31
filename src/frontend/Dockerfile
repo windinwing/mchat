@@ -12,8 +12,8 @@ RUN npm install
 # Copy source code
 COPY . .
 
-# Build the application
-RUN npm run build
+# Build the application (Core edition — public GitHub / deploy-core)
+RUN VITE_MCHAT_EDITION=core npm run build:core
 
 # Production stage
 FROM nginx:1.25-alpine AS production

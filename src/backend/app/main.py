@@ -140,6 +140,14 @@ def create_app() -> FastAPI:
             {"name": "Agents", "description": "AI model configs and vertical channel configurations"},
             {"name": "Knowledge", "description": "Knowledge bases, documents, RAG search, embedding models"},
             {"name": "Skills", "description": "Skill plugin management — upload, install from URL, reload"},
+            {
+                "name": "Skill Schedules",
+                "description": "Skill scheduled jobs — CRUD, run-once, execution logs",
+            },
+            {
+                "name": "Workflows",
+                "description": "Skill orchestration workflows — steps, run-once, execution logs",
+            },
             {"name": "Widget", "description": "Public API for embedded chat widget (no auth)"},
             {"name": "Channels", "description": "Multi-channel configuration (WeChat, etc.)"},
             {"name": "Speech", "description": "Speech-to-text transcription"},

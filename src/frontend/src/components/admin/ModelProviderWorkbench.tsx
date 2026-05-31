@@ -323,8 +323,10 @@ export function ModelProviderWorkbench() {
                         : 'hover:bg-gray-100 dark:hover:bg-gray-700/50',
                     )}
                   >
-                    <Bot className="w-4 h-4 shrink-0 opacity-60" />
-                    <span className="flex-1 truncate">{c.name}</span>
+                    <Bot className="w-4 h-4 shrink-0 opacity-60 text-gray-500 dark:text-gray-300" />
+                    <span className="flex-1 truncate text-gray-900 dark:text-gray-100">
+                      {c.name}
+                    </span>
                     {c.is_default && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary-100 dark:bg-primary-800 text-primary-700 dark:text-primary-200">
                         {t('agents.workbenchDefaultBadge')}
@@ -482,7 +484,10 @@ export function ModelProviderWorkbench() {
                             : 'border-gray-200 dark:border-gray-700 hover:border-primary-300',
                         )}
                       >
-                        <span className="truncate font-mono text-xs" title={modelId}>
+                        <span
+                          className="truncate font-mono text-xs text-gray-700 dark:text-gray-300"
+                          title={modelId}
+                        >
                           {modelId}
                         </span>
                         <div className="flex gap-1 shrink-0">

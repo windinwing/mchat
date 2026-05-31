@@ -244,8 +244,34 @@ MChat 核心是**可嵌入的多租户对话 + RAG + Skill**，不仅限于官�
 | P1 | 钉钉 / Telegram / WhatsApp | 渠道 UI 已预留，用户需求明确 |
 | P1 | 公开 API 文档站 | 降低集成门槛 |
 | P1 | Widget 体验（预表单、CSAT、未读） | 对外产品力 |
+| P1 | Workflow 运行回放与可观测 | Beta 走向生产 |
 | P2 | 运营报表深化 | 企业采购决策因素 |
 | P2 | 细粒度 RBAC | 团队规模扩大后必需 |
 | P3 | 场景案例与模板 | 获客与差异化 |
 
 欢迎通过 [GitHub Issues](https://github.com/windinwing/mchat/issues) 讨论优先级与具体需求。
+
+---
+
+## 8. Workflow 编排（Beta）
+
+### 当前状态
+
+| 能力 | 说明 |
+|------|------|
+| 线性编排 | 多 Skill 顺序执行、参数模板、步骤日志 |
+| 图编排 | React Flow 编辑器 + DAG 执行（条件/并行/审批） |
+| 触发 | 手动、定时任务、频道消息规则 |
+| 运营 | 规则模板、导入导出、命中统计、待审批队列 |
+| 告警 | 失败/拒绝 Webhook（`WORKFLOW_ALERT_WEBHOOK_URL`） |
+
+详细设计见 [Workflow 编排器（Beta）](workflow-orchestrator.zh.md)。
+
+### 规划
+
+| 方向 | 说明 |
+|------|------|
+| 运行态画布回放 | 在图编辑器中高亮节点执行状态 |
+| 节点库增强 | 搜索、分类、ComfyUI 风格卡片 |
+| 流程版本 | 发布/回滚、变更审计 |
+| 可观测 | 运行指标、慢节点分析 |

@@ -17,9 +17,12 @@ import {
   Lock,
   Store,
   DollarSign,
+  Clock3,
+  Workflow,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
+import { Badge } from '@/components/ui/Badge'
 import { useAuthStore } from '@/stores/auth'
 import { isCloudEdition } from '@/lib/edition'
 
@@ -38,6 +41,8 @@ export function Sidebar({ onClose }: SidebarProps) {
     { path: '/admin/conversations', labelKey: 'nav.conversations', icon: MessageSquare },
     { path: '/admin/knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
     { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
+    { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow, badgeKey: 'nav.workflowsBeta' },
+    { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
     { path: '/admin/agents', labelKey: 'nav.agents', icon: Bot },
     { path: '/admin/customer-agents', labelKey: 'nav.customerAgents', icon: Headphones },
     { path: '/admin/settings', labelKey: 'nav.settings', icon: Settings },
@@ -110,7 +115,12 @@ export function Sidebar({ onClose }: SidebarProps) {
                 )}
               >
                 <item.icon className="w-5 h-5 shrink-0" />
-                <span>{t(item.labelKey)}</span>
+                <span className="flex-1 text-left">{t(item.labelKey)}</span>
+                {'badgeKey' in item && item.badgeKey ? (
+                  <Badge variant="warning" size="sm" className="shrink-0">
+                    {t(item.badgeKey)}
+                  </Badge>
+                ) : null}
               </button>
             </li>
           ))}

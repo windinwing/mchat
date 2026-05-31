@@ -31,6 +31,7 @@ from app.models.message import Message
 from app.services.channel_service import (
     channel_get_or_create_conversation,
     channel_resolve_ai_config,
+    channel_trigger_bound_workflows,
 )
 from app.core.database import async_session_factory
 
@@ -453,6 +454,19 @@ async def _queue_active_text_message(
     conversation.updated_at = datetime.now(timezone.utc)
     conversation.last_seen_at = datetime.now(timezone.utc)
     await db.commit()
+    try:
+        await channel_trigger_bound_workflows(
+            db,
+            channel,
+            event_type="message",
+            event_payload={
+                "sender_id": openid,
+                "conversation_id": conversation.id,
+                "content": text,
+            },
+        )
+    except Exception as e:
+        logger.warning(f"WeChat channel workflow trigger failed: {e}")
 
     task = asyncio.create_task(
         _push_wechat_reply_in_background(
@@ -532,6 +546,19 @@ async def _process_text_message(
     conversation.updated_at = datetime.now(timezone.utc)
     conversation.last_seen_at = datetime.now(timezone.utc)
     await db.commit()
+    try:
+        await channel_trigger_bound_workflows(
+            db,
+            channel,
+            event_type="message",
+            event_payload={
+                "sender_id": openid,
+                "conversation_id": conversation.id,
+                "content": text,
+            },
+        )
+    except Exception as e:
+        logger.warning(f"WeChat channel workflow trigger failed: {e}")
 
     ai_config = await _resolve_ai_config(db, customer)
 

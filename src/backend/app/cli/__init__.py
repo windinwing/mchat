@@ -65,6 +65,14 @@ def main() -> None:
         help="Enable auto-reload for development",
     )
 
+    # worker: run independent background scheduler
+    worker_parser = subparsers.add_parser("worker", help="Run background worker")
+    worker_parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run enabled jobs once and exit",
+    )
+
     # config: manage configuration
     config_parser = subparsers.add_parser("config", help="Manage configuration")
     config_sub = config_parser.add_subparsers(dest="config_action")
@@ -104,6 +112,8 @@ async def _handle_command(args: argparse.Namespace) -> None:
             await _cmd_init(args)
         case "run":
             await _cmd_run(args)
+        case "worker":
+            await _cmd_worker(args)
         case "config":
             await _cmd_config(args)
         case "skill":
@@ -162,6 +172,13 @@ async def _cmd_run(args: argparse.Namespace) -> None:
         reload=args.reload,
         log_level="info",
     )
+
+
+async def _cmd_worker(args: argparse.Namespace) -> None:
+    """Start background scheduler worker."""
+    from app.worker.main import run_worker
+
+    await run_worker(run_once=bool(getattr(args, "once", False)))
 
 
 async def _cmd_config(args: argparse.Namespace) -> None:

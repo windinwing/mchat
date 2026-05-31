@@ -73,6 +73,17 @@ class SettingsService:
         s3_force_path_style = get_val(
             "s3_force_path_style", DEFAULT_SETTINGS.s3_force_path_style
         )
+        worker_enabled = get_val("worker_enabled", settings.worker_enabled)
+        worker_timezone = get_val("worker_timezone", settings.worker_timezone)
+        worker_log_cleanup_enabled = get_val(
+            "worker_log_cleanup_enabled", settings.worker_log_cleanup_enabled
+        )
+        worker_log_retention_days = get_val(
+            "worker_log_retention_days", settings.worker_log_retention_days
+        )
+        worker_usage_reset_enabled = get_val(
+            "worker_usage_reset_enabled", settings.worker_usage_reset_enabled
+        )
         embedding_provider = get_val(
             "embedding_provider", DEFAULT_SETTINGS.embedding_provider
         )
@@ -138,6 +149,11 @@ class SettingsService:
         settings.s3_use_ssl = s3_use_ssl
         settings.s3_public_base_url = s3_public_base_url
         settings.s3_force_path_style = s3_force_path_style
+        settings.worker_enabled = worker_enabled
+        settings.worker_timezone = worker_timezone
+        settings.worker_log_cleanup_enabled = worker_log_cleanup_enabled
+        settings.worker_log_retention_days = worker_log_retention_days
+        settings.worker_usage_reset_enabled = worker_usage_reset_enabled
 
         return AppSettingsResponse(
             site_name=get_val("site_name", DEFAULT_SETTINGS.site_name),
@@ -172,6 +188,11 @@ class SettingsService:
             s3_use_ssl=s3_use_ssl,
             s3_public_base_url=s3_public_base_url,
             s3_force_path_style=s3_force_path_style,
+            worker_enabled=worker_enabled,
+            worker_timezone=worker_timezone,
+            worker_log_cleanup_enabled=worker_log_cleanup_enabled,
+            worker_log_retention_days=worker_log_retention_days,
+            worker_usage_reset_enabled=worker_usage_reset_enabled,
         )
 
     async def update_settings(self, data: AppSettingsUpdate) -> AppSettingsResponse:

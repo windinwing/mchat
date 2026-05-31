@@ -14,6 +14,14 @@ from app.models.user import User
 from app.schemas.channel import (
     ChannelCreate,
     ChannelResponse,
+    ChannelWorkflowBindingBundle,
+    ChannelWorkflowStatsResponse,
+    ChannelWorkflowTemplateCreate,
+    ChannelWorkflowTemplateResponse,
+    ChannelWorkflowPreviewRequest,
+    ChannelWorkflowPreviewResponse,
+    ChannelWorkflowBindingResponse,
+    ChannelWorkflowBindingUpdate,
     ChannelTestRequest,
     ChannelUpdate,
 )
@@ -456,3 +464,162 @@ async def test_channel(
         channel_type=request.channel_type,
         config=request.config,
     )
+
+
+@router.get("/{channel_id}/workflows", response_model=list[ChannelWorkflowBindingResponse])
+async def list_channel_workflows(
+    channel_id: str,
+    admin: User = Depends(require_permission(Permission.CHANNELS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ChannelService(db)
+    return await service.list_channel_workflow_bindings(
+        channel_id=channel_id, user_id=admin.id
+    )
+
+
+@router.put("/{channel_id}/workflows", response_model=list[ChannelWorkflowBindingResponse])
+async def replace_channel_workflows(
+    channel_id: str,
+    request: ChannelWorkflowBindingUpdate,
+    admin: User = Depends(require_permission(Permission.CHANNELS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ChannelService(db)
+    try:
+        return await service.replace_channel_workflow_bindings(
+            channel_id=channel_id,
+            user_id=admin.id,
+            bindings=request.bindings,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post(
+    "/{channel_id}/workflows/preview",
+    response_model=ChannelWorkflowPreviewResponse,
+)
+async def preview_channel_workflow_match(
+    channel_id: str,
+    request: ChannelWorkflowPreviewRequest,
+    admin: User = Depends(require_permission(Permission.CHANNELS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ChannelService(db)
+    try:
+        return await service.preview_channel_workflow_bindings(
+            channel_id=channel_id,
+            user_id=admin.id,
+            content=request.content,
+            event_type=request.event_type,
+            dispatch_mode=request.dispatch_mode,
+            bindings_override=request.bindings,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/{channel_id}/workflows/export", response_model=ChannelWorkflowBindingBundle)
+async def export_channel_workflow_bundle(
+    channel_id: str,
+    admin: User = Depends(require_permission(Permission.CHANNELS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ChannelService(db)
+    try:
+        return await service.export_channel_workflow_bundle(
+            channel_id=channel_id,
+            user_id=admin.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/{channel_id}/workflows/import", response_model=list[ChannelWorkflowBindingResponse])
+async def import_channel_workflow_bundle(
+    channel_id: str,
+    request: ChannelWorkflowBindingBundle,
+    admin: User = Depends(require_permission(Permission.CHANNELS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ChannelService(db)
+    try:
+        return await service.import_channel_workflow_bundle(
+            channel_id=channel_id,
+            user_id=admin.id,
+            bundle=request,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/{channel_id}/workflows/stats", response_model=ChannelWorkflowStatsResponse)
+async def channel_workflow_stats(
+    channel_id: str,
+    days: int = Query(default=7, ge=1, le=90),
+    admin: User = Depends(require_permission(Permission.CHANNELS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ChannelService(db)
+    return await service.channel_workflow_stats(
+        channel_id=channel_id,
+        user_id=admin.id,
+        days=days,
+    )
+
+
+@router.get("/templates/workflow", response_model=list[ChannelWorkflowTemplateResponse])
+async def list_channel_workflow_templates(
+    admin: User = Depends(require_permission(Permission.CHANNELS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ChannelService(db).list_workflow_templates(user_id=admin.id)
+
+
+@router.post("/templates/workflow", response_model=ChannelWorkflowTemplateResponse)
+async def create_channel_workflow_template(
+    request: ChannelWorkflowTemplateCreate,
+    admin: User = Depends(require_permission(Permission.CHANNELS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ChannelService(db).save_workflow_template(
+        user_id=admin.id,
+        data=request,
+    )
+
+
+@router.delete("/templates/workflow/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_channel_workflow_template(
+    template_id: str,
+    admin: User = Depends(require_permission(Permission.CHANNELS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    ok = await ChannelService(db).delete_workflow_template(
+        user_id=admin.id,
+        template_id=template_id,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="template not found")
+    return None
+
+
+@router.post(
+    "/{channel_id}/workflows/apply-template/{template_id}",
+    response_model=list[ChannelWorkflowBindingResponse],
+)
+async def apply_channel_workflow_template(
+    channel_id: str,
+    template_id: str,
+    admin: User = Depends(require_permission(Permission.CHANNELS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ChannelService(db)
+    try:
+        return await service.apply_workflow_template_to_channel(
+            channel_id=channel_id,
+            user_id=admin.id,
+            template_id=template_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e

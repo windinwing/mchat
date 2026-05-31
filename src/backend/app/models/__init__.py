@@ -12,6 +12,15 @@ from app.models.channel import Channel
 from app.models.channel_template import ChannelTemplate
 from app.models.portal_order import PortalOrder
 from app.models.retrieval_log import RetrievalLog
+from app.models.skill_schedule import SkillSchedule, SkillScheduleRun
+from app.models.workflow import (
+    ChannelWorkflowBinding,
+    SkillWorkflowApproval,
+    SkillWorkflow,
+    SkillWorkflowRun,
+    SkillWorkflowStep,
+    SkillWorkflowStepRun,
+)
 
 __all__ = [
     "User",
@@ -30,4 +39,12 @@ __all__ = [
     "ChannelTemplate",
     "PortalOrder",
     "RetrievalLog",
+    "SkillSchedule",
+    "SkillScheduleRun",
+    "SkillWorkflow",
+    "SkillWorkflowStep",
+    "SkillWorkflowRun",
+    "SkillWorkflowStepRun",
+    "ChannelWorkflowBinding",
+    "SkillWorkflowApproval",
 ]

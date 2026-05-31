@@ -2,6 +2,24 @@
 
 All notable changes to mchat will be documented in this file.
 
+## [Unreleased] - 2026-05-30
+
+### Added
+- **Workflow graph enhancements (Beta)**: merge node, patent multi-dimension report templates (zh/en), locale-filtered template API.
+- **Canvas tools**: ComfyUI-style `V` pointer / `H` pan mode with toolbar toggles.
+- **Skill i18n**: `config.i18n` and OpenClaw locale parsing; workflow palette and nodes show localized skill titles.
+- **Graph editor UX**: drag skills from palette, node/edge context menus, PayloadMapper, missing-skill warnings.
+- **Landing preview**: new screenshot section including Workflow list and graph editor (en/zh).
+- **Docs**: README, product tour, and roadmap aligned with Workflow; four workflow showcase images.
+
+### Changed
+- Chinese patent report template reuses `patent-search` commands; English template uses placeholder skill names for demos.
+- Removed linear steps JSON editor from workflows page; graph editor is primary.
+- `README.en.md` / `README.zh-CN.md` point to canonical README files.
+
+### Tests
+- Added `tests/unit/test_workflow_graph.py` (templates, payload rendering, path resolution).
+
 ## [1.0.0] - 2026-05-17
 
 ### Added

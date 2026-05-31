@@ -13,6 +13,8 @@ from app.api.settings import router as settings_router
 from app.api.channel import router as channel_router
 from app.api.dashboard import router as dashboard_router
 from app.api.speech import router as speech_router
+from app.api.skill_schedule import router as skill_schedule_router
+from app.api.workflow import router as workflow_router
 
 api_router = APIRouter(prefix="/api")
 
@@ -22,6 +24,12 @@ api_router.include_router(speech_router, prefix="/speech", tags=["Speech"])
 api_router.include_router(agent_router, prefix="/agents", tags=["Agents"])
 api_router.include_router(knowledge_router, prefix="/knowledge", tags=["Knowledge"])
 api_router.include_router(skill_router, prefix="/skills", tags=["Skills"])
+api_router.include_router(
+    skill_schedule_router,
+    prefix="/skills/schedules",
+    tags=["Skill Schedules"],
+)
+api_router.include_router(workflow_router, prefix="/workflows", tags=["Workflows"])
 api_router.include_router(widget_router, prefix="/widget", tags=["Widget"])
 api_router.include_router(settings_router, prefix="/settings", tags=["Settings"])
 api_router.include_router(channel_router, prefix="/channels", tags=["Channels"])

@@ -97,6 +97,13 @@ class Settings(BaseSettings):
     # development | production — production enforces secure defaults at startup
     environment: str = "development"
 
+    # Background worker (independent process)
+    worker_enabled: bool = False
+    worker_timezone: str = "Asia/Shanghai"
+    worker_log_cleanup_enabled: bool = True
+    worker_log_retention_days: int = 14
+    worker_usage_reset_enabled: bool = True
+
     # Rate limiting
     rate_limit_enabled: bool = True
     rate_limit_requests: int = 60

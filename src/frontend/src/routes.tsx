@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { isCloudEdition } from '@/lib/edition'
 import { AdminLayout } from './components/layout/AdminLayout'
+import { UserLayout } from './components/layout/UserLayout'
 import { Spinner } from './components/ui/Spinner'
 import { DocumentTitle } from './components/common/DocumentTitle'
 
@@ -16,6 +17,11 @@ const AdminDashboard = lazyNamed(() => import('./pages/AdminDashboard'), 'AdminD
 const ConversationsPage = lazyNamed(() => import('./pages/ConversationsPage'), 'ConversationsPage')
 const KnowledgePage = lazyNamed(() => import('./pages/KnowledgePage'), 'KnowledgePage')
 const SkillsPage = lazyNamed(() => import('./pages/SkillsPage'), 'SkillsPage')
+const WorkflowsPage = lazyNamed(() => import('./pages/WorkflowsPage'), 'WorkflowsPage')
+const SkillSchedulesPage = lazyNamed(
+  () => import('./pages/SkillSchedulesPage'),
+  'SkillSchedulesPage',
+)
 const AgentsPage = lazyNamed(() => import('./pages/AgentsPage'), 'AgentsPage')
 const CustomerAgentsPage = lazyNamed(() => import('./pages/CustomerAgentsPage'), 'CustomerAgentsPage')
 const SettingsPage = lazyNamed(() => import('./pages/SettingsPage'), 'SettingsPage')
@@ -31,6 +37,19 @@ const UsersPage = lazyNamed(() => import('./pages/UsersPage'), 'UsersPage')
 const RolesPage = lazyNamed(() => import('./pages/RolesPage'), 'RolesPage')
 const TemplateManagerPage = lazyNamed(() => import('./pages/admin/TemplateManagerPage'), 'TemplateManagerPage')
 const AdminOrdersPage = lazyNamed(() => import('./pages/admin/AdminOrdersPage'), 'AdminOrdersPage')
+
+const RegisterPage = lazyNamed(() => import('./pages/RegisterPage'), 'RegisterPage')
+const PortalDashboard = lazyNamed(() => import('./pages/portal/DashboardPage'), 'DashboardPage')
+const PortalTemplates = lazyNamed(() => import('./pages/portal/TemplatesPage'), 'TemplatesPage')
+const PortalTemplateDetail = lazyNamed(
+  () => import('./pages/portal/TemplateDetailPage'),
+  'TemplateDetailPage',
+)
+const PortalMyChannels = lazyNamed(() => import('./pages/portal/MyChannelsPage'), 'MyChannelsPage')
+const PortalChannelDetail = lazyNamed(
+  () => import('./pages/portal/ChannelDetailPage'),
+  'ChannelDetailPage',
+)
 
 export function PageSuspense({ children }: { children: React.ReactNode }) {
   return (
@@ -53,10 +72,18 @@ export function CoreRoutes() {
       <Routes>
         <Route path="/" element={<PageSuspense><LandingPage /></PageSuspense>} />
         <Route path="/admin/login" element={<PageSuspense><AdminLogin /></PageSuspense>} />
+        {!isCloudEdition && (
+          <>
+            <Route path="/register" element={<Navigate to="/admin/login" replace />} />
+            <Route path="/portal/*" element={<Navigate to="/admin/login" replace />} />
+          </>
+        )}
         <Route path="/admin" element={<AdminLayout><PageSuspense><AdminDashboard /></PageSuspense></AdminLayout>} />
         <Route path="/admin/conversations" element={<AdminLayout><PageSuspense><ConversationsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/knowledge" element={<AdminLayout><PageSuspense><KnowledgePage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/skills" element={<AdminLayout><PageSuspense><SkillsPage /></PageSuspense></AdminLayout>} />
+        <Route path="/admin/workflows" element={<AdminLayout><PageSuspense><WorkflowsPage /></PageSuspense></AdminLayout>} />
+        <Route path="/admin/schedules" element={<AdminLayout><PageSuspense><SkillSchedulesPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/agents" element={<AdminLayout><PageSuspense><AgentsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/customer-agents" element={<AdminLayout><PageSuspense><CustomerAgentsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/settings" element={<AdminLayout><PageSuspense><SettingsPage /></PageSuspense></AdminLayout>} />
@@ -80,5 +107,22 @@ export function CoreRoutes() {
         <Route path="/showcase" element={<PageSuspense><SkillShowcasePage /></PageSuspense>} />
       </Routes>
     </>
+  )
+}
+
+export function PortalRoutes() {
+  if (!isCloudEdition) {
+    return null
+  }
+  return (
+    <Routes>
+      <Route path="/register" element={<PageSuspense><RegisterPage /></PageSuspense>} />
+      <Route path="/portal" element={<UserLayout><PageSuspense><PortalDashboard /></PageSuspense></UserLayout>} />
+      <Route path="/portal/dashboard" element={<UserLayout><PageSuspense><PortalDashboard /></PageSuspense></UserLayout>} />
+      <Route path="/portal/templates" element={<UserLayout><PageSuspense><PortalTemplates /></PageSuspense></UserLayout>} />
+      <Route path="/portal/templates/:id" element={<UserLayout><PageSuspense><PortalTemplateDetail /></PageSuspense></UserLayout>} />
+      <Route path="/portal/channels" element={<UserLayout><PageSuspense><PortalMyChannels /></PageSuspense></UserLayout>} />
+      <Route path="/portal/channels/:id" element={<UserLayout><PageSuspense><PortalChannelDetail /></PageSuspense></UserLayout>} />
+    </Routes>
   )
 }

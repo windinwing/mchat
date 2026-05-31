@@ -38,6 +38,12 @@ class Channel(Base):
 
     # Relationship
     user = relationship("User", back_populates="channels")
+    workflow_bindings = relationship(
+        "ChannelWorkflowBinding",
+        back_populates="channel",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     def __repr__(self) -> str:
         return (

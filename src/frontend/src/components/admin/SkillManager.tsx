@@ -273,7 +273,7 @@ export function SkillManager() {
           <Button
             leftIcon={<Plus className="w-4 h-4" />}
             onClick={() => setCreateOpen(true)}
-            className="w-[120px]"
+            className="w-[150px]"
           >
             {t('skills.createSkill')}
           </Button>

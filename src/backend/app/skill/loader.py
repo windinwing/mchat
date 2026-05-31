@@ -91,19 +91,37 @@ class SkillLoader:
         self, content: str, skill_data: dict[str, Any]
     ) -> None:
         """OpenClaw / xiaoyi patentskill SKILL.md (locales.zh, no --- frontmatter)."""
+        i18n: dict[str, dict[str, str]] = {}
+        prompt_body = ""
         for locale in ("zh", "en"):
             block = self._locale_block(content, locale)
             if not block:
                 continue
+            title = self._yaml_quoted_field(block, "name") or self._yaml_quoted_field(
+                block, "title"
+            )
             desc = self._yaml_quoted_field(block, "description")
             long_desc = self._yaml_multiline_field(block, "long_description")
+            entry: dict[str, str] = {}
+            if title:
+                entry["title"] = title
+            if desc:
+                entry["description"] = desc
+            if entry:
+                i18n[locale] = entry
+            if long_desc and not prompt_body:
+                prompt_body = long_desc
             if desc and not skill_data.get("description"):
                 skill_data["description"] = desc
-            if long_desc:
-                skill_data["config"]["prompt_body"] = long_desc
-                if not skill_data.get("description"):
-                    skill_data["description"] = desc or long_desc[:500]
-                return
+        if i18n:
+            skill_data["config"]["i18n"] = i18n
+        if prompt_body:
+            skill_data["config"]["prompt_body"] = prompt_body
+            if not skill_data.get("description"):
+                zh_desc = (i18n.get("zh") or {}).get("description", "")
+                skill_data["description"] = zh_desc or prompt_body[:500]
+        if i18n or prompt_body:
+            return
         # Fallback: first markdown heading + paragraph
         heading = re.search(r"(?m)^#\s+(.+)$", content)
         if heading and not skill_data.get("description"):

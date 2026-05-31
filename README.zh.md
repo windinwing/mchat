@@ -6,16 +6,28 @@
 
 **[English](README.md)** · **[GitHub](https://github.com/windinwing/mchat)**
 
-MChat 是一款**轻量、可嵌入、多租户**的垂直领域 RAG 平台，整合流式 Bot 引擎、RAG 知识库、Skill 插件系统与嵌入式聊天 Widget，支持 **10+ 大模型提供商**及多渠道接入（网站 Widget、WebSocket、REST API、微信公众号等）。
+MChat 是一款**轻量、可嵌入、多租户**的垂直领域 RAG 平台，整合流式 Bot 引擎、生产级 RAG 知识库、Skill 热加载插件、**可视化 Workflow 编排（Beta）**与一行脚本可嵌入的 Widget，支持 **10+ 大模型**与多渠道触达（网站 Widget、WebSocket、REST、微信公众号等）。
 
-平台内置 **AI 客服**作为基础通道，同时支持**自定义垂直通道**——预配置的领域 RAG 套餐（如专利查新、医疗咨询、法律问答），包含领域知识库、专属技能包和调优的检索策略，一行 `<script>` 即可嵌入。
+内置 **AI 客服**开箱即用；同一套能力可扩展为**垂直通道**——专利查新、医疗咨询、法律问答等领域 RAG 套餐（专属知识库、技能包、检索策略），一行 `<script>` 嵌入任意网站。
+
+## 为什么选择 MChat？
+
+| 特色 | 说明 |
+|------|------|
+| **垂直 RAG 一站式** | Bot + 混合检索（向量 + BM25 + RRF）+ 重排序 + 查询改写 + Parent-Child 分块，不是简单套壳聊天 |
+| **Skill 可落地** | 热加载 `SKILL.md`、OpenClaw 兼容、URL/zip 安装、ClawHub（如 `patent-search`） |
+| **Workflow 编排（Beta）** | ComfyUI 风格图编辑器（指针/拖拽切换）、DAG 执行、merge/审批/条件分支、频道与定时触发 |
+| **可嵌入 & 多租户** | 每通道独立 Widget 品牌；Agent、技能、知识库数据隔离 |
+| **运营友好** | 完整中英文管理后台、仪表盘、频道规则、技能定时任务 |
+| **开发友好** | FastAPI + React、Swagger、Docker Compose、MIT 开源 |
 
 ## 在线站点
 
 - [英文主站](http://mchat.chat)
 - [中文主站](https://mchat.9235.net)
 - [完整图片说明](docs/product-tour.zh.md)
-- [产品路线图](docs/roadmap.zh.md)（知识库、Widget、渠道、API、运营、权限）
+- [产品路线图](docs/roadmap.zh.md)（知识库、Widget、渠道、API、运营、权限、Workflow）
+- [Workflow 编排（Beta）](docs/workflow-orchestrator.zh.md)
 
 ## 界面预览
 
@@ -49,17 +61,24 @@ MChat 是一款**轻量、可嵌入、多租户**的垂直领域 RAG 平台，�
 
 [![渠道管理](docs/images/mchat.channel.zh.png)](docs/images/mchat.channel.zh.png)
 
+### Workflow 编排（Beta）
+
+[![工作流列表与模板](docs/images/workflow.cn.png)](docs/images/workflow.cn.png)
+
+[![工作流图编辑器](docs/images/workflow.graph.cn.png)](docs/images/workflow.graph.cn.png)
+
 ## 特性
 
 - **Bot 引擎** — 流式 LLM 推理与工具调用，支持 OpenAI、Anthropic、Google、DeepSeek、Ollama、Groq 等
-- **Skill 插件** — 支持从磁盘、zip、URL 热加载 `SKILL.md`，兼容 OpenClaw 风格技能包。可选付费技能包作为垂直通道的核心能力
-- **RAG 知识库** — 多策略分块、多 provider 嵌入（OpenAI / 本地上传 / Ollama）、混合检索（向量 + BM25 + RRF）、多 provider 重排序、查询改写、Parent-Child 上下文增强
-- **嵌入式 Widget** — 一行 `<script>` 即可为任意网站接入品牌化垂直 RAG 窗口
-- **多租户** — 多个独立通道配置，各自拥有 AI 配置、技能与知识库，数据完全隔离
-- **垂直通道** — 预配置的领域 RAG 套餐：AI 模型、System Prompt、知识库、重排序策略、技能包、Widget 外观，一键创建
+- **Skill 插件** — 从磁盘、zip、URL 热加载 `SKILL.md`，兼容 OpenClaw；付费技能包可作为垂直通道增值能力
+- **RAG 知识库** — 多策略分块、多 provider 嵌入、混合检索（向量 + BM25 + RRF）、重排序、查询改写、Parent-Child 上下文
+- **Workflow 编排（Beta）** — React Flow 图编辑器、线性/图 DAG 执行、merge/条件/审批节点、内置报表模板、手动/定时/频道触发
+- **嵌入式 Widget** — 一行 `<script>` 接入品牌化垂直 RAG 窗口
+- **多租户** — 多个独立通道配置，各自拥有 AI、技能与知识库，数据完全隔离
+- **垂直通道** — 领域模板一键创建：模型、Prompt、知识库、重排序、技能包、Widget 主题
 - **多渠道** — Web Widget、REST、WebSocket、微信公众号（钉钉/WhatsApp/Telegram 等 [规划中](docs/roadmap.zh.md#3-多渠道频道)）
-- **语音输入** — 支持 OpenAI Whisper 转写（可选本地模型）
-- **安全认证** — JWT 与 API Key 管理，RBAC 权限控制
+- **语音输入** — OpenAI Whisper 转写（可选本地模型）
+- **安全认证** — JWT、API Key、RBAC
 - **Docker 部署** — `docker compose up -d` 一键启动
 
 ## 快速开始
@@ -128,6 +147,7 @@ mchat/
 │   │       ├── bot/      # Bot 引擎 + 模型提供商
 │   │       ├── knowledge/# RAG + Milvus
 │   │       ├── skill/    # 技能系统
+│   │       ├── worker/   # 定时任务与工作流调度
 │   │       └── channels/ # 微信等频道适配
 │   └── frontend/         # React + Vite + Tailwind
 │       └── src/
@@ -162,6 +182,7 @@ mchat/
 | 知识库 | `/api/knowledge/*` | 文档与检索 |
 | Widget | `/api/widget/*` | 嵌入式聊天 |
 | 技能 | `/api/skills/*` | 技能管理与安装 |
+| 工作流 | `/api/workflows/*` | 工作流 CRUD、运行、模板（Beta） |
 | 频道 | `/api/channels/*` | 微信公众号等 |
 | 通道模板 | `/api/channels/templates/*` | 垂直通道一键创建 |
 | 语音 | `/api/speech/*` | 语音转文字 |
@@ -173,7 +194,7 @@ mchat/
 
 ## 多语言
 
-管理后台与项目主页支持**简体中文**与 **English**。语言偏好保存在 `localStorage`（`mchat_lang`），可在页头或侧栏切换。
+管理后台与项目主页支持**简体中文**与 **English**。语言偏好保存在 `localStorage`（`mchat_lang`），可在页头或侧栏切换。技能 `config.i18n` 与工作流界面按 UI 语言显示名称。
 
 ## CLI 工具
 
@@ -190,10 +211,11 @@ mchat db seed
 ## Skill 兼容说明
 
 - 支持标准 frontmatter `SKILL.md` 技能包
-- 支持 OpenClaw 风格 `SKILL.md` 多语言 blocks
+- 支持 OpenClaw 风格 `SKILL.md` 多语言 blocks（自动写入 `config.i18n`）
 - 管理后台支持 zip 上传和 URL 安装（`/api/skills/install-url`）
 - CLI 支持 URL 或 ClawHub 名称安装，例如：`mchat skill install patent-search`
 - **付费技能包**：垂直通道可绑定专属技能作为增值服务
+- **Workflow 复用**：同一 skill（如 `patent-search`）可在多个节点以不同 `command` / `dimension` 参数重复出现
 
 ## Docker 变体
 
@@ -208,7 +230,7 @@ mchat db seed
 
 **后端：** FastAPI、SQLAlchemy 2.0、Milvus、OpenAI / Anthropic SDK、JWT、Loguru  
 
-**前端：** React 19、TypeScript、Vite、Tailwind CSS 4、Zustand、react-i18next
+**前端：** React 19、TypeScript、Vite、Tailwind CSS 4、Zustand、react-i18next、React Flow
 
 ## 许可证
 

@@ -86,6 +86,15 @@ test: 测试
 chore: 构建/工具
 ```
 
+### Git 双仓（简要）
+
+| | `origin`（GitHub） | `private`（9235） |
+|--|-------------------|-------------------|
+| 分支 | `dev`（日常）+ `main`（由 `dev:main` 发布） | `main`、`feature/*`、完整 Cloud |
+| 推送 | `git push origin dev` / `git push origin dev:main` | `git push private main` 等 |
+
+克隆后执行 `make install-git-hooks`。hook 会限制：仅允许从本地 `dev` 推到 `origin/dev` 或 `origin/main`。
+
 ---
 
 ## 后端开发指引

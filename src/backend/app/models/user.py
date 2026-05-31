@@ -79,6 +79,25 @@ class User(Base):
     channels = relationship(
         "Channel", back_populates="user", lazy="selectin"
     )
+    skill_schedules = relationship(
+        "SkillSchedule", back_populates="user", lazy="selectin"
+    )
+    skill_schedule_runs = relationship(
+        "SkillScheduleRun", back_populates="user", lazy="selectin"
+    )
+    workflows = relationship("SkillWorkflow", back_populates="user", lazy="selectin")
+    workflow_runs = relationship(
+        "SkillWorkflowRun", back_populates="user", lazy="selectin"
+    )
+    channel_workflow_bindings = relationship(
+        "ChannelWorkflowBinding", back_populates="user", lazy="selectin"
+    )
+    workflow_approvals = relationship(
+        "SkillWorkflowApproval",
+        foreign_keys="SkillWorkflowApproval.user_id",
+        back_populates="user",
+        lazy="selectin",
+    )
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username={self.username}, role={self.role})>"

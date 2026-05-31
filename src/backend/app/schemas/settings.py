@@ -37,6 +37,11 @@ class AppSettingsResponse(BaseModel):
     s3_use_ssl: bool = False
     s3_public_base_url: str = ""
     s3_force_path_style: bool = True
+    worker_enabled: bool = False
+    worker_timezone: str = "Asia/Shanghai"
+    worker_log_cleanup_enabled: bool = True
+    worker_log_retention_days: int = 14
+    worker_usage_reset_enabled: bool = True
 
 
 class AppSettingsUpdate(BaseModel):
@@ -73,6 +78,11 @@ class AppSettingsUpdate(BaseModel):
     s3_use_ssl: bool | None = None
     s3_public_base_url: str | None = None
     s3_force_path_style: bool | None = None
+    worker_enabled: bool | None = None
+    worker_timezone: str | None = None
+    worker_log_cleanup_enabled: bool | None = None
+    worker_log_retention_days: int | None = Field(None, ge=1, le=3650)
+    worker_usage_reset_enabled: bool | None = None
 
 
 class AppLogResponse(BaseModel):

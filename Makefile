@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-stop cloud cloud-stop dev-backend deploy-core deploy-cloud dev-frontend build start docker-up docker-down docker-build clean test lint coverage db-init db-seed fmt
+.PHONY: help install install-git-hooks dev dev-worker dev-stop cloud cloud-stop worker dev-backend deploy-core deploy-cloud dev-frontend build start docker-up docker-down docker-build clean test lint coverage db-init db-seed fmt
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -7,8 +7,14 @@ install: ## Install all dependencies
 	cd src/backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt && pip install pytest pytest-asyncio pytest-cov httpx aiosqlite
 	cd src/frontend && npm install
 
+install-git-hooks: ## GitHub(origin) only allows local dev -> dev/main
+	@bash ops/scripts/install-git-hooks.sh
+
 dev: ## Start Core dev servers (app.main — no portal/templates API)
 	@bash ops/scripts/dev-start.sh
+
+dev-worker: ## Start Core dev servers + worker (worker default disabled otherwise)
+	@MCHAT_DEV_WITH_WORKER=1 bash ops/scripts/dev-start.sh
 
 dev-stop: ## Stop processes on ports 3001 and 5173
 	@bash ops/scripts/dev-stop.sh
@@ -21,6 +27,9 @@ cloud: ## Start Cloud (Core + signup/portal/templates) dev servers
 
 cloud-stop: ## Stop Cloud dev servers (same as dev-stop)
 	@bash ops/scripts/cloud-stop.sh
+
+worker: ## Run independent background worker (default disabled)
+	cd src/backend && source venv/bin/activate && python -m app.worker.main
 
 deploy-core: ## Deploy Core to 192.169.177.210 (http://mchat.chat)
 	@bash ops/scripts/deploy-remote-core.sh

@@ -20,6 +20,7 @@ from app.models.message import Message
 from app.services.channel_service import (
     channel_get_or_create_conversation,
     channel_resolve_ai_config,
+    channel_trigger_bound_workflows,
 )
 
 TELEGRAM_CONTACT_PREFIX = "telegram_channel:"
@@ -89,6 +90,19 @@ async def handle_telegram_webhook(
     conversation.updated_at = datetime.now(timezone.utc)
     conversation.last_seen_at = datetime.now(timezone.utc)
     await db.commit()
+    try:
+        await channel_trigger_bound_workflows(
+            db,
+            channel,
+            event_type="message",
+            event_payload={
+                "sender_id": msg.sender_id,
+                "conversation_id": conversation.id,
+                "content": content,
+            },
+        )
+    except Exception as e:
+        logger.warning(f"Telegram channel workflow trigger failed: {e}")
 
     ai_config = await channel_resolve_ai_config(db, customer)
 

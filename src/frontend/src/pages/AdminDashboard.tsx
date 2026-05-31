@@ -215,6 +215,17 @@ export function AdminDashboard() {
   }
 
   const s = stats
+  const resolutionRatePercent = overview
+    ? Math.max(
+        0,
+        Math.min(
+          overview.resolution_rate <= 1
+            ? overview.resolution_rate * 100
+            : overview.resolution_rate,
+          100,
+        ),
+      )
+    : 0
   const statCards = [
     { labelKey: 'dashboard.totalConversations', value: s.total_conversations, icon: MessageSquare, color: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30', trend: s.trends.conversations },
     { labelKey: 'dashboard.activeConversations', value: s.active_conversations, icon: Clock, color: 'text-green-600 bg-green-100 dark:bg-green-900/30', trend: 0 },
@@ -300,7 +311,7 @@ export function AdminDashboard() {
             <CardContent className="py-4">
               <p className="text-xs text-gray-500 dark:text-gray-400">{t('dashboard.resolutionRate')}</p>
               <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                {(overview.resolution_rate * 100).toFixed(1)}%
+                {resolutionRatePercent.toFixed(1)}%
               </p>
             </CardContent>
           </Card>
@@ -315,18 +326,22 @@ export function AdminDashboard() {
             </h3>
             <div className="grid gap-4 sm:grid-cols-3 text-sm">
               <div>
-                <p className="text-gray-500">检索次数</p>
-                <p className="text-xl font-semibold">{retrievalStats.total_searches}</p>
+                <p className="text-gray-500 dark:text-gray-400">检索次数</p>
+                <p className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                  {retrievalStats.total_searches}
+                </p>
               </div>
               <div>
-                <p className="text-gray-500">零结果率</p>
-                <p className="text-xl font-semibold">
+                <p className="text-gray-500 dark:text-gray-400">零结果率</p>
+                <p className="text-xl font-semibold text-gray-900 dark:text-gray-100">
                   {(retrievalStats.zero_result_rate * 100).toFixed(1)}%
                 </p>
               </div>
               <div>
-                <p className="text-gray-500">平均耗时</p>
-                <p className="text-xl font-semibold">{retrievalStats.avg_duration_ms} ms</p>
+                <p className="text-gray-500 dark:text-gray-400">平均耗时</p>
+                <p className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                  {retrievalStats.avg_duration_ms} ms
+                </p>
               </div>
             </div>
             {retrievalStats.top_zero_result_queries.length > 0 && (

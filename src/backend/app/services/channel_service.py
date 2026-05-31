@@ -1,15 +1,84 @@
 """Channel service - business logic for communication channel management."""
 
 import uuid
+import re
+import json
+from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai_config import AIConfig
 from app.models.channel import Channel
 from app.models.conversation import Conversation
 from app.models.customer import CustomerConfig
-from app.schemas.channel import ChannelCreate, ChannelResponse, ChannelUpdate
+from app.models.workflow import ChannelWorkflowBinding, SkillWorkflow
+from app.models.workflow import SkillWorkflowRun
+from app.models.setting import Setting
+from app.services.workflow_service import WorkflowService
+from app.schemas.channel import (
+    ChannelCreate,
+    ChannelResponse,
+    ChannelUpdate,
+    ChannelWorkflowBindingItem,
+    ChannelWorkflowPreviewItem,
+    ChannelWorkflowPreviewResponse,
+    ChannelWorkflowBindingResponse,
+    ChannelWorkflowBindingBundle,
+    ChannelWorkflowTemplateCreate,
+    ChannelWorkflowTemplateResponse,
+    ChannelWorkflowStatsItem,
+    ChannelWorkflowStatsResponse,
+)
+
+
+def _matches_rule(match_type: str, expr: str | None, content: str) -> bool:
+    matched, _, _, _, _, _ = _evaluate_rule(match_type, expr, content)
+    return matched
+
+
+def _evaluate_rule(
+    match_type: str,
+    expr: str | None,
+    content: str,
+) -> tuple[bool, str, str | None, str | None, str | None, tuple[int, int] | None]:
+    """Evaluate one rule and return rich debug tuple."""
+    mode = (match_type or "all").strip().lower()
+    pattern = (expr or "").strip()
+    if mode == "all":
+        return True, "all", None, None, None, None
+    if mode == "contains":
+        if not pattern:
+            return False, "contains_empty", None, None, None, None
+        idx = content.lower().find(pattern.lower())
+        if idx >= 0:
+            end = idx + len(pattern)
+            return True, "contains_hit", pattern, None, content[idx:end], (idx, end)
+        return False, "contains_miss", pattern, None, None, None
+    if mode == "regex":
+        if not pattern:
+            return False, "regex_empty", None, None, None, None
+        try:
+            m = re.search(pattern, content, flags=re.IGNORECASE)
+            is_match = m is not None
+            return (
+                is_match,
+                "regex_hit" if is_match else "regex_miss",
+                pattern,
+                None,
+                (m.group(0) if m else None),
+                (m.span() if m else None),
+            )
+        except re.error as e:
+            return False, "regex_error", pattern, str(e), None, None
+    return False, "unknown_match_type", mode, None, None, None
+
+
+def _binding_matches_content(binding: ChannelWorkflowBinding, content: str) -> bool:
+    """Return whether an event content matches binding rule."""
+    match_type = (binding.match_type or "all").strip().lower()
+    expr = (binding.match_expr or "").strip()
+    return _matches_rule(match_type, expr, content)
 
 
 async def channel_get_or_create_conversation(
@@ -68,6 +137,94 @@ async def channel_resolve_ai_config(
         select(AIConfig).where(AIConfig.is_default == True)
     )
     return result.scalar_one_or_none()
+
+
+async def channel_trigger_bound_workflows(
+    db: AsyncSession,
+    channel: Channel,
+    *,
+    event_type: str,
+    event_payload: dict,
+) -> list[str]:
+    """Execute enabled workflows bound to the given channel."""
+    result = await db.execute(
+        select(ChannelWorkflowBinding)
+        .where(
+            ChannelWorkflowBinding.channel_id == channel.id,
+            ChannelWorkflowBinding.user_id == channel.user_id,
+            ChannelWorkflowBinding.enabled == True,
+        )
+        .order_by(ChannelWorkflowBinding.priority.asc(), ChannelWorkflowBinding.created_at.asc())
+    )
+    bindings = result.scalars().all()
+    if not bindings:
+        return []
+
+    workflow_ids = [b.workflow_id for b in bindings]
+    wf_result = await db.execute(
+        select(SkillWorkflow).where(
+            SkillWorkflow.id.in_(workflow_ids),  # type: ignore[arg-type]
+            SkillWorkflow.user_id == channel.user_id,
+            SkillWorkflow.enabled == True,
+        )
+    )
+    workflow_map = {w.id: w for w in wf_result.scalars().all()}
+    service = WorkflowService(db)
+    run_ids: list[str] = []
+    message_text = str(
+        event_payload.get("content")
+        or event_payload.get("text")
+        or event_payload.get("message")
+        or ""
+    )
+    dispatch_mode = str((channel.config or {}).get("workflow_dispatch_mode") or "all")
+    dispatch_mode = dispatch_mode.strip().lower()
+    selected_ids: list[str] = []
+    for binding in bindings:
+        if not _binding_matches_content(binding, message_text):
+            continue
+        selected_ids.append(binding.workflow_id)
+        if dispatch_mode == "first_match":
+            break
+    for workflow_id in selected_ids:
+        workflow = workflow_map.get(workflow_id)
+        if workflow is None:
+            continue
+        run = await service.execute_workflow(
+            workflow=workflow,
+            trigger_type="channel",
+            input_payload={
+                "event_type": event_type,
+                "channel": {
+                    "id": channel.id,
+                    "name": channel.name,
+                    "type": channel.channel_type,
+                },
+                "event": event_payload,
+            },
+        )
+        run_ids.append(run.id)
+    await db.commit()
+    return run_ids
+
+
+def _preview_select_workflow_ids(
+    *,
+    bindings: list[ChannelWorkflowBinding | ChannelWorkflowBindingItem],
+    content: str,
+    dispatch_mode: str,
+) -> list[str]:
+    selected_ids: list[str] = []
+    for binding in bindings:
+        match_type = (binding.match_type or "all").strip().lower()
+        match_expr = getattr(binding, "match_expr", None)
+        matched, _, _, _, _, _ = _evaluate_rule(match_type, match_expr, content)
+        if not matched:
+            continue
+        selected_ids.append(binding.workflow_id)
+        if dispatch_mode == "first_match":
+            break
+    return selected_ids
 
 
 class ChannelService:
@@ -311,3 +468,391 @@ class ChannelService:
         if webhook_url:
             parts.append("Webhook URL 已配置")
         return {"ok": True, "message": "；".join(parts) + "。请在钉钉开放平台配置出站消息 URL。"}
+
+    async def list_channel_workflow_bindings(
+        self, *, channel_id: str, user_id: str
+    ) -> list[ChannelWorkflowBindingResponse]:
+        channel = await self.db.execute(
+            select(Channel).where(Channel.id == channel_id, Channel.user_id == user_id)
+        )
+        if channel.scalar_one_or_none() is None:
+            return []
+
+        result = await self.db.execute(
+            select(ChannelWorkflowBinding)
+            .where(
+                ChannelWorkflowBinding.channel_id == channel_id,
+                ChannelWorkflowBinding.user_id == user_id,
+            )
+            .order_by(
+                ChannelWorkflowBinding.priority.asc(),
+                ChannelWorkflowBinding.created_at.asc(),
+            )
+        )
+        rows = result.scalars().all()
+        wf_ids = [r.workflow_id for r in rows]
+        wf_map: dict[str, SkillWorkflow] = {}
+        if wf_ids:
+            wf_result = await self.db.execute(
+                select(SkillWorkflow).where(SkillWorkflow.id.in_(wf_ids))  # type: ignore[arg-type]
+            )
+            wf_map = {w.id: w for w in wf_result.scalars().all()}
+        return [
+            ChannelWorkflowBindingResponse(
+                id=row.id,
+                channel_id=row.channel_id,
+                workflow_id=row.workflow_id,
+                workflow_name=(wf_map.get(row.workflow_id).name if wf_map.get(row.workflow_id) else ""),
+                enabled=row.enabled,
+                priority=row.priority,
+                match_type=row.match_type,
+                match_expr=row.match_expr,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    async def replace_channel_workflow_bindings(
+        self,
+        *,
+        channel_id: str,
+        user_id: str,
+        bindings: list[ChannelWorkflowBindingItem],
+    ) -> list[ChannelWorkflowBindingResponse]:
+        channel_result = await self.db.execute(
+            select(Channel).where(Channel.id == channel_id, Channel.user_id == user_id)
+        )
+        channel = channel_result.scalar_one_or_none()
+        if channel is None:
+            return []
+
+        wf_ids = [b.workflow_id for b in bindings]
+        if wf_ids:
+            wf_result = await self.db.execute(
+                select(SkillWorkflow).where(
+                    SkillWorkflow.id.in_(wf_ids),  # type: ignore[arg-type]
+                    SkillWorkflow.user_id == user_id,
+                )
+            )
+            valid_ids = {w.id for w in wf_result.scalars().all()}
+            missing = [wid for wid in wf_ids if wid not in valid_ids]
+            if missing:
+                raise ValueError(f"workflow not found: {missing[0]}")
+
+        existing = await self.db.execute(
+            select(ChannelWorkflowBinding).where(
+                ChannelWorkflowBinding.channel_id == channel_id,
+                ChannelWorkflowBinding.user_id == user_id,
+            )
+        )
+        for row in existing.scalars().all():
+            await self.db.delete(row)
+        await self.db.flush()
+
+        for item in bindings:
+            row = ChannelWorkflowBinding(
+                user_id=user_id,
+                channel_id=channel_id,
+                workflow_id=item.workflow_id,
+                enabled=item.enabled,
+                priority=item.priority,
+                match_type=item.match_type,
+                match_expr=(item.match_expr.strip() if item.match_expr else None),
+            )
+            self.db.add(row)
+        await self.db.flush()
+
+        return await self.list_channel_workflow_bindings(
+            channel_id=channel_id, user_id=user_id
+        )
+
+    async def preview_channel_workflow_bindings(
+        self,
+        *,
+        channel_id: str,
+        user_id: str,
+        content: str,
+        event_type: str = "message",
+        dispatch_mode: str | None = None,
+        bindings_override: list[ChannelWorkflowBindingItem] | None = None,
+    ) -> ChannelWorkflowPreviewResponse:
+        channel_result = await self.db.execute(
+            select(Channel).where(Channel.id == channel_id, Channel.user_id == user_id)
+        )
+        channel = channel_result.scalar_one_or_none()
+        if channel is None:
+            raise ValueError("channel not found")
+
+        if bindings_override is not None:
+            bindings: list[ChannelWorkflowBinding | ChannelWorkflowBindingItem] = sorted(
+                bindings_override, key=lambda x: x.priority
+            )
+        else:
+            result = await self.db.execute(
+                select(ChannelWorkflowBinding)
+                .where(
+                    ChannelWorkflowBinding.channel_id == channel_id,
+                    ChannelWorkflowBinding.user_id == user_id,
+                    ChannelWorkflowBinding.enabled == True,
+                )
+                .order_by(ChannelWorkflowBinding.priority.asc(), ChannelWorkflowBinding.created_at.asc())
+            )
+            bindings = result.scalars().all()
+
+        workflow_ids = [b.workflow_id for b in bindings]
+        wf_map: dict[str, SkillWorkflow] = {}
+        if workflow_ids:
+            wf_result = await self.db.execute(
+                select(SkillWorkflow).where(
+                    SkillWorkflow.id.in_(workflow_ids),  # type: ignore[arg-type]
+                    SkillWorkflow.user_id == user_id,
+                )
+            )
+            wf_map = {w.id: w for w in wf_result.scalars().all()}
+
+        mode = (dispatch_mode or str((channel.config or {}).get("workflow_dispatch_mode") or "all")).strip().lower()
+        if mode not in {"all", "first_match"}:
+            mode = "all"
+        selected_ids = _preview_select_workflow_ids(
+            bindings=bindings,
+            content=content,
+            dispatch_mode=mode,
+        )
+
+        items: list[ChannelWorkflowPreviewItem] = []
+        for binding in bindings:
+            workflow = wf_map.get(binding.workflow_id)
+            workflow_name = workflow.name if workflow else ""
+            matched, reason_code, reason_detail, reason_error, matched_text, matched_span = _evaluate_rule(
+                (binding.match_type or "all"),
+                getattr(binding, "match_expr", None),
+                content,
+            )
+            selected = binding.workflow_id in selected_ids
+            if matched and not selected and mode == "first_match":
+                reason_code = "matched_but_skipped"
+                first_selected_id = selected_ids[0] if selected_ids else None
+                if first_selected_id and wf_map.get(first_selected_id):
+                    reason_detail = wf_map[first_selected_id].name
+                else:
+                    reason_detail = first_selected_id
+            item = ChannelWorkflowPreviewItem(
+                workflow_id=binding.workflow_id,
+                workflow_name=workflow_name,
+                priority=getattr(binding, "priority", 100),
+                match_type=(binding.match_type or "all"),
+                match_expr=getattr(binding, "match_expr", None),
+                matched=matched,
+                selected=selected,
+                reason_code=reason_code,
+                reason_detail=reason_detail,
+                error=reason_error,
+                matched_text=matched_text,
+                match_start=(matched_span[0] if matched_span else None),
+                match_end=(matched_span[1] if matched_span else None),
+            )
+            items.append(item)
+
+        return ChannelWorkflowPreviewResponse(
+            event_type=event_type,
+            dispatch_mode=mode,
+            matched_workflow_ids=selected_ids,
+            evaluations=items,
+        )
+
+    async def export_channel_workflow_bundle(
+        self, *, channel_id: str, user_id: str
+    ) -> ChannelWorkflowBindingBundle:
+        channel_result = await self.db.execute(
+            select(Channel).where(Channel.id == channel_id, Channel.user_id == user_id)
+        )
+        channel = channel_result.scalar_one_or_none()
+        if channel is None:
+            raise ValueError("channel not found")
+        bindings = await self.list_channel_workflow_bindings(
+            channel_id=channel_id,
+            user_id=user_id,
+        )
+        items = [
+            ChannelWorkflowBindingItem(
+                workflow_id=b.workflow_id,
+                enabled=b.enabled,
+                priority=b.priority,
+                match_type=b.match_type,
+                match_expr=b.match_expr,
+            )
+            for b in bindings
+        ]
+        dispatch_mode = str((channel.config or {}).get("workflow_dispatch_mode") or "all")
+        return ChannelWorkflowBindingBundle(
+            dispatch_mode=dispatch_mode,
+            bindings=items,
+        )
+
+    async def import_channel_workflow_bundle(
+        self,
+        *,
+        channel_id: str,
+        user_id: str,
+        bundle: ChannelWorkflowBindingBundle,
+    ) -> list[ChannelWorkflowBindingResponse]:
+        channel_result = await self.db.execute(
+            select(Channel).where(Channel.id == channel_id, Channel.user_id == user_id)
+        )
+        channel = channel_result.scalar_one_or_none()
+        if channel is None:
+            raise ValueError("channel not found")
+        config = dict(channel.config or {})
+        config["workflow_dispatch_mode"] = bundle.dispatch_mode
+        channel.config = config
+        rows = await self.replace_channel_workflow_bindings(
+            channel_id=channel_id,
+            user_id=user_id,
+            bindings=bundle.bindings,
+        )
+        await self.db.flush()
+        return rows
+
+    async def channel_workflow_stats(
+        self, *, channel_id: str, user_id: str, days: int = 7
+    ) -> ChannelWorkflowStatsResponse:
+        safe_days = max(1, min(days, 90))
+        bindings = await self.list_channel_workflow_bindings(
+            channel_id=channel_id, user_id=user_id
+        )
+        wf_ids = [b.workflow_id for b in bindings]
+        if not wf_ids:
+            return ChannelWorkflowStatsResponse(channel_id=channel_id, days=safe_days, items=[])
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=safe_days)
+        stmt = (
+            select(
+                SkillWorkflowRun.workflow_id,
+                func.count(SkillWorkflowRun.id).label("total_runs"),
+                func.sum(case((SkillWorkflowRun.status == "success", 1), else_=0)).label("success_runs"),
+                func.sum(case((SkillWorkflowRun.status == "failed", 1), else_=0)).label("failed_runs"),
+                func.max(SkillWorkflowRun.started_at).label("last_run_at"),
+            )
+            .where(
+                SkillWorkflowRun.user_id == user_id,
+                SkillWorkflowRun.trigger_type == "channel",
+                SkillWorkflowRun.started_at >= cutoff,
+                SkillWorkflowRun.workflow_id.in_(wf_ids),  # type: ignore[arg-type]
+            )
+            .group_by(SkillWorkflowRun.workflow_id)
+        )
+        result = await self.db.execute(stmt)
+        stats_rows = result.all()
+        wf_map = {b.workflow_id: b.workflow_name for b in bindings}
+        items = [
+            ChannelWorkflowStatsItem(
+                workflow_id=row.workflow_id,
+                workflow_name=wf_map.get(row.workflow_id, ""),
+                total_runs=int(row.total_runs or 0),
+                success_runs=int(row.success_runs or 0),
+                failed_runs=int(row.failed_runs or 0),
+                last_run_at=row.last_run_at,
+            )
+            for row in stats_rows
+        ]
+        items.sort(key=lambda x: x.total_runs, reverse=True)
+        return ChannelWorkflowStatsResponse(channel_id=channel_id, days=safe_days, items=items)
+
+    async def list_workflow_templates(self, *, user_id: str) -> list[ChannelWorkflowTemplateResponse]:
+        key = f"channel_workflow_templates:{user_id}"
+        row = (await self.db.execute(select(Setting).where(Setting.key == key))).scalar_one_or_none()
+        data = []
+        if row and row.value:
+            try:
+                data = json.loads(row.value)
+            except Exception:
+                data = []
+        templates: list[ChannelWorkflowTemplateResponse] = []
+        for item in data if isinstance(data, list) else []:
+            try:
+                templates.append(ChannelWorkflowTemplateResponse.model_validate(item))
+            except Exception:
+                continue
+        return templates
+
+    async def save_workflow_template(
+        self, *, user_id: str, data: ChannelWorkflowTemplateCreate
+    ) -> ChannelWorkflowTemplateResponse:
+        templates = await self.list_workflow_templates(user_id=user_id)
+        now = datetime.now(timezone.utc)
+        item = ChannelWorkflowTemplateResponse(
+            id=str(uuid.uuid4()),
+            name=data.name.strip(),
+            description=(data.description or "").strip() or None,
+            dispatch_mode=data.dispatch_mode,
+            bindings=data.bindings,
+            usage_count=0,
+            created_at=now,
+            updated_at=now,
+        )
+        templates.append(item)
+        key = f"channel_workflow_templates:{user_id}"
+        row = (await self.db.execute(select(Setting).where(Setting.key == key))).scalar_one_or_none()
+        serialized = json.dumps([t.model_dump(mode="json") for t in templates], ensure_ascii=False)
+        if row is None:
+            row = Setting(key=key, value=serialized, category="workflow_templates")
+            self.db.add(row)
+        else:
+            row.value = serialized
+            row.category = "workflow_templates"
+        await self.db.flush()
+        return item
+
+    async def delete_workflow_template(self, *, user_id: str, template_id: str) -> bool:
+        templates = await self.list_workflow_templates(user_id=user_id)
+        next_templates = [t for t in templates if t.id != template_id]
+        if len(next_templates) == len(templates):
+            return False
+        key = f"channel_workflow_templates:{user_id}"
+        row = (await self.db.execute(select(Setting).where(Setting.key == key))).scalar_one_or_none()
+        serialized = json.dumps([t.model_dump(mode="json") for t in next_templates], ensure_ascii=False)
+        if row is None:
+            row = Setting(key=key, value=serialized, category="workflow_templates")
+            self.db.add(row)
+        else:
+            row.value = serialized
+            row.category = "workflow_templates"
+        await self.db.flush()
+        return True
+
+    async def apply_workflow_template_to_channel(
+        self,
+        *,
+        channel_id: str,
+        user_id: str,
+        template_id: str,
+    ) -> list[ChannelWorkflowBindingResponse]:
+        templates = await self.list_workflow_templates(user_id=user_id)
+        template = next((t for t in templates if t.id == template_id), None)
+        if template is None:
+            raise ValueError("template not found")
+        rows = await self.import_channel_workflow_bundle(
+            channel_id=channel_id,
+            user_id=user_id,
+            bundle=ChannelWorkflowBindingBundle(
+                dispatch_mode=template.dispatch_mode,
+                bindings=template.bindings,
+            ),
+        )
+        # update usage counter in settings payload
+        for t in templates:
+            if t.id == template_id:
+                t.usage_count += 1
+                t.updated_at = datetime.now(timezone.utc)
+        key = f"channel_workflow_templates:{user_id}"
+        row = (await self.db.execute(select(Setting).where(Setting.key == key))).scalar_one_or_none()
+        serialized = json.dumps([t.model_dump(mode="json") for t in templates], ensure_ascii=False)
+        if row is None:
+            row = Setting(key=key, value=serialized, category="workflow_templates")
+            self.db.add(row)
+        else:
+            row.value = serialized
+            row.category = "workflow_templates"
+        await self.db.flush()
+        return rows

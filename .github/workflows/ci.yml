@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   backend-test:
@@ -51,14 +51,14 @@ jobs:
       - name: Install dependencies
         run: cd src/frontend && npm ci
 
-      - name: Type check
-        run: cd src/frontend && npx tsc --noEmit
+      - name: Type check (Core)
+        run: cd src/frontend && npx tsc -p tsconfig.core.json --noEmit
 
       - name: Lint
         run: cd src/frontend && npm run lint
 
-      - name: Build
-        run: cd src/frontend && npm run build
+      - name: Build (Core)
+        run: cd src/frontend && VITE_MCHAT_EDITION=core npm run build:core
 
   docker-build:
     runs-on: ubuntu-latest

@@ -205,6 +205,12 @@ def apply_schema_patches(conn: Connection) -> list[str]:
         cc_patches = [
             ("plan", "VARCHAR(20) NOT NULL DEFAULT 'free'"),
             ("trial_ends_at", "DATETIME NULL"),
+            ("pre_chat_fields", "JSON NULL" if dialect == "mysql" else "TEXT NULL"),
+            ("subscription_ends_at", "DATETIME NULL"),
+            (
+                "skill_bindings",
+                "JSON NULL" if dialect == "mysql" else "TEXT NULL",
+            ),
             ("template_id", "VARCHAR(36) NULL"),
             ("channel_category", "VARCHAR(50) NOT NULL DEFAULT 'customer_service'"),
             ("usage_messages_month", "INTEGER NOT NULL DEFAULT 0"),
@@ -322,6 +328,134 @@ def apply_schema_patches(conn: Connection) -> list[str]:
                     text(f"ALTER TABLE document_chunks ADD COLUMN {col_name} {col_def}")
                 )
                 applied.append(f"document_chunks.{col_name}")
+
+    if "skill_schedules" in inspect(conn).get_table_names():
+        cols = _column_names(conn, "skill_schedules")
+        if "workflow_id" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE skill_schedules "
+                    "ADD COLUMN workflow_id VARCHAR(36) NULL"
+                )
+            )
+            applied.append("skill_schedules.workflow_id")
+        if "target_type" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE skill_schedules "
+                    "ADD COLUMN target_type VARCHAR(20) NOT NULL DEFAULT 'skill'"
+                )
+            )
+            applied.append("skill_schedules.target_type")
+        # allow workflow schedules without skill_id
+        try:
+            if dialect == "mysql":
+                conn.execute(
+                    text(
+                        "ALTER TABLE skill_schedules "
+                        "MODIFY COLUMN skill_id VARCHAR(36) NULL"
+                    )
+                )
+                applied.append("skill_schedules.skill_id_nullable")
+            elif dialect == "postgresql":
+                conn.execute(
+                    text(
+                        "ALTER TABLE skill_schedules "
+                        "ALTER COLUMN skill_id DROP NOT NULL"
+                    )
+                )
+                applied.append("skill_schedules.skill_id_nullable")
+        except Exception:
+            pass
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX idx_skill_schedules_workflow_id "
+                    "ON skill_schedules(workflow_id)"
+                )
+            )
+        except Exception:
+            pass
+
+    if "skill_schedule_runs" in inspect(conn).get_table_names():
+        cols = _column_names(conn, "skill_schedule_runs")
+        run_patches = [
+            ("workflow_id", "VARCHAR(36) NULL"),
+            ("target_type", "VARCHAR(20) NOT NULL DEFAULT 'skill'"),
+            ("target_name", "VARCHAR(200) NULL"),
+        ]
+        for col_name, col_def in run_patches:
+            if col_name not in cols:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE skill_schedule_runs "
+                        f"ADD COLUMN {col_name} {col_def}"
+                    )
+                )
+                applied.append(f"skill_schedule_runs.{col_name}")
+        try:
+            if dialect == "mysql":
+                conn.execute(
+                    text(
+                        "ALTER TABLE skill_schedule_runs "
+                        "MODIFY COLUMN skill_id VARCHAR(36) NULL"
+                    )
+                )
+                applied.append("skill_schedule_runs.skill_id_nullable")
+            elif dialect == "postgresql":
+                conn.execute(
+                    text(
+                        "ALTER TABLE skill_schedule_runs "
+                        "ALTER COLUMN skill_id DROP NOT NULL"
+                    )
+                )
+                applied.append("skill_schedule_runs.skill_id_nullable")
+        except Exception:
+            pass
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX idx_skill_schedule_runs_workflow_id "
+                    "ON skill_schedule_runs(workflow_id)"
+                )
+            )
+        except Exception:
+            pass
+
+    if "channel_workflow_bindings" not in inspect(conn).get_table_names():
+        Base.metadata.create_all(conn)
+    else:
+        cols = _column_names(conn, "channel_workflow_bindings")
+        binding_patches = [
+            ("match_type", "VARCHAR(20) NOT NULL DEFAULT 'all'"),
+            ("match_expr", "TEXT NULL"),
+        ]
+        for col_name, col_def in binding_patches:
+            if col_name not in cols:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE channel_workflow_bindings "
+                        f"ADD COLUMN {col_name} {col_def}"
+                    )
+                )
+                applied.append(f"channel_workflow_bindings.{col_name}")
+
+    if "skill_workflow_approvals" in inspect(conn).get_table_names():
+        cols = _column_names(conn, "skill_workflow_approvals")
+        approval_patches = [
+            ("comment", "TEXT NULL"),
+            ("approved_by", "VARCHAR(36) NULL"),
+            ("decision_payload", "JSON NULL" if dialect == "mysql" else "TEXT NULL"),
+        ]
+        for col_name, col_def in approval_patches:
+            if col_name not in cols:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE skill_workflow_approvals "
+                        f"ADD COLUMN {col_name} {col_def}"
+                    )
+                )
+                applied.append(f"skill_workflow_approvals.{col_name}")
 
     # Ensure any new tables from models exist
     Base.metadata.create_all(conn)

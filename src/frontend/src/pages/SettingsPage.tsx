@@ -37,6 +37,11 @@ interface AppSettings {
   s3_use_ssl: boolean
   s3_public_base_url: string
   s3_force_path_style: boolean
+  worker_enabled: boolean
+  worker_timezone: string
+  worker_log_cleanup_enabled: boolean
+  worker_log_retention_days: number
+  worker_usage_reset_enabled: boolean
 }
 
 interface AppLogResponse {
@@ -93,6 +98,11 @@ export function SettingsPage() {
     s3_use_ssl: false,
     s3_public_base_url: '',
     s3_force_path_style: true,
+    worker_enabled: false,
+    worker_timezone: 'Asia/Shanghai',
+    worker_log_cleanup_enabled: true,
+    worker_log_retention_days: 14,
+    worker_usage_reset_enabled: true,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -161,6 +171,7 @@ export function SettingsPage() {
     { id: 'storage', label: t('settings.tabStorage') },
     { id: 'api', label: t('settings.tabApi') },
     { id: 'security', label: t('settings.tabSecurity') },
+    { id: 'worker', label: t('settings.tabWorker') },
     { id: 'logs', label: t('settings.tabLogs') },
   ]
 
@@ -557,6 +568,84 @@ export function SettingsPage() {
                       : t('settings.emptyLogs')}
                 </pre>
               </div>
+            </div>
+          </TabPanel>
+
+          <TabPanel id="worker" activeTab={activeTab}>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {t('settings.workerEnabled')}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('settings.workerEnabledHint')}
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.worker_enabled}
+                  onChange={(checked) =>
+                    setSettings({ ...settings, worker_enabled: checked })
+                  }
+                />
+              </div>
+
+              <Input
+                label={t('settings.workerTimezone')}
+                value={settings.worker_timezone}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setSettings({ ...settings, worker_timezone: e.target.value })
+                }
+                placeholder="Asia/Shanghai"
+              />
+
+              <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-700 pt-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {t('settings.workerUsageResetEnabled')}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('settings.workerUsageResetEnabledHint')}
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.worker_usage_reset_enabled}
+                  onChange={(checked) =>
+                    setSettings({ ...settings, worker_usage_reset_enabled: checked })
+                  }
+                />
+              </div>
+
+              <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-700 pt-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {t('settings.workerLogCleanupEnabled')}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('settings.workerLogCleanupEnabledHint')}
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.worker_log_cleanup_enabled}
+                  onChange={(checked) =>
+                    setSettings({ ...settings, worker_log_cleanup_enabled: checked })
+                  }
+                />
+              </div>
+
+              <Input
+                label={t('settings.workerLogRetentionDays')}
+                type="number"
+                min={1}
+                max={3650}
+                value={settings.worker_log_retention_days}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setSettings({
+                    ...settings,
+                    worker_log_retention_days: parseInt(e.target.value, 10) || 14,
+                  })
+                }
+              />
             </div>
           </TabPanel>
         </CardContent>

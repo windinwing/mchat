@@ -14,6 +14,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { Spinner } from '@/components/ui/Spinner'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
+import { ThemeToggle } from '@/components/common/ThemeToggle'
 import { useState } from 'react'
 
 const navItems = [
@@ -64,7 +65,10 @@ export function UserLayout({ children }: { children: ReactNode }) {
         <span className="font-semibold text-gray-900 dark:text-gray-100">
           MChat
         </span>
-        <LanguageSwitcher />
+        <div className="flex items-center gap-2">
+          <LanguageSwitcher />
+          <ThemeToggle />
+        </div>
       </div>
 
       {/* Mobile sidebar overlay */}
@@ -152,6 +156,9 @@ function SidebarContent({
         <div className="flex items-center gap-2 px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
           <Settings className="w-4 h-4" />
           {user?.display_name || user?.username}
+        </div>
+        <div className="px-3 pb-2">
+          <ThemeToggle className="w-full rounded-lg" />
         </div>
         <button
           onClick={onLogout}

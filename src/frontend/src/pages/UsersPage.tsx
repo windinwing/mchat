@@ -155,7 +155,7 @@ export function UsersPage() {
           <Button
             leftIcon={<Plus className="w-4 h-4" />}
             onClick={() => setShowCreate((v) => !v)}
-            className="w-[120px]"
+            className="w-[150px]"
           >
             {t('users.createUser')}
           </Button>

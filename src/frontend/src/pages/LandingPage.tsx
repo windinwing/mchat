@@ -12,23 +12,33 @@ import {
   Sparkles,
   Zap,
   Code2,
+  Workflow,
 } from 'lucide-react'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
+import { ThemeToggle } from '@/components/common/ThemeToggle'
+import { useAuthStore } from '@/stores/auth'
+import { landingScreenshot, LANDING_PREVIEW_CARDS } from '@/lib/landingImages'
 
 const GITHUB_URL = 'https://github.com/windinwing/mchat'
 
-const featureIcons = [Bot, BookOpen, Puzzle, MessageCircle, Globe, Layers] as const
+const featureIcons = [Bot, BookOpen, Puzzle, Workflow, MessageCircle, Globe, Layers] as const
 const featureKeys = [
   'featureBot',
   'featureRag',
   'featureSkill',
+  'featureWorkflow',
   'featureWidget',
   'featureChannel',
   'featureTenant',
 ] as const
 
 export function LandingPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const { isAuthenticated, user } = useAuthStore()
+  const adminTarget =
+    isAuthenticated
+      ? (user?.role === 'user' ? '/portal/dashboard' : '/admin')
+      : '/admin/login'
 
   return (
     <div className="min-h-screen bg-[#fafbfc] dark:bg-gray-950 text-gray-900 dark:text-gray-100">
@@ -42,6 +52,9 @@ export function LandingPage() {
             <span className="text-lg font-bold tracking-tight">MChat</span>
           </Link>
           <nav className="hidden sm:flex items-center gap-6 text-sm text-gray-600 dark:text-gray-400">
+            <a href="#preview" className="hover:text-primary-600 transition-colors">
+              {t('landing.navPreview')}
+            </a>
             <a href="#features" className="hover:text-primary-600 transition-colors">
               {t('landing.navFeatures')}
             </a>
@@ -66,6 +79,7 @@ export function LandingPage() {
           </nav>
           <div className="flex items-center gap-3">
             <LanguageSwitcher />
+            <ThemeToggle />
             <Link
               to="/showcase"
               className="hidden sm:inline-flex text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
@@ -81,7 +95,7 @@ export function LandingPage() {
               </Link>
             )}
             <Link
-              to="/admin/login"
+              to={adminTarget}
               className="inline-flex text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
             >
               {t('landing.ctaAdmin')}
@@ -147,6 +161,57 @@ export function LandingPage() {
                 <p className="text-2xl sm:text-3xl font-bold text-primary-600">{s.v}</p>
                 <p className="text-xs sm:text-sm text-gray-500 mt-1">{t(s.k)}</p>
               </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Product preview */}
+      <section id="preview" className="py-20 sm:py-24 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/40">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="text-center max-w-3xl mx-auto mb-12">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 text-xs font-medium mb-4">
+              {t('landing.previewBadge')}
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-bold">{t('landing.previewTitle')}</h2>
+            <p className="mt-4 text-gray-600 dark:text-gray-400 leading-relaxed">{t('landing.previewSubtitle')}</p>
+            <ul className="mt-6 text-left sm:text-center space-y-2 text-sm text-gray-600 dark:text-gray-400">
+              {(['previewPoint1', 'previewPoint2', 'previewPoint3'] as const).map((key) => (
+                <li key={key}>{t(`landing.${key}`)}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-xl bg-gray-50 dark:bg-gray-800/50 mb-8">
+            <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-500 dark:text-gray-400">
+              {t('landing.previewFrameTitle')}
+            </div>
+            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="block">
+              <img
+                src={landingScreenshot('home.zone', i18n.language)}
+                alt={t('landing.previewMainAlt')}
+                className="w-full h-auto"
+                loading="lazy"
+              />
+            </a>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {LANDING_PREVIEW_CARDS.map(({ key, image }) => (
+              <figure
+                key={key}
+                className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-900 shadow-sm hover:shadow-md transition-shadow"
+              >
+                <img
+                  src={landingScreenshot(image, i18n.language)}
+                  alt={t(`landing.${key}`)}
+                  className="w-full h-auto aspect-video object-cover object-top"
+                  loading="lazy"
+                />
+                <figcaption className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 border-t border-gray-100 dark:border-gray-800">
+                  {t(`landing.${key}`)}
+                </figcaption>
+              </figure>
             ))}
           </div>
         </div>
@@ -247,7 +312,7 @@ docker compose -f ops/docker/docker-compose.lite.yml up -d
             <a href={GITHUB_URL} className="hover:text-primary-600" target="_blank" rel="noreferrer">
               {t('common.github')}
             </a>
-            <Link to="/admin/login" className="hover:text-primary-600">
+            <Link to={adminTarget} className="hover:text-primary-600">
               {t('common.admin')}
             </Link>
             <Link to="/showcase" className="hover:text-primary-600">

@@ -43,6 +43,13 @@ class Skill(Base):
 
     # Relationships
     user = relationship("User", back_populates="skills")
+    schedules = relationship(
+        "SkillSchedule",
+        back_populates="skill",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    workflow_steps = relationship("SkillWorkflowStep", back_populates="skill", lazy="selectin")
 
     def __repr__(self) -> str:
         return (

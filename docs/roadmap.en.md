@@ -159,8 +159,35 @@ Embedded multi-tenant chat + RAG + Skills also fits internal KB assistants, docs
 | P1 | Channel adapters (DingTalk, Telegram, WhatsApp) | UI reserved, user demand |
 | P1 | Public API docs | Lower integration barrier |
 | P1 | Widget UX (pre-chat forms, CSAT, unread badge) | Product polish |
+| P1 | Workflow run replay & observability | Beta → production hardening |
 | P2 | Analytics depth | Enterprise procurement |
 | P2 | Fine-grained RBAC | Team scale requirement |
 | P3 | Use-case templates & tour content | Acquisition & differentiation |
 
 Discuss on [GitHub Issues](https://github.com/windinwing/mchat/issues).
+
+---
+
+## 8. Workflow orchestration (Beta)
+
+### Current
+
+| Capability | Notes |
+|------------|-------|
+| Linear flows | Ordered Skill steps, payload templates, step logs |
+| Graph DAG | React Flow editor + executor (condition / parallel / approval / merge) |
+| Triggers | Manual run, skill schedules, channel message rules |
+| Operations | Rule preview, import/export, hit stats, approval queue |
+| Templates | Patent multi-dimension report (zh/en), skill_name auto-bind |
+| Alerts | Failure/rejection webhook (`WORKFLOW_ALERT_WEBHOOK_URL`) |
+
+See [workflow-orchestrator.zh.md](workflow-orchestrator.zh.md) for DSL and template details.
+
+### Planned
+
+| Area | Notes |
+|------|-------|
+| Run replay | Highlight node status on the canvas during/after runs |
+| Node library | Search, categories, ComfyUI-style canvas tools (pointer/pan) |
+| Versioning | Publish/rollback, change audit |
+| Observability | Run metrics, slow-node analysis |
