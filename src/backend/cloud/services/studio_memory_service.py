@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from app.core.config import settings
 from cloud.config import cloud_settings
 from cloud.services.studio_memory_index import (
     MemorySearchHit,
@@ -53,7 +52,7 @@ class StudioMemoryService:
         return cls(str(conversation.user_id), str(conversation.customer_id))
 
     def _today_key(self) -> str:
-        tz_name = settings.worker_timezone or "UTC"
+        tz_name = cloud_settings.studio_memory_timezone or "UTC"
         try:
             tz = ZoneInfo(tz_name)
         except Exception:
@@ -157,7 +156,7 @@ class StudioMemoryService:
             memory_md = memory_md[:max_chars] + "\n\n…(truncated for prompt budget)"
 
         days = max(1, int(cloud_settings.studio_memory_daily_bootstrap_days or 2))
-        tz_name = settings.worker_timezone or "UTC"
+        tz_name = cloud_settings.studio_memory_timezone or "UTC"
         try:
             tz = ZoneInfo(tz_name)
         except Exception:

@@ -17,6 +17,7 @@ class CloudSettings(BaseSettings):
     studio_workspace_dir: str = "../../data/studio"
     studio_memory_bootstrap_max_chars: int = 8000
     studio_memory_daily_bootstrap_days: int = 2
+    studio_memory_timezone: str = "UTC"
 
     @property
     def studio_workspace_path(self) -> Path:
