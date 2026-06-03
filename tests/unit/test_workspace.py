@@ -74,6 +74,24 @@ def test_build_workspace_context_pro_container(workspace_root, monkeypatch):
     assert ctx.container_name is not None
 
 
+def test_build_workspace_context_user_denied(workspace_root, monkeypatch):
+    monkeypatch.setattr(settings, "workspace_container_enabled", True)
+    customer = CustomerConfig(
+        id="ch-deny",
+        name="Denied",
+        user_id="owner-3",
+        plan="pro",
+        workspace_mode="container",
+        enabled=True,
+    )
+    ctx = build_workspace_context(
+        "owner-3",
+        customer_config=customer,
+        user_container_allowed=False,
+    )
+    assert ctx.mode.value == "local"
+
+
 def test_legacy_studio_path(monkeypatch, tmp_path):
     legacy = tmp_path / "legacy-studio"
     monkeypatch.setattr(settings, "workspace_legacy_studio_dir", str(legacy))

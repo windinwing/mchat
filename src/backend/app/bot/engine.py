@@ -646,10 +646,20 @@ async def _execute_tool(
 
     ws_ctx = None
     if user_id:
+        user_container_allowed = None
+        from sqlalchemy import select
+
+        from app.models.user import User
+
+        user_row = await db_session.execute(select(User).where(User.id == user_id))
+        owner = user_row.scalar_one_or_none()
+        if owner is not None:
+            user_container_allowed = owner.workspace_container_allowed
         ws_ctx = build_workspace_context(
             user_id,
             customer_config=customer_config,
             channel_id=channel_id,
+            user_container_allowed=user_container_allowed,
         )
 
     for skill in skills:

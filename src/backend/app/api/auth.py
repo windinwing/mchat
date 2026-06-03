@@ -10,7 +10,6 @@ from app.models.user import User
 from app.schemas.auth import (
     BootstrapResponse,
     ChangePasswordRequest,
-    SetPasswordRequest,
     CreateUserRequest,
     LoginRequest,
     RegisterRequest,
@@ -87,10 +86,9 @@ async def register(
 @router.get("/me", response_model=UserResponse)
 async def get_me(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> UserResponse:
+) -> User:
     """Get current authenticated user info."""
-    return AuthService(db).user_response(current_user)
+    return current_user
 
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
@@ -105,21 +103,6 @@ async def change_password(
         current_user,
         request.current_password,
         request.new_password,
-    )
-
-
-@router.post("/set-password", status_code=status.HTTP_204_NO_CONTENT)
-async def set_password(
-    request: SetPasswordRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    """Set password (portal phone users without current; admin still needs current)."""
-    auth_service = AuthService(db)
-    await auth_service.set_password(
-        current_user,
-        request.new_password,
-        request.current_password,
     )
 
 
@@ -158,12 +141,19 @@ async def update_user(
 ) -> User:
     """Update user role or reset password (admin only)."""
     auth_service = AuthService(db)
-    return await auth_service.update_user(
+    fields = request.model_dump(exclude_unset=True)
+    set_policy = "workspace_container_allowed" in fields
+    if set_policy:
+        fields.pop("workspace_container_allowed")
+    user = await auth_service.update_user(
         user_id,
-        role=request.role,
-        display_name=request.display_name,
-        password=request.password,
+        role=fields.get("role"),
+        display_name=fields.get("display_name"),
+        password=fields.get("password"),
+        workspace_container_allowed=request.workspace_container_allowed,
+        set_workspace_container_allowed=set_policy,
     )
+    return user
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

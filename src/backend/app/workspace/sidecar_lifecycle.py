@@ -70,7 +70,19 @@ def idle_minutes_since(user_id: str, *, started_at: str | None = None) -> int | 
 
 
 def normalize_image_ref(image: str | None) -> str:
-    return (image or "").strip().split("@")[0].split(":")[0]
+    """Normalize image reference for comparison (keep tag, strip digest noise)."""
+    raw = (image or "").strip()
+    if not raw:
+        return ""
+    ref = raw.split("@", 1)[0].strip()
+    ref = ref.lower()
+    if ref.startswith("docker.io/library/"):
+        ref = ref[len("docker.io/library/") :]
+    elif ref.startswith("docker.io/"):
+        ref = ref[len("docker.io/") :]
+    if ":" not in ref:
+        ref = f"{ref}:latest"
+    return ref
 
 
 def image_matches_running(configured: str, running: str | None) -> bool:
@@ -78,7 +90,12 @@ def image_matches_running(configured: str, running: str | None) -> bool:
         return False
     cfg = normalize_image_ref(configured)
     run = normalize_image_ref(running)
-    return cfg == run or configured.strip() in running or running in configured
+    if cfg and run and cfg == run:
+        return True
+    # docker ps may show truncated IDs; avoid loose substring match on tags.
+    if running.startswith("sha256:"):
+        return False
+    return False
 
 
 def inspect_container(container_name: str) -> dict[str, Any]:
@@ -158,6 +175,12 @@ def list_sidecars() -> list[dict[str, Any]]:
         user_id = labels.get(label_key, "")
         started_at = ((inspect.get("State") or {}).get("StartedAt")) if inspect else None
         idle = idle_minutes_since(user_id, started_at=started_at) if user_id else None
+        host_cfg = inspect.get("HostConfig") or {}
+        memory_bytes = int(host_cfg.get("Memory") or 0)
+        nano_cpus = int(host_cfg.get("NanoCpus") or 0)
+        from app.workspace.sidecar_limits import effective_sidecar_limits
+
+        configured_limits = effective_sidecar_limits(user_id) if user_id else {}
         items.append(
             {
                 "container_name": name,
@@ -173,6 +196,10 @@ def list_sidecars() -> list[dict[str, Any]]:
                 if user_id
                 else None,
                 "idle_minutes": idle,
+                "memory_limit_bytes": memory_bytes or None,
+                "cpus": round(nano_cpus / 1_000_000_000, 2) if nano_cpus else None,
+                "configured_memory": configured_limits.get("memory"),
+                "configured_cpus": configured_limits.get("cpus"),
             }
         )
     return items

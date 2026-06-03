@@ -20,6 +20,7 @@ interface UserRow {
   username: string
   role: 'admin' | 'agent'
   display_name: string | null
+  workspace_container_allowed?: boolean | null
   created_at: string
 }
 
@@ -125,6 +126,29 @@ export function UsersPage() {
         type: 'error',
       })
     }
+  }
+
+  const handleContainerPolicyChange = async (
+    user: UserRow,
+    value: string,
+  ) => {
+    const workspace_container_allowed =
+      value === 'auto' ? null : value === 'allow' ? true : false
+    try {
+      await api.patch(`/auth/users/${user.id}`, { workspace_container_allowed })
+      toast(t('users.updated'), { type: 'success' })
+      await loadUsers()
+    } catch (err: unknown) {
+      toast(err instanceof Error ? err.message : t('users.updateFailed'), {
+        type: 'error',
+      })
+    }
+  }
+
+  const containerPolicyValue = (allowed: boolean | null | undefined) => {
+    if (allowed === true) return 'allow'
+    if (allowed === false) return 'deny'
+    return 'auto'
   }
 
   if (currentUser?.role !== 'admin') {
@@ -234,6 +258,7 @@ export function UsersPage() {
                     <th className="py-2 pr-4">{t('auth.username')}</th>
                     <th className="py-2 pr-4">{t('users.displayName')}</th>
                     <th className="py-2 pr-4">{t('users.role')}</th>
+                    <th className="py-2 pr-4">{t('users.workspaceContainer')}</th>
                     <th className="py-2 pr-4">{t('users.permissions')}</th>
                     <th className="py-2 pr-4">{t('users.createdAt')}</th>
                     <th className="py-2">{t('users.actions')}</th>
@@ -262,6 +287,19 @@ export function UsersPage() {
                           onChange={(e) => handleRoleChange(user, e.target.value)}
                           disabled={user.id === currentUser?.id}
                           options={knownRoles.map((r) => ({ value: r, label: r }))}
+                        />
+                      </td>
+                      <td className="py-3 pr-4">
+                        <Select
+                          value={containerPolicyValue(user.workspace_container_allowed)}
+                          onChange={(e) =>
+                            handleContainerPolicyChange(user, e.target.value)
+                          }
+                          options={[
+                            { value: 'auto', label: t('users.workspaceContainerAuto') },
+                            { value: 'allow', label: t('users.workspaceContainerAllow') },
+                            { value: 'deny', label: t('users.workspaceContainerDeny') },
+                          ]}
                         />
                       </td>
                       <td className="py-3 pr-4">

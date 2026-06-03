@@ -78,17 +78,42 @@ class SkillService:
         root.mkdir(parents=True, exist_ok=True)
         return root
 
-    @staticmethod
-    def _enforce_quota(user_id: str, *, additional_bytes: int = 0) -> None:
+    _PLAN_RANK = {"free": 0, "free_trial": 1, "pro": 2, "enterprise": 3}
+
+    async def _best_plan_for_user(self, user_id: str) -> str:
+        from app.models.customer import CustomerConfig
+
+        result = await self.db.execute(
+            select(CustomerConfig.plan).where(CustomerConfig.user_id == user_id)
+        )
+        plans = [row[0] for row in result.all() if row[0]]
+        if not plans:
+            return "free"
+        return max(plans, key=lambda p: self._PLAN_RANK.get((p or "free").lower(), 0))
+
+    async def _enforce_quota(self, user_id: str, *, additional_bytes: int = 0) -> None:
         from app.workspace.disk_usage import check_soft_quota
         from app.workspace.resolver import build_workspace_context
 
-        ctx = build_workspace_context(user_id)
+        plan = await self._best_plan_for_user(user_id)
+        ctx = build_workspace_context(user_id, plan_override=plan)
         message = check_soft_quota(ctx, additional_bytes=additional_bytes)
         if message:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=message,
+            )
+
+    async def _require_tenant_skill_authoring(self, user_id: str) -> None:
+        from app.workspace.skill_policy import (
+            TENANT_SKILL_AUTHORING_REQUIRES_CONTAINER,
+            user_container_entitled,
+        )
+
+        if not await user_container_entitled(self.db, user_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=TENANT_SKILL_AUTHORING_REQUIRES_CONTAINER,
             )
 
     async def _refresh_storage_usage(self, user_id: str) -> None:
@@ -227,6 +252,7 @@ class SkillService:
         source_name: str,
         name_hint: str | None = None,
     ) -> SkillResponse:
+        await self._require_tenant_skill_authoring(user_id)
         skills_dir = self._skills_root(user_id)
 
         try:
@@ -277,7 +303,7 @@ class SkillService:
             shutil.rmtree(extract_path)
         extract_path.mkdir(parents=True, exist_ok=True)
 
-        self._enforce_quota(user_id, additional_bytes=len(content))
+        await self._enforce_quota(user_id, additional_bytes=len(content))
 
         try:
             extract_skill_zip(content, extract_path)
@@ -424,17 +450,48 @@ class SkillService:
                         if k not in ("secrets", "env")
                     }
                 )
+                from app.workspace.skill_policy import (
+                    SKILL_ORIGIN_PLATFORM,
+                    SKILL_ORIGIN_TENANT,
+                    skill_origin_for_disk_path,
+                )
+
+                path = skill_data.get("path") or ""
+                origin = skill_origin_for_disk_path(
+                    path,
+                    user_id=user_id,
+                    skill_name=str(skill_data.get("name") or ""),
+                )
+                merged["origin"] = (
+                    SKILL_ORIGIN_TENANT if origin == SKILL_ORIGIN_TENANT else SKILL_ORIGIN_PLATFORM
+                )
                 existing.config = merged
                 if not restricted:
                     existing.enabled = True
             else:
+                from app.workspace.skill_policy import (
+                    SKILL_ORIGIN_PLATFORM,
+                    SKILL_ORIGIN_TENANT,
+                    skill_origin_for_disk_path,
+                )
+
+                path = skill_data.get("path") or ""
+                origin = skill_origin_for_disk_path(
+                    path,
+                    user_id=user_id,
+                    skill_name=str(skill_data.get("name") or ""),
+                )
+                cfg = dict(skill_data.get("config") or {})
+                cfg["origin"] = (
+                    SKILL_ORIGIN_TENANT if origin == SKILL_ORIGIN_TENANT else SKILL_ORIGIN_PLATFORM
+                )
                 skill = Skill(
                     user_id=user_id,
                     name=skill_data["name"],
                     description=skill_data.get("description"),
                     skill_type=skill_data.get("type", "tool"),
                     path=skill_data.get("path"),
-                    config=skill_data.get("config"),
+                    config=cfg,
                     enabled=False if restricted else True,
                 )
                 self.db.add(skill)
@@ -781,6 +838,11 @@ class SkillService:
             raise HTTPException(status_code=404, detail="Skill not found")
         if skill.skill_type == "builtin":
             raise HTTPException(status_code=403, detail="Cannot modify built-in skills")
+        from app.workspace.skill_policy import is_tenant_authored_skill
+
+        if not is_tenant_authored_skill(skill, user_id):
+            raise HTTPException(status_code=403, detail="platform_skill_readonly")
+        await self._require_tenant_skill_authoring(user_id)
 
         directory = self._skill_directory(skill)
         if directory is None or not directory.exists():
@@ -795,7 +857,7 @@ class SkillService:
 
         target.parent.mkdir(parents=True, exist_ok=True)
         content = await file.read()
-        self._enforce_quota(user_id, additional_bytes=len(content))
+        await self._enforce_quota(user_id, additional_bytes=len(content))
         target.write_bytes(content)
         await self._refresh_storage_usage(user_id)
         return {"path": str(target.relative_to(directory)), "name": target.name, "written": True}
@@ -810,6 +872,11 @@ class SkillService:
             raise HTTPException(status_code=404, detail="Skill not found")
         if skill.skill_type == "builtin":
             raise HTTPException(status_code=403, detail="Cannot edit built-in skills")
+        from app.workspace.skill_policy import is_tenant_authored_skill
+
+        if not is_tenant_authored_skill(skill, user_id):
+            raise HTTPException(status_code=403, detail="platform_skill_readonly")
+        await self._require_tenant_skill_authoring(user_id)
 
         directory = self._skill_directory(skill)
         if directory is None or not directory.exists():
@@ -823,7 +890,7 @@ class SkillService:
 
         target.parent.mkdir(parents=True, exist_ok=True)
         encoded = content.encode("utf-8")
-        self._enforce_quota(user_id, additional_bytes=len(encoded))
+        await self._enforce_quota(user_id, additional_bytes=len(encoded))
         target.write_text(content, encoding="utf-8")
         await self._refresh_storage_usage(user_id)
         return {"path": str(target.relative_to(directory)), "name": target.name, "written": True}
@@ -832,6 +899,7 @@ class SkillService:
         self, *, user_id: str, name: str, description: str | None = None, skill_type: str = "tool"
     ) -> SkillResponse:
         """Create a new skill directory with a minimal SKILL.md."""
+        await self._require_tenant_skill_authoring(user_id)
         skills_dir = self._skills_root(user_id)
 
         folder_name = self._safe_folder_name(name)

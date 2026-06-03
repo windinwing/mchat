@@ -7,7 +7,12 @@ import pytest
 from app.workspace.paths import tenant_skills_dir
 from app.workspace.resolver import build_workspace_context
 from app.workspace.skill_runner import deploy_runner_script, execute_skill_script
-from app.workspace.skill_sync import ensure_skill_in_tenant, sync_skill_directory_to_tenant
+from app.workspace.skill_sync import (
+    directory_content_fingerprint,
+    ensure_skill_in_tenant,
+    sync_skill_directory_to_tenant,
+    tenant_skill_is_current,
+)
 
 
 @pytest.fixture
@@ -71,3 +76,43 @@ def test_ensure_skill_in_tenant_from_platform(tenant_env, tmp_path, monkeypatch)
     ctx = build_workspace_context("user-1")
     dest = ensure_skill_in_tenant(_Skill(), ctx)
     assert dest.resolve().is_relative_to(tenant_skills_dir("user-1"))
+
+
+def test_ensure_skill_resyncs_when_platform_source_changes(tenant_env, tmp_path, monkeypatch):
+    platform_root = tmp_path / "global-skills"
+    platform_root.mkdir()
+    skill_dir = platform_root / "my-tool"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: my-tool\nversion: 1\n---\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "app.workspace.skill_sync.resolve_skill_directory",
+        lambda name: skill_dir if name == "my-tool" else None,
+    )
+
+    class _Skill:
+        name = "my-tool"
+        path = str(skill_dir / "SKILL.md")
+        config = {}
+        skill_type = "tool"
+
+    ctx = build_workspace_context("user-1")
+    first = ensure_skill_in_tenant(_Skill(), ctx)
+    assert "version: 1" in (first / "SKILL.md").read_text(encoding="utf-8")
+
+    (skill_dir / "SKILL.md").write_text("---\nname: my-tool\nversion: 2\n---\n", encoding="utf-8")
+    assert not tenant_skill_is_current(skill_dir, first)
+
+    second = ensure_skill_in_tenant(_Skill(), ctx)
+    assert second == first
+    assert "version: 2" in (second / "SKILL.md").read_text(encoding="utf-8")
+
+
+def test_directory_fingerprint_detects_content_change(tmp_path):
+    root = tmp_path / "skill"
+    root.mkdir()
+    (root / "SKILL.md").write_text("v1", encoding="utf-8")
+    fp1 = directory_content_fingerprint(root)
+    (root / "SKILL.md").write_text("v2", encoding="utf-8")
+    fp2 = directory_content_fingerprint(root)
+    assert fp1 != fp2

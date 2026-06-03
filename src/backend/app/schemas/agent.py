@@ -193,6 +193,10 @@ class CustomerConfigResponse(BaseModel):
     enabled: bool
     widget_session_ttl_hours: int = 24
     workspace_mode: str | None = None
+    workspace_container_allowed: bool | None = Field(
+        None,
+        description="Owner account container policy (read-only)",
+    )
     created_at: datetime
     updated_at: datetime
 

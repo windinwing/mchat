@@ -187,6 +187,9 @@ def apply_schema_patches(conn: Connection) -> list[str]:
         user_patches = [
             ("email", "VARCHAR(255) NULL"),
             ("account_status", "VARCHAR(20) NOT NULL DEFAULT 'active'"),
+            ("workspace_container_allowed", "BOOLEAN NULL"),
+            ("workspace_sidecar_memory", "VARCHAR(32) NULL"),
+            ("workspace_sidecar_cpus", "VARCHAR(16) NULL"),
             ("phone", "VARCHAR(20) NULL"),
             ("phone_verified_at", "DATETIME NULL"),
             ("external_provider", "VARCHAR(50) NULL"),

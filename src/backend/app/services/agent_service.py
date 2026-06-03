@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai_config import AIConfig
 from app.models.customer import CustomerConfig
+from app.models.user import User
 from app.schemas.agent import (
     AIConfigCreate,
     AIConfigUpdate,
@@ -19,6 +20,47 @@ class AgentService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    async def _owner_container_policy(self, user_id: str) -> bool | None:
+        user = await self.db.get(User, user_id)
+        return user.workspace_container_allowed if user else None
+
+    async def _assert_workspace_mode_allowed(
+        self,
+        user_id: str,
+        workspace_mode: str | None,
+        *,
+        plan: str = "free",
+    ) -> None:
+        if (workspace_mode or "").strip().lower() != "container":
+            return
+        from fastapi import HTTPException, status
+
+        from app.workspace.policy import container_block_reason
+        from app.workspace.types import WorkspaceMode
+
+        block = container_block_reason(
+            plan=plan,
+            subscription_active=True,
+            workspace_mode_override="container",
+            user_container_allowed=await self._owner_container_policy(user_id),
+            requested_mode=WorkspaceMode.CONTAINER,
+        )
+        if block:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=block,
+            )
+
+    def _customer_response(
+        self,
+        config: CustomerConfig,
+        *,
+        workspace_container_allowed: bool | None,
+    ) -> CustomerConfigResponse:
+        return CustomerConfigResponse.model_validate(config).model_copy(
+            update={"workspace_container_allowed": workspace_container_allowed}
+        )
 
     async def create_ai_config(
         self, user_id: str, data: AIConfigCreate
@@ -126,6 +168,7 @@ class AgentService:
         skill_ids = await filter_tenant_skill_ids(
             self.db, user_id, data.skill_ids
         )
+        await self._assert_workspace_mode_allowed(user_id, data.workspace_mode)
         config = CustomerConfig(
             name=data.name,
             short_code=(data.short_code.strip() if data.short_code else None),
@@ -147,7 +190,10 @@ class AgentService:
         self.db.add(config)
         await self.db.flush()
         await self.db.refresh(config)
-        return CustomerConfigResponse.model_validate(config)
+        return self._customer_response(
+            config,
+            workspace_container_allowed=await self._owner_container_policy(user_id),
+        )
 
     async def list_customer_configs(
         self, user_id: str
@@ -159,7 +205,11 @@ class AgentService:
             .order_by(CustomerConfig.created_at.desc())
         )
         configs = result.scalars().all()
-        return [CustomerConfigResponse.model_validate(c) for c in configs]
+        policy = await self._owner_container_policy(user_id)
+        return [
+            self._customer_response(c, workspace_container_allowed=policy)
+            for c in configs
+        ]
 
     async def get_customer_config(
         self, config_id: str, user_id: str
@@ -174,7 +224,10 @@ class AgentService:
         config = result.scalar_one_or_none()
         if config is None:
             return None
-        return CustomerConfigResponse.model_validate(config)
+        return self._customer_response(
+            config,
+            workspace_container_allowed=await self._owner_container_policy(user_id),
+        )
 
     async def update_customer_config(
         self, config_id: str, user_id: str, data: CustomerConfigCreate
@@ -193,6 +246,12 @@ class AgentService:
         from app.services.skill_filter import filter_tenant_skill_ids
 
         update_data = data.model_dump(exclude_unset=True)
+        next_mode = update_data.get("workspace_mode", config.workspace_mode)
+        await self._assert_workspace_mode_allowed(
+            user_id,
+            next_mode,
+            plan=config.plan or "free",
+        )
         for key, value in update_data.items():
             if key == "auto_reply_rules":
                 value = [rule.model_dump() for rule in data.auto_reply_rules]
@@ -202,7 +261,10 @@ class AgentService:
 
         await self.db.flush()
         await self.db.refresh(config)
-        return CustomerConfigResponse.model_validate(config)
+        return self._customer_response(
+            config,
+            workspace_container_allowed=await self._owner_container_policy(user_id),
+        )
 
     async def _unset_default_ai_configs(
         self, user_id: str, exclude_id: str | None = None

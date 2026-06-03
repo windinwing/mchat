@@ -136,15 +136,40 @@ MChat 需要租户级 Skill 执行隔离与可回收 sidecar，以支持后续�
 |------|------|
 | 首次执行 / status 探测 | `ensure_ready` → 不存在或非 running 则 `docker run` |
 | 复用 | `inspect.State.Running == true` 且镜像匹配 → 跳过创建 |
-| **镜像升级** | 运行中容器镜像 ≠ `WORKSPACE_CONTAINER_IMAGE` → `docker rm` 后下次 `ensure_ready` 重建 |
+| **镜像升级** | 运行中容器镜像 tag ≠ `WORKSPACE_CONTAINER_IMAGE` → `docker rm` 后下次 `ensure_ready` 重建（含 `3.12` vs `3.13` 等 tag 差异） |
+| **平台 Skill 同步** | 执行前比对源目录与租户副本内容 hash；平台更新后自动覆盖同步 |
+| **Skill 写入配额** | 按用户名下所有通道的最高套餐 plan 计算磁盘软配额 |
+| **容器依赖** | 执行前若 skill 目录有 `requirements.txt`，在 sidecar 内 `pip install -r`（按 hash 幂等） |
 | **空闲回收** | Worker 每 15 分钟检查；空闲 ≥ `WORKSPACE_SIDECAR_IDLE_MINUTES` → `docker rm -f`（需 `WORKSPACE_SIDECAR_RECYCLE_ENABLED=true`） |
 | 活动记录 | `{tenant}/data/.mchat/sidecar.meta.json` 的 `last_active_at` |
 | 手动回收 | 管理后台 `/admin/workspace` 或 `POST /api/workspace/sidecars/{user_id}/recycle` |
 
-## 13. 管理后台
+## 13. 管理后台（Cloud / `feature/channel-rental`）
 
 - 路径：**管理后台 → 执行工作区**（`/admin/workspace`）
-- 功能：按通道分配 **自动 / 本地 / 容器**；查看 Sidecar 列表、镜像是否过期、磁盘与空闲时长；手动回收
+- **用户管理**：每用户 **容器 Sidecar** 策略（自动 / 允许 / 禁止）及 memory/CPU 覆盖
+- **执行工作区 → 容器用户**：Sidecar 状态、磁盘、资源限额
+- **通道配置**：能力与绑定 Tab 内 **执行环境**（自动 / 本地 / 容器）
+- 功能：查看 Sidecar 列表、镜像是否过期、磁盘与空闲时长；手动回收
+
+### 谁能用 Docker 独立空间？
+
+| 层级 | 控制 |
+|------|------|
+| 全局 | `WORKSPACE_CONTAINER_ENABLED=true` |
+| 用户 | 用户管理 / 执行工作区 → 容器 Sidecar：禁止则降级本地 |
+| 用户 | 允许：Free 也可在通道上强制 container + **自建 Skill** |
+| 套餐 | Pro/Enterprise + 订阅有效 → 自动 container（用户未禁止时） |
+| 通道 | `workspace_mode`：local / container / null（自动） |
+
+### Skill 策略（Local vs Container）
+
+| 模式 | 可用 Skill | 自建/上传 |
+|------|------------|-----------|
+| **Local** | 平台/已有 Skill | ❌ |
+| **Container** | 全部 + 租户自建 | ✅（`requirements.txt` 在 sidecar 内 pip） |
+
+Skill 元数据 `config.origin`：`platform` | `tenant`；执行时 local 模式拒绝 `tenant` 来源。
 
 ## 14. 开关与回退
 

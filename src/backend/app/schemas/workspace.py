@@ -46,6 +46,10 @@ class ChannelWorkspaceSummary(BaseModel):
     workspace_mode: str | None = Field(
         None, description="Override: local | container; null = follow plan/default"
     )
+    user_container_allowed: bool | None = Field(
+        None,
+        description="Owner user policy: null=auto, true=allow, false=deny container",
+    )
     requested_mode: str
     effective_mode: str
     fallback_reason: str | None = None
@@ -70,6 +74,43 @@ class SidecarListItem(BaseModel):
     started_at: str | None = None
     last_active_at: str | None = None
     idle_minutes: int | None = None
+    memory_limit_bytes: int | None = None
+    cpus: float | None = None
+    configured_memory: str | None = None
+    configured_cpus: str | None = None
+
+
+class UserWorkspaceSummary(BaseModel):
+    user_id: str
+    username: str
+    display_name: str | None = None
+    workspace_container_allowed: bool | None = None
+    container_entitled: bool = False
+    tenant_skill_authoring: bool = False
+    workspace_sidecar_memory: str | None = None
+    workspace_sidecar_cpus: str | None = None
+    effective_memory: str | None = None
+    effective_cpus: str | None = None
+    container_name: str | None = None
+    sidecar: SidecarStatusResponse = Field(default_factory=SidecarStatusResponse)
+    memory_limit_bytes: int | None = None
+    running_cpus: float | None = None
+    disk_usage_bytes: dict[str, int] = Field(default_factory=dict)
+    idle_minutes: int | None = None
+    last_active_at: str | None = None
+    image_matches: bool = True
+
+
+class UserWorkspaceUpdate(BaseModel):
+    workspace_container_allowed: bool | None = Field(
+        None, description="null=auto, true=allow, false=deny container"
+    )
+    workspace_sidecar_memory: str | None = Field(
+        None, description="Sidecar memory limit e.g. 512m, 2g; empty clears override"
+    )
+    workspace_sidecar_cpus: str | None = Field(
+        None, description="Sidecar CPU quota e.g. 1.0; empty clears override"
+    )
 
 
 class WorkspaceModeUpdate(BaseModel):

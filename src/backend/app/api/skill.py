@@ -19,6 +19,26 @@ from app.services.skill_service import SkillService
 router = APIRouter()
 
 
+class SkillCapabilitiesResponse(BaseModel):
+    tenant_skill_authoring: bool = False
+    container_entitled: bool = False
+
+
+@router.get("/capabilities", response_model=SkillCapabilitiesResponse)
+async def skill_capabilities(
+    admin: User = Depends(require_permission(Permission.SKILLS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Whether current user may create/edit tenant skills (container workspace)."""
+    from app.workspace.skill_policy import user_container_entitled
+
+    entitled = await user_container_entitled(db, admin.id)
+    return SkillCapabilitiesResponse(
+        tenant_skill_authoring=entitled,
+        container_entitled=entitled,
+    )
+
+
 @router.get("", response_model=list[SkillResponse])
 async def list_skills(
     admin: User = Depends(require_permission(Permission.SKILLS_READ)),

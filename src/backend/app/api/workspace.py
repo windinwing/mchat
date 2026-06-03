@@ -16,15 +16,19 @@ from app.schemas.workspace import (
     SidecarListItem,
     SidecarRecycleResponse,
     SidecarStatusResponse,
+    UserWorkspaceSummary,
+    UserWorkspaceUpdate,
     WorkspaceModeUpdate,
     WorkspaceStatusResponse,
 )
 from app.workspace.admin_service import (
     list_channel_summaries,
     list_sidecar_items,
+    list_user_workspace_summaries,
     recycle_user_sidecar,
     summarize_channel,
     update_channel_workspace_mode,
+    update_user_workspace_settings,
 )
 from app.workspace.context import workspace_execution_scope
 from app.workspace.disk_usage import tenant_execution_usage_bytes
@@ -182,6 +186,48 @@ async def recycle_idle_sidecars_now(
     )
 
 
+@router.get("/users", response_model=list[UserWorkspaceSummary])
+async def list_workspace_users(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[UserWorkspaceSummary]:
+    """Admin: per-user container entitlement, sidecar status, and resource limits."""
+    if not await has_global_scope(current_user, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    return await list_user_workspace_summaries(db)
+
+
+@router.patch("/users/{user_id}", response_model=UserWorkspaceSummary)
+async def patch_workspace_user(
+    user_id: str,
+    body: UserWorkspaceUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserWorkspaceSummary:
+    """Admin: update container policy and sidecar memory/CPU for a user."""
+    if not await has_global_scope(current_user, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    fields = body.model_dump(exclude_unset=True)
+    user = await update_user_workspace_settings(
+        db,
+        user_id=user_id,
+        workspace_container_allowed=body.workspace_container_allowed,
+        set_container_allowed="workspace_container_allowed" in fields,
+        workspace_sidecar_memory=body.workspace_sidecar_memory,
+        workspace_sidecar_cpus=body.workspace_sidecar_cpus,
+        set_sidecar_memory="workspace_sidecar_memory" in fields,
+        set_sidecar_cpus="workspace_sidecar_cpus" in fields,
+    )
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    await db.commit()
+    items = await list_user_workspace_summaries(db)
+    for item in items:
+        if item.user_id == user_id:
+            return item
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+
 @router.get("/settings/runtime")
 async def workspace_runtime_settings(
     current_user: User = Depends(get_current_user),
@@ -190,6 +236,8 @@ async def workspace_runtime_settings(
     return {
         "workspace_container_enabled": settings.workspace_container_enabled,
         "workspace_container_image": settings.workspace_container_image,
+        "workspace_container_memory": settings.workspace_container_memory,
+        "workspace_container_cpus": settings.workspace_container_cpus,
         "workspace_sidecar_idle_minutes": settings.workspace_sidecar_idle_minutes,
         "workspace_sidecar_recycle_enabled": settings.workspace_sidecar_recycle_enabled,
     }

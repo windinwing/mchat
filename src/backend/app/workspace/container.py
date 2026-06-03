@@ -105,6 +105,26 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
                 "error": "Skill script must live under tenant workspace for container execution"
             }
 
+        skill_dir = script_path.parent
+        try:
+            from app.workspace.container_deps import ensure_skill_requirements_in_container
+
+            await asyncio.to_thread(
+                ensure_skill_requirements_in_container,
+                container_name=name,
+                tenant_root=self.ctx.tenant_root,
+                skill_dir=skill_dir,
+                docker_cmd=self._docker_cmd(),
+                container_path_for=self._container_script_path,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Container skill dependency install failed for user {}: {}",
+                self.ctx.user_id,
+                exc,
+            )
+            return {"error": f"容器内依赖安装失败: {exc}"}
+
         env = {**self.execution_env(), **(extra_env or {})}
         env["MCHAT_SKILL_ARGS"] = json.dumps(args, ensure_ascii=False)
         env_args: list[str] = []
@@ -183,13 +203,21 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
             )
 
         tenant = str(self.ctx.tenant_root)
+        from app.workspace.sidecar_limits import effective_sidecar_limits
+
+        limits = effective_sidecar_limits(self.ctx.user_id)
         cmd = [
             *self._docker_cmd(),
             "run",
             "-d",
             "--name",
             name,
-            *sidecar_run_args(user_id=self.ctx.user_id, container_name=name),
+            *sidecar_run_args(
+                user_id=self.ctx.user_id,
+                container_name=name,
+                memory=limits.get("memory"),
+                cpus=limits.get("cpus"),
+            ),
             *execution_volume_mounts(tenant),
             "-w",
             "/workspace",

@@ -7,6 +7,7 @@ from app.models.customer import CustomerConfig
 from app.services.subscription_gate import channel_subscription_active
 from app.workspace.limits import limits_for_plan
 from app.workspace.paths import ensure_tenant_layout, tenant_root
+from app.workspace.policy import container_block_reason, plan_allows_container_auto
 from app.workspace.types import WorkspaceContext, WorkspaceMode
 
 
@@ -26,22 +27,29 @@ def resolve_workspace_mode(
     plan: str | None = None,
     workspace_mode_override: str | None = None,
     subscription_active: bool = True,
+    user_container_allowed: bool | None = None,
 ) -> WorkspaceMode:
     """Choose local (A) or container (B) backend."""
     override = _normalize_mode(workspace_mode_override)
     if override is not None:
         mode = override
     elif (
-        (plan or "free").lower() in ("pro", "enterprise")
-        and subscription_active
+        plan_allows_container_auto(plan, subscription_active=subscription_active)
         and settings.workspace_container_enabled
     ):
         mode = WorkspaceMode.CONTAINER
     else:
         mode = WorkspaceMode(settings.workspace_default_mode or "local")
 
-    if mode == WorkspaceMode.CONTAINER and not settings.workspace_container_enabled:
-        return WorkspaceMode.LOCAL
+    if mode == WorkspaceMode.CONTAINER:
+        if container_block_reason(
+            plan=plan,
+            subscription_active=subscription_active,
+            workspace_mode_override=workspace_mode_override,
+            user_container_allowed=user_container_allowed,
+            requested_mode=WorkspaceMode.CONTAINER,
+        ):
+            return WorkspaceMode.LOCAL
     return mode
 
 
@@ -51,8 +59,14 @@ def build_workspace_context(
     customer_config: CustomerConfig | None = None,
     channel_id: str | None = None,
     workspace_mode_override: str | None = None,
+    user_container_allowed: bool | None = None,
+    plan_override: str | None = None,
 ) -> WorkspaceContext:
-    plan = (customer_config.plan if customer_config else None) or "free"
+    plan = (
+        plan_override
+        or (customer_config.plan if customer_config else None)
+        or "free"
+    )
     override = workspace_mode_override
     if customer_config is not None:
         override = override or getattr(customer_config, "workspace_mode", None)
@@ -65,6 +79,7 @@ def build_workspace_context(
         plan=plan,
         workspace_mode_override=override,
         subscription_active=subscription_active,
+        user_container_allowed=user_container_allowed,
     )
     limits = limits_for_plan(plan)
     if mode == WorkspaceMode.LOCAL:

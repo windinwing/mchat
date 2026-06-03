@@ -92,6 +92,8 @@ interface CustomerServiceConfig {
   position: string
   enabled: boolean
   widget_session_ttl_hours?: number
+  workspace_mode?: string | null
+  workspace_container_allowed?: boolean | null
   created_at?: string
   updated_at?: string
 }
@@ -169,6 +171,8 @@ function normalizeCustomerConfig(
     position: String(raw?.position || 'right'),
     enabled: raw?.enabled ?? true,
     widget_session_ttl_hours: raw?.widget_session_ttl_hours ?? 24,
+    workspace_mode: raw?.workspace_mode ?? null,
+    workspace_container_allowed: raw?.workspace_container_allowed ?? null,
     created_at: raw?.created_at,
     updated_at: raw?.updated_at,
   }
@@ -352,6 +356,7 @@ export function CustomerConfig() {
           position: config.position,
           enabled: config.enabled,
           widget_session_ttl_hours: config.widget_session_ttl_hours ?? 24,
+          workspace_mode: config.workspace_mode || null,
         })
         const normalized = normalizeCustomerConfig(created)
         setConfigs((prev) => [...prev, normalized])
@@ -381,6 +386,7 @@ export function CustomerConfig() {
         position: config.position,
         enabled: config.enabled,
         widget_session_ttl_hours: config.widget_session_ttl_hours ?? 24,
+        workspace_mode: config.workspace_mode || null,
       })
       const normalized = normalizeCustomerConfig(updated)
       setConfig(normalized)
@@ -656,6 +662,29 @@ export function CustomerConfig() {
               />
               <p className="text-xs text-gray-500 dark:text-gray-400 -mt-4">
                 {t('customerAgents.widgetSessionHint')}
+              </p>
+              <Select
+                label={t('customerAgents.workspaceMode')}
+                value={config.workspace_mode || 'auto'}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                  const v = e.target.value
+                  setConfig({
+                    ...config,
+                    workspace_mode: v === 'auto' ? null : v,
+                  })
+                }}
+                options={[
+                  { value: 'auto', label: t('customerAgents.workspaceModeAuto') },
+                  { value: 'local', label: t('customerAgents.workspaceModeLocal') },
+                  ...(config.workspace_container_allowed === false
+                    ? []
+                    : [{ value: 'container', label: t('customerAgents.workspaceModeContainer') }]),
+                ]}
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 -mt-4">
+                {config.workspace_container_allowed === false
+                  ? t('customerAgents.workspaceModeContainerDisabled')
+                  : t('customerAgents.workspaceModeHint')}
               </p>
               <Select
                 label={t('customerAgents.bindAiModel')}

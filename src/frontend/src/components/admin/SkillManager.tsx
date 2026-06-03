@@ -79,6 +79,7 @@ export function SkillManager() {
   const [createDescription, setCreateDescription] = useState('')
   const [createType, setCreateType] = useState('tool')
   const [creating, setCreating] = useState(false)
+  const [canAuthorSkills, setCanAuthorSkills] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -87,8 +88,12 @@ export function SkillManager() {
 
   const loadSkills = async () => {
     try {
-      const data = await api.get<Skill[]>('/skills')
+      const [data, caps] = await Promise.all([
+        api.get<Skill[]>('/skills'),
+        api.get<{ tenant_skill_authoring: boolean }>('/skills/capabilities'),
+      ])
       setSkills(data)
+      setCanAuthorSkills(Boolean(caps.tenant_skill_authoring))
     } catch (err) {
       console.error('Failed to load skills:', err)
       toast(t('skills.toastLoadFailed'), { type: 'error' })
@@ -259,6 +264,11 @@ export function SkillManager() {
 
   return (
     <div className="space-y-4">
+      {!canAuthorSkills && (
+        <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
+          {t('skills.localModeHint')}
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="w-72">
@@ -270,20 +280,24 @@ export function SkillManager() {
           />
         </div>
         <div className="flex gap-2">
-          <Button
-            leftIcon={<Plus className="w-4 h-4" />}
-            onClick={() => setCreateOpen(true)}
-            className="w-[150px]"
-          >
-            {t('skills.createSkill')}
-          </Button>
-          <Button
-            variant="secondary"
-            leftIcon={<Link2 className="w-4 h-4" />}
-            onClick={openInstallDialog}
-          >
-            {t('skills.installFromUrl')}
-          </Button>
+          {canAuthorSkills && (
+            <>
+              <Button
+                leftIcon={<Plus className="w-4 h-4" />}
+                onClick={() => setCreateOpen(true)}
+                className="w-[150px]"
+              >
+                {t('skills.createSkill')}
+              </Button>
+              <Button
+                variant="secondary"
+                leftIcon={<Link2 className="w-4 h-4" />}
+                onClick={openInstallDialog}
+              >
+                {t('skills.installFromUrl')}
+              </Button>
+            </>
+          )}
           <Button
             variant="secondary"
             leftIcon={<RefreshCw className="w-4 h-4" />}
@@ -292,12 +306,14 @@ export function SkillManager() {
           >
             {t('skills.syncFromDisk')}
           </Button>
-          <Button
-            leftIcon={<Upload className="w-4 h-4" />}
-            onClick={() => setUploadOpen(true)}
-          >
-            {t('skills.uploadOverwrite')}
-          </Button>
+          {canAuthorSkills && (
+            <Button
+              leftIcon={<Upload className="w-4 h-4" />}
+              onClick={() => setUploadOpen(true)}
+            >
+              {t('skills.uploadOverwrite')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -383,6 +399,7 @@ export function SkillManager() {
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
+                    {canAuthorSkills && skill.config?.origin === 'tenant' && (
                     <button
                       onClick={() => {
                         setFileBrowserSkillId(skill.id)
@@ -395,6 +412,7 @@ export function SkillManager() {
                     >
                       <FolderOpen className="w-4 h-4" />
                     </button>
+                    )}
                     {skill.skill_type !== 'builtin' && (
                       <button
                         onClick={() => deleteSkill(skill.id, skill.name)}

@@ -8,7 +8,13 @@ from app.core.config import settings
 # receive docker.sock, privileged mode, or arbitrary host bind mounts.
 
 
-def sidecar_run_args(*, user_id: str, container_name: str) -> list[str]:
+def sidecar_run_args(
+    *,
+    user_id: str,
+    container_name: str,
+    memory: str | None = None,
+    cpus: str | None = None,
+) -> list[str]:
     """Extra ``docker run`` flags for tenant execution sidecars."""
     args = [
         "--init",
@@ -27,12 +33,12 @@ def sidecar_run_args(*, user_id: str, container_name: str) -> list[str]:
     pids_limit = settings.workspace_container_pids_limit
     if pids_limit and pids_limit > 0:
         args.extend(["--pids-limit", str(pids_limit)])
-    memory = (settings.workspace_container_memory or "").strip()
-    if memory:
-        args.extend(["--memory", memory])
-    cpus = (settings.workspace_container_cpus or "").strip()
-    if cpus:
-        args.extend(["--cpus", cpus])
+    mem = (memory or settings.workspace_container_memory or "").strip()
+    if mem:
+        args.extend(["--memory", mem])
+    cpu = (cpus or settings.workspace_container_cpus or "").strip()
+    if cpu:
+        args.extend(["--cpus", cpu])
     return args
 
 

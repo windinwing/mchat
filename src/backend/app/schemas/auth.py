@@ -31,12 +31,10 @@ class UserResponse(BaseModel):
     username: str
     role: str
     email: str | None = None
-    phone: str | None = None
     account_status: str = "active"
     avatar_url: str | None = None
     display_name: str | None = None
-    external_provider: str | None = None
-    can_set_password: bool = True
+    workspace_container_allowed: bool | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -65,13 +63,6 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=6, max_length=255)
 
 
-class SetPasswordRequest(BaseModel):
-    """Portal: set password without current (phone signup) or with current."""
-
-    new_password: str = Field(..., min_length=6, max_length=255)
-    current_password: str | None = Field(None, min_length=1, max_length=255)
-
-
 class CreateUserRequest(BaseModel):
     """Admin: create a new user."""
 
@@ -89,3 +80,7 @@ class UpdateUserRequest(BaseModel):
     role: Literal["admin", "agent", "user"] | None = None
     display_name: str | None = Field(None, max_length=100)
     password: str | None = Field(None, min_length=6, max_length=255)
+    workspace_container_allowed: bool | None = Field(
+        None,
+        description="Container sidecar policy: null=auto by plan, true=allow, false=deny",
+    )

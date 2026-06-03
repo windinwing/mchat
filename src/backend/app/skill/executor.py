@@ -116,6 +116,20 @@ async def _execute_python_tool(skill: Skill, args: dict[str, Any]) -> Any:
         return {"error": "No path defined for skill"}
 
     ws_ctx = get_workspace_context()
+    user_id = ws_ctx.user_id if ws_ctx else (skill.user_id or "")
+    from app.workspace.skill_policy import tenant_skill_execution_blocked
+
+    block = tenant_skill_execution_blocked(
+        skill,
+        user_id,
+        ws_ctx.effective_mode.value if ws_ctx else "local",
+    )
+    if block:
+        return {
+            "error": "自建 Skill 需在 Docker 容器执行空间运行；请联系管理员开通容器工作区。",
+            "code": block,
+        }
+
     skill_dir: Path
     if ws_ctx is not None:
         try:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from app.skill.ops_policy import is_server_ops_skill
 from app.workspace.paths import ensure_execution_layout
 from app.workspace.types import WorkspaceContext
 
+_SKIP_FINGERPRINT_DIRS = frozenset({".git", "__pycache__", ".mchat"})
+
 
 def _skill_source_dir(skill: Skill) -> Path | None:
     if skill.path:
@@ -23,6 +26,37 @@ def _skill_source_dir(skill: Skill) -> Path | None:
             return skill_md
     resolved = resolve_skill_directory(skill.name)
     return resolved
+
+
+def directory_content_fingerprint(root: Path) -> str:
+    """Stable hash of skill tree contents for stale sync detection."""
+    root = root.resolve()
+    if not root.is_dir():
+        return ""
+    digest = hashlib.sha256()
+    for path in sorted(
+        p
+        for p in root.rglob("*")
+        if p.is_file() and not any(part in _SKIP_FINGERPRINT_DIRS for part in p.parts)
+    ):
+        rel = path.relative_to(root).as_posix()
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def tenant_skill_is_current(source: Path, tenant_dir: Path) -> bool:
+    """True when tenant copy matches platform source."""
+    if not (tenant_dir / "SKILL.md").is_file() or not source.is_dir():
+        return False
+    try:
+        return directory_content_fingerprint(source) == directory_content_fingerprint(
+            tenant_dir
+        )
+    except OSError:
+        return False
 
 
 def sync_skill_directory_to_tenant(source_dir: Path, tenant_skills: Path) -> Path:
@@ -67,12 +101,15 @@ def ensure_skill_in_tenant(
         except ValueError:
             pass
 
-    if (tenant_dir / "SKILL.md").is_file() and not force:
-        return tenant_dir
-
     source = _skill_source_dir(skill)
     if source is None:
+        if (tenant_dir / "SKILL.md").is_file() and not force:
+            return tenant_dir
         raise FileNotFoundError(f"Skill directory not found: {skill.name}")
+
+    if (tenant_dir / "SKILL.md").is_file() and not force:
+        if tenant_skill_is_current(source, tenant_dir):
+            return tenant_dir
 
     try:
         source.resolve().relative_to(tenant_skills.resolve())
