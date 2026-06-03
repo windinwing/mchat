@@ -91,6 +91,11 @@ class SkillService:
                 detail=message,
             )
 
+    async def _refresh_storage_usage(self, user_id: str) -> None:
+        from app.workspace.usage_service import refresh_customer_storage_usage
+
+        await refresh_customer_storage_usage(self.db, user_id)
+
     @staticmethod
     def _skill_directory(skill: Skill) -> Path | None:
         if not skill.path:
@@ -309,6 +314,7 @@ class SkillService:
                 ),
             )
 
+        await self._refresh_storage_usage(user_id)
         return SkillResponse.model_validate(skill)
 
     async def list_skills(self, user_id: str) -> list[SkillResponse]:
@@ -362,6 +368,7 @@ class SkillService:
         self._remove_skill_directory(skill)
         await self.db.delete(skill)
         await self.db.flush()
+        await self._refresh_storage_usage(user_id)
         return True
 
     async def _prune_stale_filesystem_skills(self, user_id: str) -> int:
@@ -790,6 +797,7 @@ class SkillService:
         content = await file.read()
         self._enforce_quota(user_id, additional_bytes=len(content))
         target.write_bytes(content)
+        await self._refresh_storage_usage(user_id)
         return {"path": str(target.relative_to(directory)), "name": target.name, "written": True}
 
     async def write_skill_file(self, skill_id: str, user_id: str, file_path: str, content: str) -> dict:
@@ -817,6 +825,7 @@ class SkillService:
         encoded = content.encode("utf-8")
         self._enforce_quota(user_id, additional_bytes=len(encoded))
         target.write_text(content, encoding="utf-8")
+        await self._refresh_storage_usage(user_id)
         return {"path": str(target.relative_to(directory)), "name": target.name, "written": True}
 
     async def create_skill(
@@ -859,6 +868,7 @@ class SkillService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Skill created on disk but not registered. Check SKILL.md metadata.",
             )
+        await self._refresh_storage_usage(user_id)
         return SkillResponse.model_validate(skill)
 
     async def upload_skill(

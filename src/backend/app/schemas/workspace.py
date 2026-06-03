@@ -30,5 +30,9 @@ class WorkspaceStatusResponse(BaseModel):
     container_name: str | None = None
     sidecar: SidecarStatusResponse | None = None
     disk_usage_bytes: dict[str, int] = Field(default_factory=dict)
+    usage_storage_bytes: int | None = Field(
+        default=None,
+        description="Synced to customer_configs.usage_storage_bytes for this user",
+    )
     limits: dict[str, Any]
     execution_env: dict[str, str]

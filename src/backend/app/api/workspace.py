@@ -16,6 +16,7 @@ from app.workspace.disk_usage import tenant_execution_usage_bytes
 from app.workspace.factory import get_workspace_provider
 from app.workspace.resolver import build_workspace_context
 from app.workspace.sidecar import sidecar_inspect
+from app.workspace.usage_service import refresh_customer_storage_usage
 
 router = APIRouter()
 
@@ -57,6 +58,7 @@ async def get_workspace_status(
         assert ready is not None
         provider = get_workspace_provider(ready)
         sidecar_raw = sidecar_inspect(ready.container_name)
+        usage_synced = await refresh_customer_storage_usage(db, ready.user_id)
         return WorkspaceStatusResponse(
             user_id=ready.user_id,
             customer_id=ready.customer_id,
@@ -71,6 +73,7 @@ async def get_workspace_status(
             container_name=ready.container_name,
             sidecar=SidecarStatusResponse(**sidecar_raw),
             disk_usage_bytes=tenant_execution_usage_bytes(ready.tenant_root),
+            usage_storage_bytes=usage_synced,
             limits={
                 "shell_enabled": ready.limits.shell_enabled,
                 "studio_enabled": ready.limits.studio_enabled,
