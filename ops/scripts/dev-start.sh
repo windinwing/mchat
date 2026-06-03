@@ -12,6 +12,7 @@ bash "$ROOT/ops/scripts/dev-preflight.sh"
 source "$ROOT/ops/scripts/ensure-env.sh"
 ensure_docker_env_file 2>/dev/null || true
 sync_backend_database_url 2>/dev/null || true
+bash "$ROOT/ops/scripts/ensure-dev-mysql.sh"
 bash "$ROOT/ops/scripts/verify-mysql.sh" || exit 1
 
 bash "$ROOT/ops/scripts/ensure-dev-mysql.sh"
