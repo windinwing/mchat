@@ -18,6 +18,7 @@ const ConversationsPage = lazyNamed(() => import('./pages/ConversationsPage'), '
 const KnowledgePage = lazyNamed(() => import('./pages/KnowledgePage'), 'KnowledgePage')
 const SkillsPage = lazyNamed(() => import('./pages/SkillsPage'), 'SkillsPage')
 const WorkflowsPage = lazyNamed(() => import('./pages/WorkflowsPage'), 'WorkflowsPage')
+const WorkspacePage = lazyNamed(() => import('./pages/WorkspacePage'), 'WorkspacePage')
 const SkillSchedulesPage = lazyNamed(
   () => import('./pages/SkillSchedulesPage'),
   'SkillSchedulesPage',
@@ -83,6 +84,7 @@ export function CoreRoutes() {
         <Route path="/admin/knowledge" element={<AdminLayout><PageSuspense><KnowledgePage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/skills" element={<AdminLayout><PageSuspense><SkillsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/workflows" element={<AdminLayout><PageSuspense><WorkflowsPage /></PageSuspense></AdminLayout>} />
+        <Route path="/admin/workspace" element={<AdminLayout><PageSuspense><WorkspacePage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/schedules" element={<AdminLayout><PageSuspense><SkillSchedulesPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/agents" element={<AdminLayout><PageSuspense><AgentsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/customer-agents" element={<AdminLayout><PageSuspense><CustomerAgentsPage /></PageSuspense></AdminLayout>} />

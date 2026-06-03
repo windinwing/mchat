@@ -19,6 +19,7 @@ import {
   DollarSign,
   Clock3,
   Workflow,
+  Container,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
@@ -42,6 +43,7 @@ export function Sidebar({ onClose }: SidebarProps) {
     { path: '/admin/knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
     { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
     { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow, badgeKey: 'nav.workflowsBeta' },
+    { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
     { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
     { path: '/admin/agents', labelKey: 'nav.agents', icon: Bot },
     { path: '/admin/customer-agents', labelKey: 'nav.customerAgents', icon: Headphones },

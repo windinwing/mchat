@@ -141,6 +141,8 @@ class AgentService:
             domains=data.domains,
             position=data.position,
             enabled=data.enabled,
+            widget_session_ttl_hours=data.widget_session_ttl_hours,
+            workspace_mode=data.workspace_mode,
         )
         self.db.add(config)
         await self.db.flush()

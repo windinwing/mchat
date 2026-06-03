@@ -145,6 +145,9 @@ class Settings(BaseSettings):
     workspace_container_pids_limit: int = 256
     workspace_container_memory: str = ""  # e.g. 512m
     workspace_container_cpus: str = ""  # e.g. 1.0
+    # Sidecar idle recycle (worker); 0 = disabled
+    workspace_sidecar_idle_minutes: int = 120
+    workspace_sidecar_recycle_enabled: bool = False
     # Optional legacy Cloud studio root ({root}/{user_id}/{channel_id}); empty = unified layout
     workspace_legacy_studio_dir: str = ""
 

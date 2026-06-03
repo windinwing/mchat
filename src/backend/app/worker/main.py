@@ -16,7 +16,7 @@ from app.core.database import async_session_factory
 from app.models.skill_schedule import SkillSchedule
 from app.services.skill_schedule_service import SkillScheduleService
 from app.services.settings_service import SettingsService
-from app.worker.jobs import cleanup_old_logs, reset_monthly_usage_quotas
+from app.worker.jobs import cleanup_old_logs, recycle_idle_sidecars, reset_monthly_usage_quotas
 from app.worker.skill_scheduler import SkillScheduleRuntime
 
 
@@ -39,6 +39,16 @@ def _build_scheduler() -> AsyncIOScheduler:
             CronTrigger(hour=3, minute=10),
             id="cleanup_old_logs",
             args=[settings.worker_log_retention_days],
+            max_instances=1,
+            replace_existing=True,
+            coalesce=True,
+        )
+
+    if settings.workspace_sidecar_recycle_enabled:
+        scheduler.add_job(
+            recycle_idle_sidecars,
+            IntervalTrigger(minutes=15),
+            id="recycle_idle_sidecars",
             max_instances=1,
             replace_existing=True,
             coalesce=True,

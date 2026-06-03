@@ -1,4 +1,4 @@
-"""Workspace status API."""
+"""Workspace status and admin APIs."""
 
 from __future__ import annotations
 
@@ -6,16 +6,32 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.middleware.auth import get_current_user, has_global_scope
 from app.models.customer import CustomerConfig
 from app.models.user import User
-from app.schemas.workspace import SidecarStatusResponse, WorkspaceStatusResponse
+from app.schemas.workspace import (
+    ChannelWorkspaceSummary,
+    SidecarListItem,
+    SidecarRecycleResponse,
+    SidecarStatusResponse,
+    WorkspaceModeUpdate,
+    WorkspaceStatusResponse,
+)
+from app.workspace.admin_service import (
+    list_channel_summaries,
+    list_sidecar_items,
+    recycle_user_sidecar,
+    summarize_channel,
+    update_channel_workspace_mode,
+)
 from app.workspace.context import workspace_execution_scope
 from app.workspace.disk_usage import tenant_execution_usage_bytes
 from app.workspace.factory import get_workspace_provider
 from app.workspace.resolver import build_workspace_context
 from app.workspace.sidecar import sidecar_inspect
+from app.workspace.sidecar_lifecycle import recycle_idle_sidecars
 from app.workspace.usage_service import refresh_customer_storage_usage
 
 router = APIRouter()
@@ -59,6 +75,7 @@ async def get_workspace_status(
         provider = get_workspace_provider(ready)
         sidecar_raw = sidecar_inspect(ready.container_name)
         usage_synced = await refresh_customer_storage_usage(db, ready.user_id)
+        await db.commit()
         return WorkspaceStatusResponse(
             user_id=ready.user_id,
             customer_id=ready.customer_id,
@@ -81,3 +98,98 @@ async def get_workspace_status(
             },
             execution_env=provider.execution_env(),
         )
+
+
+@router.get("/channels", response_model=list[ChannelWorkspaceSummary])
+async def list_workspace_channels(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ChannelWorkspaceSummary]:
+    """List workspace execution summary per customer agent (no sidecar auto-start)."""
+    is_admin = await has_global_scope(current_user, db)
+    user_filter = None if is_admin else current_user.id
+    return await list_channel_summaries(db, user_id=user_filter)
+
+
+@router.patch("/channels/{customer_id}", response_model=ChannelWorkspaceSummary)
+async def patch_channel_workspace_mode(
+    customer_id: str,
+    body: WorkspaceModeUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ChannelWorkspaceSummary:
+    """Assign local or container execution for a customer agent."""
+    is_admin = await has_global_scope(current_user, db)
+    try:
+        summary = await update_channel_workspace_mode(
+            db,
+            customer_id=customer_id,
+            user_id=current_user.id,
+            workspace_mode=body.workspace_mode,
+            is_admin=is_admin,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    if summary is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
+    await db.commit()
+    return summary
+
+
+@router.get("/sidecars", response_model=list[SidecarListItem])
+async def list_workspace_sidecars(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[SidecarListItem]:
+    """List Docker execution sidecars (admin: all; tenant: own user_id only)."""
+    items = list_sidecar_items()
+    if await has_global_scope(current_user, db):
+        return items
+    return [item for item in items if item.user_id == current_user.id]
+
+
+@router.post("/sidecars/{user_id}/recycle", response_model=SidecarRecycleResponse)
+async def recycle_sidecar_for_user(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SidecarRecycleResponse:
+    """Remove a user's sidecar container (next execution recreates if needed)."""
+    is_admin = await has_global_scope(current_user, db)
+    if user_id != current_user.id and not is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    ok = recycle_user_sidecar(user_id)
+    return SidecarRecycleResponse(
+        ok=ok,
+        removed=1 if ok else 0,
+        message="Sidecar removed" if ok else "No sidecar to remove",
+    )
+
+
+@router.post("/sidecars/recycle-idle", response_model=SidecarRecycleResponse)
+async def recycle_idle_sidecars_now(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SidecarRecycleResponse:
+    """Manually run idle sidecar recycle (admin only)."""
+    if not await has_global_scope(current_user, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    removed = recycle_idle_sidecars()
+    return SidecarRecycleResponse(
+        ok=True,
+        removed=removed,
+        message=f"Recycled {removed} idle sidecar(s)",
+    )
+
+
+@router.get("/settings/runtime")
+async def workspace_runtime_settings(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Expose non-secret workspace container settings for admin UI."""
+    return {
+        "workspace_container_enabled": settings.workspace_container_enabled,
+        "workspace_container_image": settings.workspace_container_image,
+        "workspace_sidecar_idle_minutes": settings.workspace_sidecar_idle_minutes,
+        "workspace_sidecar_recycle_enabled": settings.workspace_sidecar_recycle_enabled,
+    }

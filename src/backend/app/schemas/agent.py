@@ -132,6 +132,20 @@ class CustomerConfigCreate(BaseModel):
     widget_session_ttl_hours: int = Field(
         24, ge=0, le=24 * 365, description="0 = never expire by time"
     )
+    workspace_mode: str | None = Field(
+        None,
+        description="Execution override: local | container; null = auto from subscription plan",
+    )
+
+    @field_validator("workspace_mode", mode="before")
+    @classmethod
+    def normalize_workspace_mode(cls, v: str | None) -> str | None:
+        if v is None or str(v).strip() == "":
+            return None
+        mode = str(v).strip().lower()
+        if mode not in ("local", "container"):
+            raise ValueError("workspace_mode must be local or container")
+        return mode
 
 
 class ModelCatalogRequest(BaseModel):
@@ -178,6 +192,7 @@ class CustomerConfigResponse(BaseModel):
     pre_chat_fields: list[dict] | None = None
     enabled: bool
     widget_session_ttl_hours: int = 24
+    workspace_mode: str | None = None
     created_at: datetime
     updated_at: datetime
 

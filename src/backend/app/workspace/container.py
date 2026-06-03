@@ -66,6 +66,9 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
                 exc,
             )
             return await super().ensure_ready()
+        from app.workspace.sidecar_lifecycle import touch_sidecar_activity
+
+        touch_sidecar_activity(self.ctx.user_id)
         return self.ctx
 
     def _container_script_path(self, script_path: Path) -> str:
@@ -124,6 +127,9 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
             text=True,
             check=False,
         )
+        from app.workspace.sidecar_lifecycle import touch_sidecar_activity
+
+        touch_sidecar_activity(self.ctx.user_id)
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
         if proc.returncode != 0:
@@ -153,7 +159,21 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
             check=False,
         )
         if inspect.returncode == 0 and inspect.stdout.strip() == "true":
-            return
+            from app.workspace.sidecar_lifecycle import (
+                sidecar_needs_recreate,
+                touch_sidecar_activity,
+            )
+
+            recreate, _running_image = sidecar_needs_recreate(name)
+            if recreate:
+                subprocess.run(
+                    [*self._docker_cmd(), "rm", "-f", name],
+                    capture_output=True,
+                    check=False,
+                )
+            else:
+                touch_sidecar_activity(self.ctx.user_id)
+                return
 
         if inspect.returncode == 0:
             subprocess.run(
@@ -182,3 +202,6 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
             raise RuntimeError(
                 proc.stderr.strip() or proc.stdout.strip() or "docker run failed"
             )
+        from app.workspace.sidecar_lifecycle import touch_sidecar_activity
+
+        touch_sidecar_activity(self.ctx.user_id)

@@ -70,3 +70,17 @@ async def cleanup_old_logs(retention_days: int) -> int:
     )
     return removed
 
+
+async def recycle_idle_sidecars() -> int:
+    """Worker job: remove execution sidecars idle longer than configured threshold."""
+    from app.core.config import settings
+
+    if not settings.workspace_sidecar_recycle_enabled:
+        logger.info("Worker job recycle_idle_sidecars skipped: disabled")
+        return 0
+    from app.workspace.sidecar_lifecycle import recycle_idle_sidecars as _recycle
+
+    removed = _recycle()
+    logger.info("Worker job recycle_idle_sidecars removed {}", removed)
+    return removed
+
