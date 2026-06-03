@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# Ensure local dev MySQL is reachable (start docker compose if needed).
+# Ensure local dev MySQL is reachable (start docker compose lite if needed).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-COMPOSE_FILE="$ROOT/ops/docker/docker-compose.dev.yml"
-HOST="${MCHAT_MYSQL_HOST:-127.0.0.1}"
-PORT="${MCHAT_MYSQL_PORT:-3306}"
+# shellcheck disable=SC1091
+source "$ROOT/ops/scripts/ensure-env.sh"
+
+COMPOSE_FILE=ops/docker/docker-compose.lite.yml
+ENV_FILE=ops/docker/.env
 MAX_WAIT="${MCHAT_MYSQL_WAIT_SEC:-60}"
+
+ensure_docker_env_file 2>/dev/null || true
+read_mysql_env
+
+HOST="${MCHAT_MYSQL_HOST:-127.0.0.1}"
+PORT="${MCHAT_MYSQL_PORT:-$MYSQL_PORT}"
 
 mysql_ready() {
   if command -v nc >/dev/null 2>&1; then
@@ -36,16 +44,16 @@ fi
 if ! command -v docker >/dev/null 2>&1; then
   echo "ERROR: MySQL not available on ${HOST}:${PORT} and Docker is not installed."
   echo "  Start MySQL manually, or install Docker and run:"
-  echo "  docker compose -f ops/docker/docker-compose.dev.yml up -d mysql"
+  echo "  docker compose -f ops/docker/docker-compose.lite.yml --env-file ops/docker/.env up -d mysql"
   exit 1
 fi
 
 echo "→ Starting dev MySQL (docker compose)…"
-docker compose -f "$COMPOSE_FILE" up -d mysql
+docker_compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d mysql
 
 echo "→ Waiting for MySQL on ${HOST}:${PORT} (up to ${MAX_WAIT}s)…"
 if ! wait_mysql; then
-  echo "ERROR: MySQL did not become ready. Check: docker logs mchat-dev-mysql"
+  echo "ERROR: MySQL did not become ready. Check: docker logs mchat-mysql"
   exit 1
 fi
 echo "→ MySQL ready"

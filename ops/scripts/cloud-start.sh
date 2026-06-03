@@ -32,7 +32,14 @@ trap cleanup EXIT
 kill_port "$BACKEND_PORT"
 kill_port "$FRONTEND_PORT"
 
+bash "$ROOT/ops/scripts/dev-preflight.sh"
+
+# shellcheck disable=SC1091
+source "$ROOT/ops/scripts/ensure-env.sh"
+ensure_docker_env_file 2>/dev/null || true
+sync_backend_database_url 2>/dev/null || true
 bash "$ROOT/ops/scripts/ensure-dev-mysql.sh"
+bash "$ROOT/ops/scripts/verify-mysql.sh" || exit 1
 
 # ---- Backend (Cloud: cloud.main:app) ----
 cd "$ROOT/src/backend"
