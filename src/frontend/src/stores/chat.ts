@@ -62,6 +62,42 @@ function dedupeMessages(messages: Message[]): Message[] {
   return out
 }
 
+function isConfigOrAssistantError(message: Message): boolean {
+  if (message.role !== 'assistant') return false
+  if (message.extra_data?.is_error === true) return true
+  const text = message.content || ''
+  return (
+    text.startsWith('Error:') ||
+    text.includes('未配置') ||
+    text.includes('No AI configuration') ||
+    text.includes('模型工作台') ||
+    message.id.startsWith('ai-error-')
+  )
+}
+
+function mergeServerMessagesWithLocalErrors(
+  serverMsgs: Message[],
+  localMsgs: Message[],
+): Message[] {
+  const serverIds = new Set(serverMsgs.map((m) => m.id))
+  const serverAssistantText = new Set(
+    serverMsgs.filter((m) => m.role === 'assistant').map((m) => m.content),
+  )
+  const localErrors = localMsgs.filter(
+    (m) =>
+      isConfigOrAssistantError(m) &&
+      !serverIds.has(m.id) &&
+      !serverAssistantText.has(m.content),
+  )
+  if (localErrors.length === 0) return serverMsgs
+  return dedupeMessages(
+    [...serverMsgs, ...localErrors].sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    ),
+  )
+}
+
 export interface Message {
   id: string
   conversation_id: string
@@ -344,7 +380,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       )
       set((state) => {
         if (!state.isStreaming) {
-          return { messages: serverMsgs }
+          return { messages: mergeServerMessagesWithLocalErrors(serverMsgs, state.messages) }
         }
         const localAssistants = state.messages.filter(
           (m) => m.role === 'assistant',
@@ -358,7 +394,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             streamSafetyTimer = null
           }
           return {
-            messages: serverMsgs,
+            messages: mergeServerMessagesWithLocalErrors(serverMsgs, state.messages),
             isStreaming: false,
             streamingContent: '',
           }

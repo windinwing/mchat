@@ -5,25 +5,26 @@ import {
   ChevronLeft,
   ChevronRight,
   GripVertical,
-  Hand,
   Maximize2,
   Minimize2,
-  MousePointer2,
   Save,
   Trash2,
 } from 'lucide-react'
 import {
   Background,
-  Controls,
+  MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useViewport,
   type Connection,
   type Edge,
   type Node,
+  type Viewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -52,15 +53,25 @@ import {
 } from '@/lib/patentWorkflowPresets'
 import api from '@/lib/api'
 import { PayloadMapper } from '@/components/workflow/PayloadMapper'
+import { WorkflowCanvasToolbar, type CanvasTool } from '@/components/workflow/WorkflowCanvasToolbar'
 import { workflowNodeTypes } from '@/components/workflow/WorkflowCanvasNode'
 import {
   WorkflowGraphContextMenu,
   type GraphContextMenuState,
 } from '@/components/workflow/WorkflowGraphContextMenu'
+import { WorkflowCanvasToolHint } from '@/components/workflow/WorkflowCanvasToolHint'
+import { useWorkflowGraphHistory } from '@/hooks/useWorkflowGraphHistory'
 
 export type { GraphNodeType }
 
-type CanvasTool = 'pointer' | 'pan'
+function parseStoredViewport(raw?: Record<string, unknown>): Viewport | null {
+  if (!raw || typeof raw !== 'object') return null
+  const x = Number(raw.x)
+  const y = Number(raw.y)
+  const zoom = Number(raw.zoom)
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(zoom)) return null
+  return { x, y, zoom }
+}
 
 function isEditableTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
@@ -109,6 +120,35 @@ function toSafeInt(value: string, fallback: number) {
   return Math.max(0, Math.floor(n))
 }
 
+function resolveSkillFromConfig(
+  config: Record<string, unknown>,
+  skills: WorkflowSkillOption[],
+): WorkflowSkillOption | undefined {
+  const skillId = String(config.skill_id || '')
+  const skillName = String(config.skill_name || '')
+  if (skillId) {
+    const byId = skills.find((s) => s.id === skillId)
+    if (byId) return byId
+  }
+  if (skillName) {
+    return skills.find((s) => s.name === skillName)
+  }
+  return undefined
+}
+
+function enrichSkillConfig(
+  config: Record<string, unknown>,
+  skills: WorkflowSkillOption[],
+): Record<string, unknown> {
+  const resolved = resolveSkillFromConfig(config, skills)
+  if (!resolved) return config
+  return {
+    ...config,
+    skill_id: resolved.id,
+    skill_name: resolved.name,
+  }
+}
+
 function skillLabelForNode(
   config: Record<string, unknown>,
   skills: WorkflowSkillOption[],
@@ -142,7 +182,9 @@ function toFlowNodes(
   t: (key: string) => string,
 ): Node[] {
   return graphNodes.map((node) => {
-    const config = node.config || {}
+    const rawConfig = node.config || {}
+    const config =
+      node.type === 'skill' ? enrichSkillConfig(rawConfig, skills) : rawConfig
     const skillLabel = node.type === 'skill' ? skillLabelForNode(config, skills, locale) : ''
     const category =
       node.type === 'skill'
@@ -250,9 +292,11 @@ export function WorkflowGraphEditor(props: Props) {
 function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   const { t, i18n } = useTranslation()
   const uiLocale = i18n.language || 'zh'
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, zoomIn, zoomOut, fitView, getViewport, setViewport } = useReactFlow()
+  const { zoom } = useViewport()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null)
+  const viewportInitialized = useRef(false)
   const [dark, setDark] = useState(isDarkMode())
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [propsOpen, setPropsOpen] = useState(false)
@@ -273,8 +317,46 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   const [skillSearch, setSkillSearch] = useState('')
   const [contextMenu, setContextMenu] = useState<GraphContextMenuState>(null)
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('pointer')
-  const isPointerTool = canvasTool === 'pointer'
+  const [spaceHeld, setSpaceHeld] = useState(false)
+  const [showMinimap, setShowMinimap] = useState(true)
+  const [toolHintLabel, setToolHintLabel] = useState<string | null>(null)
+  const toolHintTimerRef = useRef<number | undefined>(undefined)
+  const isPointerTool = canvasTool === 'pointer' && !spaceHeld
   const [showcaseConfig, setShowcaseConfig] = useState<PatentShowcaseConfig | null>(null)
+
+  const {
+    pushHistory,
+    undo,
+    redo,
+    clearHistory,
+    onNodeDragStart,
+    onNodeDragStop,
+    handleNodesChange,
+    handleEdgesChange,
+  } = useWorkflowGraphHistory(nodes, edges, setNodes, setEdges)
+
+  const showToolHint = useCallback(
+    (mode: 'pointer' | 'pan' | 'space') => {
+      const label =
+        mode === 'pointer'
+          ? t('workflows.canvasHintPointer')
+          : mode === 'pan'
+            ? t('workflows.canvasHintPan')
+            : t('workflows.canvasHintSpacePan')
+      setToolHintLabel(label)
+      window.clearTimeout(toolHintTimerRef.current)
+      toolHintTimerRef.current = window.setTimeout(() => setToolHintLabel(null), 1600)
+    },
+    [t],
+  )
+
+  const selectCanvasTool = useCallback(
+    (tool: CanvasTool) => {
+      setCanvasTool(tool)
+      showToolHint(tool === 'pointer' ? 'pointer' : 'pan')
+    },
+    [showToolHint],
+  )
 
   const patentPresets = useMemo(
     () =>
@@ -332,16 +414,58 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat || isEditableTarget(e.target)) return
+      if (isEditableTarget(e.target)) return
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) {
+          if (redo()) {
+            setToolHintLabel(t('workflows.canvasRedo'))
+            window.clearTimeout(toolHintTimerRef.current)
+            toolHintTimerRef.current = window.setTimeout(() => setToolHintLabel(null), 1200)
+          }
+        } else if (undo()) {
+          setToolHintLabel(t('workflows.canvasUndo'))
+          window.clearTimeout(toolHintTimerRef.current)
+          toolHintTimerRef.current = window.setTimeout(() => setToolHintLabel(null), 1200)
+        }
+        return
+      }
+      if (e.repeat) return
+      if (e.code === 'Space') {
+        e.preventDefault()
+        setSpaceHeld(true)
+        showToolHint('space')
+        return
+      }
       if (e.key === 'v' || e.key === 'V') {
-        setCanvasTool('pointer')
+        selectCanvasTool('pointer')
       } else if (e.key === 'h' || e.key === 'H') {
-        setCanvasTool('pan')
+        selectCanvasTool('pan')
+      } else if (e.key === '=' || e.key === '+') {
+        e.preventDefault()
+        zoomIn({ duration: 120 })
+      } else if (e.key === '-') {
+        e.preventDefault()
+        zoomOut({ duration: 120 })
+      } else if (e.key === '0') {
+        e.preventDefault()
+        fitView({ padding: 0.15, duration: 200 })
+      }
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !isEditableTarget(e.target)) {
+        e.preventDefault()
+        setSpaceHeld(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.clearTimeout(toolHintTimerRef.current)
+    }
+  }, [fitView, redo, selectCanvasTool, showToolHint, t, undo, zoomIn, zoomOut])
 
   useEffect(() => {
     const observer = new MutationObserver(() => setDark(isDarkMode()))
@@ -352,7 +476,24 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   useEffect(() => {
     setNodes(toFlowNodes(initial.nodes, skills, uiLocale, t))
     setEdges(toFlowEdges(initial.edges))
-  }, [initial, skills, setEdges, setNodes, t, uiLocale])
+    clearHistory()
+    const stored = parseStoredViewport(initial.viewport)
+    if (stored) {
+      setViewport(stored, { duration: 0 })
+      viewportInitialized.current = true
+    }
+  }, [clearHistory, initial, skills, setEdges, setNodes, setViewport, t, uiLocale])
+
+  const onFlowInit = useCallback(() => {
+    if (viewportInitialized.current) return
+    viewportInitialized.current = true
+    const stored = parseStoredViewport(initial.viewport)
+    if (stored) {
+      setViewport(stored, { duration: 0 })
+      return
+    }
+    fitView({ padding: 0.15, duration: 200 })
+  }, [fitView, initial.viewport, setViewport])
 
   useEffect(() => {
     const onFullscreenChange = () => setFullScreen(Boolean(document.fullscreenElement))
@@ -361,14 +502,31 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   }, [])
 
   const onConnect = useCallback(
-    (params: Connection) =>
+    (params: Connection) => {
+      pushHistory()
       setEdges((eds) =>
         addEdge({ ...params, id: `e_${params.source}_${params.target}_${Date.now()}` }, eds),
-      ),
-    [setEdges],
+      )
+    },
+    [pushHistory, setEdges],
+  )
+
+  const onNodesChangeWrapped = useCallback(
+    (changes: Parameters<typeof onNodesChange>[0]) => {
+      handleNodesChange(changes, onNodesChange)
+    },
+    [handleNodesChange, onNodesChange],
+  )
+
+  const onEdgesChangeWrapped = useCallback(
+    (changes: Parameters<typeof onEdgesChange>[0]) => {
+      handleEdgesChange(changes, onEdgesChange)
+    },
+    [handleEdgesChange, onEdgesChange],
   )
 
   const addControlNode = (nodeType: GraphNodeType, position?: { x: number; y: number }) => {
+    pushHistory()
     const id = `${nodeType}_${Date.now()}`
     const defaultName: Record<GraphNodeType, string> = {
       start: t('workflows.graphNodeStart'),
@@ -410,9 +568,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   }
 
   const buildPresetNode = (preset: PatentWorkflowPreset, position: { x: number; y: number }): Node => {
-    const skill =
-      skills.find((s) => s.name === preset.skillName) ||
-      skills.find((s) => s.name === 'patent-search' && preset.skillName === 'patent-search')
+    const skill = resolveSkillFromConfig({ skill_name: preset.skillName }, skills)
     const id = `${preset.id}_${Date.now()}`
     const label = getPatentPresetTitle(preset, uiLocale)
     const skillLabel = skill ? getSkillDisplayName(skill, uiLocale) : preset.skillName
@@ -440,6 +596,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   }
 
   const addPresetNodeAt = (preset: PatentWorkflowPreset, position: { x: number; y: number }) => {
+    pushHistory()
     const next = buildPresetNode(preset, position)
     setNodes((prev) => [...prev, next])
     setSelectedNodeId(next.id)
@@ -482,6 +639,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   }
 
   const addSkillNodeAt = (skill: WorkflowSkillOption, position: { x: number; y: number }) => {
+    pushHistory()
     const next = buildSkillNode(skill, position)
     setNodes((prev) => [...prev, next])
     setSelectedNodeId(next.id)
@@ -490,6 +648,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   }
 
   const addEmptySkillNodeAt = (position: { x: number; y: number }) => {
+    pushHistory()
     const next = buildSkillNode(null, position, t('workflows.emptySkillNode'))
     setNodes((prev) => [...prev, next])
     setSelectedNodeId(next.id)
@@ -508,12 +667,14 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   }
 
   const deleteNodeById = (nodeId: string) => {
+    pushHistory()
     setNodes((prev) => prev.filter((n) => n.id !== nodeId))
     setEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId))
     if (selectedNodeId === nodeId) setSelectedNodeId(null)
   }
 
   const deleteEdgeById = (edgeId: string) => {
+    pushHistory()
     setEdges((prev) => prev.filter((e) => e.id !== edgeId))
     if (selectedEdgeId === edgeId) setSelectedEdgeId(null)
   }
@@ -521,6 +682,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   const duplicateNodeById = (nodeId: string) => {
     const source = nodes.find((n) => n.id === nodeId)
     if (!source) return
+    pushHistory()
     const copy: Node = {
       ...source,
       id: `${nodeId}_copy_${Date.now()}`,
@@ -543,7 +705,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
       setContextMenu(null)
       const raw = event.dataTransfer.getData(DRAG_MIME)
       if (!raw || !reactFlowWrapper.current) return
-      let payload: { kind: string; skillId?: string }
+      let payload: { kind: string; skillId?: string; presetId?: string }
       try {
         payload = JSON.parse(raw)
       } catch {
@@ -595,7 +757,8 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
         if (n.id !== nodeId) return n
         const nextData = updater(n.data as any)
         if (nextData.nodeType === 'skill') {
-          const cfg = nextData.config || {}
+          const cfg = enrichSkillConfig(nextData.config || {}, skills)
+          nextData.config = cfg
           nextData.skillLabel = skillLabelForNode(cfg, skills, uiLocale)
           const cat = String(cfg.workflow_role || inferSkillCategory({ id: '', name: nextData.skillLabel, config: cfg }))
           nextData.categoryLabel = t(`workflows.skillCategory.${cat}`)
@@ -624,13 +787,18 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
   const saveGraph = () => {
     onSave({
       version: 1,
-      nodes: nodes.map((n) => ({
-        id: n.id,
-        type: ((n.data as any)?.nodeType || 'skill') as GraphNodeType,
-        name: String((n.data as any)?.label || ''),
-        position: n.position,
-        config: ((n.data as any)?.config || {}) as Record<string, unknown>,
-      })),
+      nodes: nodes.map((n) => {
+        const nodeType = ((n.data as any)?.nodeType || 'skill') as GraphNodeType
+        const rawConfig = ((n.data as any)?.config || {}) as Record<string, unknown>
+        const config = nodeType === 'skill' ? enrichSkillConfig(rawConfig, skills) : rawConfig
+        return {
+          id: n.id,
+          type: nodeType,
+          name: String((n.data as any)?.label || ''),
+          position: n.position,
+          config,
+        }
+      }),
       edges: edges.map((e) => ({
         id: e.id,
         source: e.source,
@@ -639,6 +807,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
         target_handle: e.targetHandle || undefined,
         condition: (typeof e.label === 'string' && e.label) || undefined,
       })),
+      viewport: getViewport(),
     })
   }
 
@@ -687,22 +856,6 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-2 py-1.5 dark:border-gray-800">
         <p className="truncate text-xs font-medium text-gray-600 dark:text-gray-300">{t('workflows.graphEditorTitle')}</p>
         <div className="flex items-center gap-1">
-          <div className="mr-1 flex items-center gap-0.5 rounded-md border border-gray-200 p-0.5 dark:border-gray-700">
-            <IconToolButton
-              title={t('workflows.canvasToolPointer')}
-              active={isPointerTool}
-              onClick={() => setCanvasTool('pointer')}
-            >
-              <MousePointer2 className="h-4 w-4" />
-            </IconToolButton>
-            <IconToolButton
-              title={t('workflows.canvasToolPan')}
-              active={!isPointerTool}
-              onClick={() => setCanvasTool('pan')}
-            >
-              <Hand className="h-4 w-4" />
-            </IconToolButton>
-          </div>
           <IconToolButton title={fullScreen ? t('workflows.graphExitFullscreen') : t('workflows.graphFullscreen')} onClick={toggleFullscreen}>
             {fullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </IconToolButton>
@@ -868,15 +1021,25 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
             nodeTypes={workflowNodeTypes}
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
+            onNodesChange={onNodesChangeWrapped}
+            onEdgesChange={onEdgesChangeWrapped}
             onConnect={onConnect}
+            onNodeDragStart={onNodeDragStart}
+            onNodeDragStop={onNodeDragStop}
+            onInit={onFlowInit}
+            minZoom={0.08}
+            maxZoom={2.5}
+            zoomOnScroll
+            zoomOnPinch
+            zoomOnDoubleClick={false}
+            panOnScroll={false}
             panOnDrag={isPointerTool ? [1, 2] : true}
-            panOnScroll
             selectionOnDrag={isPointerTool}
+            selectionKeyCode={isPointerTool ? 'Shift' : null}
             nodesDraggable={isPointerTool}
             nodesConnectable={isPointerTool}
             elementsSelectable={isPointerTool}
+            proOptions={{ hideAttribution: true }}
             onNodeClick={(_, node) => {
               if (!isPointerTool) return
               setContextMenu(null)
@@ -914,11 +1077,37 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
               setContextMenu({ kind: 'pane', x: e.clientX, y: e.clientY, flowX: position.x, flowY: position.y })
             }}
             onPaneClick={() => setContextMenu(null)}
-            fitView
             colorMode={dark ? 'dark' : 'light'}
           >
-            <Background />
-            <Controls />
+            <Background gap={20} size={1} />
+            <WorkflowCanvasToolbar
+              canvasTool={canvasTool}
+              onCanvasToolChange={selectCanvasTool}
+              spacePanActive={spaceHeld}
+              zoom={zoom}
+              showMinimap={showMinimap}
+              onToggleMinimap={() => setShowMinimap((v) => !v)}
+              onZoomIn={() => zoomIn({ duration: 120 })}
+              onZoomOut={() => zoomOut({ duration: 120 })}
+              onFitView={() => fitView({ padding: 0.15, duration: 200 })}
+              onResetZoom={() => setViewport({ ...getViewport(), zoom: 1 }, { duration: 150 })}
+            />
+            <WorkflowCanvasToolHint label={toolHintLabel} />
+            {showMinimap ? (
+              <Panel position="bottom-right" className="!m-3">
+                <MiniMap
+                  className="mchat-workflow-minimap !rounded-lg !border !border-gray-300 !shadow-lg dark:!border-gray-600"
+                  nodeColor={(node) => {
+                    const nodeType = ((node.data as { nodeType?: GraphNodeType })?.nodeType || 'skill') as GraphNodeType
+                    return NODE_COLORS[nodeType] || '#94a3b8'
+                  }}
+                  nodeStrokeWidth={2}
+                  maskColor={dark ? 'rgba(15, 23, 42, 0.62)' : 'rgba(255, 255, 255, 0.72)'}
+                  pannable
+                  zoomable
+                />
+              </Panel>
+            ) : null}
           </ReactFlow>
         </div>
 
@@ -993,7 +1182,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
                             <label className="block text-xs text-gray-600 dark:text-gray-300">{t('workflows.graphSkillSelect')}</label>
                             <select
                               className="block w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                              value={String(selectedNodeConfig.skill_id || '')}
+                              value={resolveSkillFromConfig(selectedNodeConfig, skills)?.id || String(selectedNodeConfig.skill_id || '')}
                               onChange={(e) => {
                                 const skill = skills.find((s) => s.id === e.target.value)
                                 updateNodeData(selectedNode.id, (data) => ({

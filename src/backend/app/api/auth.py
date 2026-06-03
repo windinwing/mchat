@@ -51,7 +51,7 @@ async def login(
         if "can't connect" in err or "operationalerror" in err:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="数据库未连接，请先启动 MySQL：docker compose -f ops/docker/docker-compose.dev.yml up -d",
+                detail="Database unavailable. Run: make db-mysql-dev or make setup",
             ) from e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -6,13 +6,16 @@ services:
   mysql:
     image: mysql:8.0
     container_name: mchat-mysql
+    env_file:
+      - path: .env
+        required: false
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-mchat}
       MYSQL_USER: ${MYSQL_USER:-mchat}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mchat123}
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      - "${MYSQL_PORT:-3307}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
@@ -29,9 +32,12 @@ services:
   # 后端服务
   backend:
     build:
-      context: ../../src/backend
-      dockerfile: Dockerfile.lite
+      context: ../..
+      dockerfile: src/backend/Dockerfile.lite
     container_name: mchat-backend
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: "mysql+aiomysql://${MYSQL_USER:-mchat}:${MYSQL_PASSWORD:-mchat123}@mysql:3306/${MYSQL_DATABASE:-mchat}"
       JWT_SECRET: ${JWT_SECRET:-change-this-to-a-random-secret-at-least-32-chars}
@@ -40,6 +46,8 @@ services:
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
       MILVUS_ENABLED: "false"
+      UPLOAD_DIR: /app/uploads
+      SKILLS_DIR: /app/skills
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "3001"
     ports:

@@ -43,11 +43,21 @@ export function useChat(conversationId?: string) {
         if (!data.conversation_id || data.conversation_id === conversationId) {
           const messageId = data.id || data.message_id
           const live = useChatStore.getState().streamingContent
+          const content = data.content || live
           finalizeStream({
             id: messageId,
             conversation_id: data.conversation_id || conversationId,
-            content: data.content || live,
+            content,
           })
+          if (
+            typeof content === 'string' &&
+            (content.startsWith('Error:') ||
+              content.includes('未配置') ||
+              content.includes('No AI configuration') ||
+              content.includes('模型工作台'))
+          ) {
+            setError(content)
+          }
         }
         return
       }
@@ -63,6 +73,15 @@ export function useChat(conversationId?: string) {
             conversation_id: msg.conversation_id || conversationId,
             content: msg.content,
           })
+          if (
+            msg.extra_data?.is_error ||
+            (typeof msg.content === 'string' &&
+              (msg.content.includes('未配置') ||
+                msg.content.startsWith('Error:') ||
+                msg.content.includes('No AI configuration')))
+          ) {
+            setError(msg.content || 'Error')
+          }
           return
         }
         const message: Message = {

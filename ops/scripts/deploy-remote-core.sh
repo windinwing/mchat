@@ -3,8 +3,9 @@
 # Usage: bash ops/scripts/deploy-remote-core.sh
 set -euo pipefail
 
-REMOTE="${1:-xiaoxiao@192.169.177.210}"
-REMOTE_DIR="/opt/xiaoxiao/mchat"
+REMOTE="${1:-${MCHAT_DEPLOY_REMOTE:-}}"
+REMOTE="${REMOTE:?Set MCHAT_DEPLOY_REMOTE or pass user@host as first argument}"
+REMOTE_DIR="${MCHAT_DEPLOY_DIR:-/opt/xiaoxiao/mchat}"
 PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 echo "==> Build frontend (Core edition)"
@@ -39,7 +40,7 @@ else
   JWT_SECRET=$(openssl rand -hex 32)
   ENV_FILE="$PROJECT_DIR/ops/deploy/.env.production.generated"
   cat > "$ENV_FILE" <<'EOF'
-DATABASE_URL=mysql+aiomysql://mchat:112358xx@127.0.0.1:3306/mchat
+DATABASE_URL=mysql+aiomysql://mchat:CHANGE_ME@127.0.0.1:3306/mchat
 
 JWT_SECRET=__JWT_SECRET__
 JWT_ALGORITHM=HS256

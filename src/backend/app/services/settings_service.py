@@ -1,7 +1,8 @@
 """Settings service - business logic for system configuration."""
 
-from collections import deque
 import json
+import os
+from collections import deque
 from pathlib import Path
 
 from sqlalchemy import select
@@ -61,7 +62,12 @@ class SettingsService:
         milvus_host = get_val("milvus_host", DEFAULT_SETTINGS.milvus_host)
         milvus_port = get_val("milvus_port", DEFAULT_SETTINGS.milvus_port)
         storage_backend = get_val("storage_backend", DEFAULT_SETTINGS.storage_backend)
-        upload_dir_raw = get_val("upload_dir", DEFAULT_SETTINGS.upload_dir)
+        upload_default = (
+            os.environ.get("UPLOAD_DIR", "").strip()
+            or settings.upload_dir
+            or DEFAULT_SETTINGS.upload_dir
+        )
+        upload_dir_raw = get_val("upload_dir", upload_default)
         upload_dir = str(resolve_upload_root(upload_dir_raw))
         max_upload_size_mb = get_val(
             "max_upload_size_mb", DEFAULT_SETTINGS.max_upload_size_mb
@@ -179,7 +185,10 @@ class SettingsService:
 
         # Keep runtime storage settings in sync with persisted settings.
         settings.storage_backend = storage_backend
-        settings.upload_dir = upload_dir
+        env_upload = os.environ.get("UPLOAD_DIR", "").strip()
+        settings.upload_dir = (
+            str(resolve_upload_root(env_upload)) if env_upload else upload_dir
+        )
         settings.max_upload_size_mb = max_upload_size_mb
         settings.s3_endpoint = s3_endpoint
         settings.s3_region = s3_region

@@ -62,7 +62,7 @@
 
 [![工作流图编辑器](images/workflow.graph.cn.png)](images/workflow.graph.cn.png)
 
-详细说明：[Workflow 编排器（Beta）](workflow-orchestrator.zh.md) · [产品路线图](roadmap.zh.md)
+详细说明：[Workflow orchestrator（英文）](workflow-orchestrator.en.md) · [中文译本](workflow-orchestrator.zh.md) · [产品路线图](roadmap.zh.md)
 
 ---
 

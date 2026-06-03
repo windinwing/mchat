@@ -27,7 +27,7 @@ MChat 是一款**轻量、可嵌入、多租户**的垂直领域 RAG 平台，�
 - [中文主站](https://mchat.9235.net)
 - [完整图片说明](docs/product-tour.zh.md)
 - [产品路线图](docs/roadmap.zh.md)（知识库、Widget、渠道、API、运营、权限、Workflow）
-- [Workflow 编排（Beta）](docs/workflow-orchestrator.zh.md)
+- [Workflow 编排（Beta）](docs/workflow-orchestrator.en.md) · [中文](docs/workflow-orchestrator.zh.md)
 
 ## 界面预览
 
@@ -79,20 +79,78 @@ MChat 是一款**轻量、可嵌入、多租户**的垂直领域 RAG 平台，�
 - **多渠道** — Web Widget、REST、WebSocket、微信公众号（钉钉/WhatsApp/Telegram 等 [规划中](docs/roadmap.zh.md#3-多渠道频道)）
 - **语音输入** — OpenAI Whisper 转写（可选本地模型）
 - **安全认证** — JWT、API Key、RBAC
-- **Docker 部署** — `docker compose up -d` 一键启动
+- **Docker 部署** — `make docker-up-lite` 一键启动
+
+## Workflow 编排（Beta）
+
+MChat **Workflow** 把多个 Skill 串成可复用流程——不只是单轮对话，而是支持**并行分支、条件路由、人工审批**与**结构化产出**（报表、导出、告警）的多步自动化。
+
+```mermaid
+flowchart LR
+  T[手动 / 定时 / 频道消息] --> W[Workflow 图]
+  W --> S1[Skill 节点]
+  W --> S2[Skill 节点]
+  S1 --> M[Merge 合并]
+  S2 --> M
+  M --> E[结束 / 导出 / 通知]
+```
+
+| 概念 | 作用 |
+|------|------|
+| **Skill** | 最小执行单元（工具、函数、Webhook，如 `patent-search`、自定义技能包） |
+| **Workflow** | 线性步骤或 **图编排**（`graph_json`），把多个 Skill 连成 DAG |
+| **触发方式** | **手动**（管理后台立即运行）、**定时**（技能定时任务 + Worker）、**频道**（微信 / Telegram / Web 等消息规则） |
+
+**可视化图编辑器**（管理后台 → **工作流**，`/admin/workflows`）：
+
+- ComfyUI 风格画布：指针 / 平移切换（`V` / `H`），从左栏技能库拖拽节点
+- 节点类型：`start` · `skill` · `condition` · `approval` · `merge` · `end`
+- **参数映射器** — 每节点可写 `${input.keyword}`、`${nodes.<id>.result.xxx}` 等模板
+- **Merge** — 等待并行分支全部完成，再交给下游图表/导出节点
+- **审批** — 运行暂停，运营在后台批准或拒绝后续继续
+
+**模板**：内置如 **专利多维分析报表**（检索 → 多维度并行分析 → 合并 → 图表/Excel/Word/PPT）。任意工作流可 **保存为模板**，在「我的模板」一键复用；按 `skill_name` 绑定技能，安装技能后即可跨环境使用同一拓扑。
+
+**典型用法**：同一个 `patent-search` 可在多个节点重复出现——检索用 `command: search`，各维度分析用 `command: analysis` + 不同 `dimension`，最后用 `patent-report` 做图表与 Office 导出。
+
+**快速体验**
+
+1. `make setup && make dev`（或 `make docker-up-lite`）
+2. 在 **管理后台 → 技能** 安装所需 Skill（如 `patent-search`、`patent-report`）
+3. 打开 **管理后台 → 工作流**，选用模板或自行连线，点击 **立即运行**
+4. **定时触发**需启动 Worker：`make dev-worker`，或在 `.env` 中设置 `WORKER_ENABLED=true`
+
+> **Beta** — 主链路可用于生产验证；图 DSL 与 UI 仍可能调整。  
+> 详细说明：[Workflow orchestrator（英文主文档）](docs/workflow-orchestrator.en.md) · [中文译本](docs/workflow-orchestrator.zh.md) · [产品导览 — Workflow](docs/product-tour.zh.md#workflow-编排beta) · API：[api.en.md#workflows-beta](docs/api.en.md#workflows-beta)
 
 ## 快速开始
 
 ### Docker（推荐）
+
 ```bash
 git clone https://github.com/windinwing/mchat.git
 cd mchat
 
-docker compose -f ops/docker/docker-compose.lite.yml up -d
+make docker-up-lite
+# 若本机 Docker 需要 sudo，脚本会自动使用
 
-# 管理后台: http://localhost:5173
+# 管理后台: http://localhost:5173/admin
 # API 文档:  http://localhost:3001/docs
-# 项目主页:  http://localhost:5173/
+# 默认管理员: admin / admin123
+```
+
+手动等价命令（需先复制 `.env`）：
+
+```bash
+cp ops/docker/.env.example ops/docker/.env
+docker compose -f ops/docker/docker-compose.lite.yml --env-file ops/docker/.env up -d --build
+```
+
+更新代码后重建镜像：
+
+```bash
+docker compose -f ops/docker/docker-compose.lite.yml --env-file ops/docker/.env build --no-cache backend frontend
+docker compose -f ops/docker/docker-compose.lite.yml --env-file ops/docker/.env up -d
 ```
 
 **默认管理员账号**（首次启动自动创建）：`admin` / `admin123`  
@@ -113,28 +171,71 @@ docker compose -f ops/docker/docker-compose.lite.yml up -d
 
 ### 本地开发
 
-```bash
-make install   # 安装依赖
-make db-mysql-dev   # 可选：本地 MySQL
-ollama pull nomic-embed-text   # 推荐：本地 Embedding（知识库向量）
-make dev         # Core 本地开发（app.main，管理后台无「模板」菜单）
-make cloud       # Cloud 本地开发（cloud.main + 方案市场 / 门户）
+**系统依赖**（新机器请先安装）：
 
-# 后端: http://localhost:3001  (/docs 为 Swagger)
-# 前端: http://localhost:5173
+| 依赖 | 版本 | Ubuntu/Debian 示例 |
+|------|------|---------------------|
+| Python | 3.10+（推荐 3.12） | `sudo apt install python3.12 python3.12-venv` 或 pyenv：`pyenv install 3.12.0 && pyenv local 3.12.0` |
+| Node.js | 20+ | [nodejs.org](https://nodejs.org/) 或 `nvm install 20`（**make dev 必须**，Docker 构建亦用 20） |
+| Docker | 最新 | 用于本地 MySQL（`make db-mysql-dev`） |
+| make | — | `sudo apt install make` |
+
+> **说明**：`make` 使用 bash 并 `source venv`。**不要**对 `make setup` / `make install` / `make dev` 使用 sudo。  
+> 短命令 `mchat`：先 `make install`，再 `source scripts/env.sh`，或 `./bin/mchat`。
+
+**git pull 之后（二选一）**：
+
+```bash
+# 路径 A — 本地热重载
+git pull
+make setup && make dev
+
+# 路径 B — Docker 全栈
+git pull
+make docker-up-lite
+```
+
+**Docker 常用命令**：
+
+| 命令 | 说明 |
+|------|------|
+| `make docker-up-lite` | 初始化并启动（MySQL + 后端 + 前端） |
+| `make docker-down-lite` | 停止 lite 栈（保留数据） |
+| `make docker-logs-lite` | 查看日志 |
+| `make db-docker-reset-lite` | 删 MySQL volume（密码不对时） |
+| `make db-mysql-dev` | 仅启动 MySQL（配合 make dev） |
+
+**全新重测**：`MCHAT_RESET_FORCE=1 make reset-fresh`
+
+**首次 clone**：`git clone ... && cd mchat && make setup && make dev`
+
+**注意**：
+
+- `make dev` **必须 Node.js 20+**（Tailwind/Vite 6）
+- MySQL 默认宿主机端口 **3307**，账号 `mchat` / `mchat123`
+- `make dev` 若 5173 被 Docker 前端占用，会自动 stop 前端/后端容器（保留 MySQL）
+- 远程部署：`MCHAT_DEPLOY_REMOTE=user@host make deploy-core`（或 `deploy-cloud`）
+
+```bash
+make cloud       # Cloud 本地开发（cloud.main + 方案市场 / 门户）
+make test        # 运行测试
+make lint        # 代码检查
+
+# 短命令 CLI（install 之后，任选其一）:
+source scripts/env.sh && mchat run
+./bin/mchat run
 ```
 
 | 命令 | 后端 | 管理后台「模板」 | 门户 / 方案市场 |
 |------|------|------------------|-----------------|
 | `make dev` | `app.main:app` | 无 | 无 |
 | `make cloud` | `cloud.main:app` | 有 | 有 |
-| `make deploy-core` | Core | 无 | 无 |
-| `make deploy-cloud` | Cloud | 有 | 有 |
-```bash
-make test      # 运行测试
-make lint      # 代码检查
-mchat run      # CLI 启动服务
-```
+| `make deploy-core` | Core（需 `MCHAT_DEPLOY_REMOTE`） | 无 | 无 |
+| `make deploy-cloud` | Cloud（需 `MCHAT_DEPLOY_REMOTE`） | 有 | 有 |
+
+# 后端: http://localhost:3001  (/docs 为 Swagger)
+# 前端: http://localhost:5173
+# 管理后台: http://localhost:5173/admin  （默认账号 admin / admin123）
 
 ## 项目结构
 
@@ -198,16 +299,18 @@ mchat/
 
 ## CLI 工具
 
+`make install` 会安装 CLI。推荐在当前 shell 加载环境后使用短命令：
+
 ```bash
-mchat init
+source scripts/env.sh   # PATH + venv activate（bash/zsh）
 mchat run
-mchat config show
 mchat skill list
-mchat skill create <name>
-mchat skill install <url-or-name>
 mchat db init
-mchat db seed
 ```
+
+不 source 时可用：`./bin/mchat run`
+
+日常开发直接 `make dev` 即可。
 ## Skill 兼容说明
 
 - 支持标准 frontmatter `SKILL.md` 技能包
@@ -221,10 +324,9 @@ mchat db seed
 
 | 文件 | 服务 | 场景 |
 |------|------|------|
-| `docker-compose.lite.yml` | MySQL + 后端 + 前端 | 开发 / 轻量 |
+| `docker-compose.lite.yml` | MySQL + 后端 + 前端 | **默认**（`make setup` / `make docker-up-lite`） |
 | `docker-compose.yml` | + Milvus、etcd、MinIO、Redis | 完整 RAG |
 | `docker-compose.prod.yml` | + Nginx HTTPS | 生产 |
-| `docker-compose.dev.yml` | 热重载 | 本地开发 |
 
 ## 技术栈
 

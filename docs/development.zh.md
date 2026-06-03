@@ -9,38 +9,59 @@ git clone https://github.com/your-org/mchat.git
 cd mchat
 ```
 
-### 2. 启动开发数据库
+### 2. 系统依赖（新机器）
+
+**Ubuntu / Debian：**
 
 ```bash
-docker compose -f ops/docker/docker-compose.dev.yml up -d mysql
+sudo apt update
+sudo apt install -y git make python3 python3-venv python3-pip docker.io docker-compose-plugin
+# Node.js 20+：见 https://nodejs.org/ 或使用 nvm
 ```
 
-### 3. 后端开发
+### 3. 一键搭建（推荐）
+
+在项目根目录：
 
 ```bash
+make setup   # lite MySQL、同步 .env、install、建表
+make dev     # 本地热重载
+# 或 Docker 全栈: make docker-up-lite
+```
+
+等价于 `bash ops/scripts/setup.sh` + `make dev`。
+
+### 4. 手动搭建
+
+#### 启动开发数据库
+
+```bash
+make db-mysql-dev   # 仅启动 lite MySQL（与 make setup 相同容器）
+```
+
+#### 后端开发
+
+```bash
+make install
+# 或手动（与 make 相同，使用 source）:
 cd src/backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+pip install -e .
 cp .env.example .env
-# 编辑 .env 配置数据库连接
-
-# 初始化数据库表
-python -c "
-from app.core.database import engine, Base
-from app.models import *  # noqa
-import asyncio
-async def init():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-asyncio.run(init())
-"
-
-# 启动开发服务器（热重载）
+python -m app.cli db init
 uvicorn app.main:app --reload --port 3001
 ```
 
-### 4. 前端开发
+加载项目环境后可使用短命令：
+
+```bash
+source scripts/env.sh
+mchat skill list
+```
+
+### 5. 前端开发
 
 ```bash
 cd src/frontend
@@ -48,7 +69,7 @@ npm install
 npm run dev  # 启动在 http://localhost:5173
 ```
 
-### 5. 访问
+### 6. 访问
 
 - 前端: http://localhost:5173
 - 后端 API: http://localhost:3001

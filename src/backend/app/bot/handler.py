@@ -5,6 +5,7 @@ from loguru import logger
 from sqlalchemy import select
 
 from app.bot.engine import process_message
+from app.bot.reply_persist import ensure_assistant_reply_persisted, persist_assistant_reply
 from app.services.llm_credentials import ensure_ai_config_api_key, is_usable_api_key
 from app.core.database import async_session_factory
 from app.core.event_bus import event_bus
@@ -116,16 +117,21 @@ async def on_message_created(
                     "Please configure an AI provider in the admin panel."
                 )
                 logger.warning(error_msg)
+                err_row = await persist_assistant_reply(
+                    db, conv, error_msg, is_error=True
+                )
+                await db.commit()
                 await ws_manager.send_to_conversation(
                     cov_id,
                     {
                         "type": "chat:message",
                         "message": {
-                            "id": f"ai-error-{message.id}",
+                            "id": err_row.id,
                             "role": "assistant",
                             "content": error_msg,
                             "conversation_id": cov_id,
-                            "created_at": "2025-01-01T00:00:00Z",
+                            "created_at": err_row.created_at.isoformat(),
+                            "extra_data": {"is_error": True},
                         },
                     },
                 )
@@ -138,16 +144,21 @@ async def on_message_created(
                     "或在 .env 设置 DEEPSEEK_API_KEY / MOONSHOT_API_KEY。"
                 )
                 logger.warning(error_msg)
+                err_row = await persist_assistant_reply(
+                    db, conv, error_msg, is_error=True, ai_config=ai_config
+                )
+                await db.commit()
                 await ws_manager.send_to_conversation(
                     cov_id,
                     {
                         "type": "chat:message",
                         "message": {
-                            "id": f"ai-error-{message.id}",
+                            "id": err_row.id,
                             "role": "assistant",
                             "content": error_msg,
                             "conversation_id": cov_id,
-                            "created_at": "2025-01-01T00:00:00Z",
+                            "created_at": err_row.created_at.isoformat(),
+                            "extra_data": {"is_error": True},
                         },
                     },
                 )
@@ -179,7 +190,11 @@ async def on_message_created(
 
             await db.flush()
 
-            # If the model failed without persisting (e.g. connection error), save a visible reply
+            assistant_row = await ensure_assistant_reply_persisted(
+                db, conv, message, full_content, ai_config=ai_config
+            )
+            assistant_id = assistant_row.id if assistant_row is not None else None
+
             if not full_content.strip():
                 msg_result = await db.execute(
                     select(Message)
@@ -193,33 +208,16 @@ async def on_message_created(
                 last_assistant = msg_result.scalar_one_or_none()
                 if last_assistant is not None:
                     full_content = last_assistant.content or ""
+                    assistant_id = last_assistant.id
                 else:
                     full_content = (
                         "AI 未返回可见内容（可能仅调用了工具但结果未展示）。"
                         "请重试；若仍失败，请检查 API Key、Base URL 与网络连接。"
                     )
-                    fallback = Message(
-                        conversation_id=cov_id,
-                        role="assistant",
-                        content=full_content,
+                    fallback = await persist_assistant_reply(
+                        db, conv, full_content, is_error=True, ai_config=ai_config
                     )
-                    db.add(fallback)
-                    await db.flush()
-
-            assistant_id = None
-            if full_content.strip():
-                msg_result = await db.execute(
-                    select(Message)
-                    .where(
-                        Message.conversation_id == cov_id,
-                        Message.role == "assistant",
-                    )
-                    .order_by(Message.created_at.desc(), Message.id.desc())
-                    .limit(1)
-                )
-                assistant_row = msg_result.scalar_one_or_none()
-                if assistant_row is not None:
-                    assistant_id = assistant_row.id
+                    assistant_id = fallback.id
 
             # Signal stream end (include DB id so UI can dedupe)
             await ws_manager.send_to_conversation(
@@ -238,6 +236,35 @@ async def on_message_created(
 
     except Exception as e:
         logger.error(f"Bot engine error: {e}", exc_info=True)
+        err_text = f"Sorry, I encountered an error: {str(e)}"
+        try:
+            async with async_session_factory() as err_db:
+                conv_result = await err_db.execute(
+                    select(Conversation).where(Conversation.id == cov_id)
+                )
+                conv = conv_result.scalar_one_or_none()
+                if conv is not None:
+                    err_row = await persist_assistant_reply(
+                        err_db, conv, err_text, is_error=True
+                    )
+                    await err_db.commit()
+                    await ws_manager.send_to_conversation(
+                        cov_id,
+                        {
+                            "type": "chat:message",
+                            "message": {
+                                "id": err_row.id,
+                                "role": "assistant",
+                                "content": err_text,
+                                "conversation_id": cov_id,
+                                "created_at": err_row.created_at.isoformat(),
+                                "extra_data": {"is_error": True},
+                            },
+                        },
+                    )
+                    return
+        except Exception as persist_err:
+            logger.error(f"Failed to persist bot error reply: {persist_err}")
         await ws_manager.send_to_conversation(
             cov_id,
             {
@@ -245,7 +272,7 @@ async def on_message_created(
                 "message": {
                     "id": f"ai-error-{message.id}",
                     "role": "assistant",
-                    "content": f"Sorry, I encountered an error: {str(e)}",
+                    "content": err_text,
                     "conversation_id": cov_id,
                     "created_at": "2025-01-01T00:00:00Z",
                 },

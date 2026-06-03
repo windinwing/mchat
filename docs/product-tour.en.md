@@ -62,7 +62,7 @@ Chain multiple Skills into a DAG — manual runs, schedules, and channel trigger
 
 [![Workflow graph editor](images/workflow.graph.en.png)](images/workflow.graph.en.png)
 
-Details: [Workflow orchestrator (Beta)](workflow-orchestrator.zh.md) (Chinese, implementation reference) · [Roadmap](roadmap.en.md)
+Details: [Workflow orchestrator (Beta)](workflow-orchestrator.en.md) · [Roadmap](roadmap.en.md)
 
 ---
 

@@ -3,8 +3,9 @@
 # Usage: bash ops/scripts/deploy-remote-cloud.sh
 set -euo pipefail
 
-REMOTE="${1:-xiaoxiao@10.98.8.15}"
-REMOTE_DIR="/opt/xiaoxiao/mchat"
+REMOTE="${1:-${MCHAT_DEPLOY_REMOTE:-}}"
+REMOTE="${REMOTE:?Set MCHAT_DEPLOY_REMOTE or pass user@host as first argument}"
+REMOTE_DIR="${MCHAT_DEPLOY_DIR:-/opt/xiaoxiao/mchat}"
 PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 echo "==> Build frontend (Cloud edition)"
@@ -62,8 +63,8 @@ else
   JWT_SECRET=$(openssl rand -hex 32)
   ENV_FILE="$PROJECT_DIR/ops/deploy/.env.production.generated"
   cat > "$ENV_FILE" <<'EOF'
-DATABASE_URL=mysql+aiomysql://mchat:112358xx@10.98.8.8:3306/mchat
-REDIS_URL=redis://10.98.8.12:6379/0
+DATABASE_URL=mysql+aiomysql://mchat:CHANGE_ME@localhost:3306/mchat
+REDIS_URL=redis://localhost:6379/0
 
 JWT_SECRET=__JWT_SECRET__
 JWT_ALGORITHM=HS256

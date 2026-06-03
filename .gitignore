@@ -83,6 +83,9 @@ tmp/
 temp/
 src/frontend/index.html.bak
 
-# Internal ops docs (local only, not committed)
+# Personal host-specific ops (rsync targets, nginx vhosts, deploy hosts)
+ops/local/
+
+# Internal ops docs (local only)
 docs/core-cloud-split.zh.md
 docs/core-cloud-split.en.md

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Send, Paperclip, X, Mic, Square, Link2, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSpeechInput } from '@/hooks/useSpeechInput'
+import { useInputHistory } from '@/hooks/useInputHistory'
 import { ChatSendOptions, OutboundAsset } from '@/stores/chat'
 
 interface ChatInputProps {
@@ -59,6 +60,7 @@ export function ChatInput({
   /** 开始录音前的输入框内容，避免预览与最终写入叠加重复 */
   const speechBaseRef = useRef('')
   const wasListeningRef = useRef(false)
+  const inputHistory = useInputHistory()
 
   const speechMessages = useMemo(
     () => ({
@@ -122,6 +124,7 @@ export function ChatInput({
       role: sendRole,
       outboundAssets: outboundLinks.length > 0 ? outboundLinks : undefined,
     })
+    if (trimmed) inputHistory.pushSent(trimmed)
     setContent('')
     setSelectedFile(null)
     setOutboundLinks([])
@@ -134,10 +137,55 @@ export function ChatInput({
     }
   }
 
+  const getTextInputEl = () =>
+    singleLine ? inputRef.current : textareaRef.current
+
+  const atInputStart = () => {
+    const el = getTextInputEl()
+    if (!el) return true
+    return el.selectionStart === 0 && el.selectionEnd === 0
+  }
+
+  const atInputEnd = () => {
+    const el = getTextInputEl()
+    if (!el) return true
+    return el.selectionStart === el.value.length && el.selectionEnd === el.value.length
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!atInputStart()) return
+      const recalled = inputHistory.navigate(-1, content)
+      if (recalled !== null) {
+        e.preventDefault()
+        setContent(recalled)
+        if (speech.isListening) speechBaseRef.current = recalled
+      }
+      return
+    }
+    if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!inputHistory.isBrowsing()) return
+      if (!atInputEnd()) return
+      const recalled = inputHistory.navigate(1, content)
+      if (recalled !== null) {
+        e.preventDefault()
+        setContent(recalled)
+        if (speech.isListening) speechBaseRef.current = recalled
+      }
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
+    }
+  }
+
+  const handleInputChange = (value: string) => {
+    if (inputHistory.isBrowsing()) inputHistory.resetBrowse()
+    if (speech.isListening) {
+      speechBaseRef.current = value.replace(speech.interimText, '').trimEnd()
+    } else {
+      setContent(value)
     }
   }
 
@@ -385,18 +433,12 @@ export function ChatInput({
               ref={inputRef}
               type="text"
               value={inputValue}
-              onChange={(e) => {
-                const v = e.target.value
-                if (speech.isListening) {
-                  speechBaseRef.current = v.replace(speech.interimText, '').trimEnd()
-                } else {
-                  setContent(v)
-                }
-              }}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={displayPlaceholder}
               disabled={disabled}
+              title={t('chat.inputHistoryHint')}
               className={cn(
                 'block w-full h-10 rounded-xl border border-gray-300 bg-gray-50 px-4 text-sm',
                 'placeholder:text-gray-400',
@@ -410,18 +452,12 @@ export function ChatInput({
             <textarea
               ref={textareaRef}
               value={inputValue}
-              onChange={(e) => {
-                const v = e.target.value
-                if (speech.isListening) {
-                  speechBaseRef.current = v.replace(speech.interimText, '').trimEnd()
-                } else {
-                  setContent(v)
-                }
-              }}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={displayPlaceholder}
               disabled={disabled}
+              title={t('chat.inputHistoryHint')}
               rows={1}
               className={cn(
                 'block w-full min-h-[42px] h-auto resize-none rounded-xl border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm',

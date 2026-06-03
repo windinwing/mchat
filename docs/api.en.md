@@ -396,6 +396,46 @@ Initialize a visitor conversation (no auth required).
 
 ---
 
+## Workflows (Beta)
+
+> Chain multiple Skills into flows with linear steps or a `graph_json` DAG. See [workflow-orchestrator.en.md](./workflow-orchestrator.en.md).
+
+Permissions: `skills:read` / `skills:write`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/workflows/templates` | Built-in + my templates (`?locale=en\|zh`) |
+| GET | `/workflows/showcase-config` | Patent workflow showcase config (skill names, install status) |
+| POST | `/workflows/{workflow_id}/save-as-template` | Save workflow graph as my template |
+| DELETE | `/workflows/templates/{template_id}` | Delete my template |
+| POST | `/workflows/from-template/{template_id}` | Create workflow from template (auto-resolve `skill_name`) |
+| GET | `/workflows` | List workflows |
+| POST | `/workflows` | Create workflow |
+| PATCH | `/workflows/{workflow_id}` | Update (including `graph_json`) |
+| DELETE | `/workflows/{workflow_id}` | Delete |
+| GET | `/workflows/{workflow_id}/steps` | List linear steps |
+| PUT | `/workflows/{workflow_id}/steps` | Replace linear steps |
+| POST | `/workflows/{workflow_id}/run-once` | Manual run |
+| GET | `/workflows/runs/list` | Run history (`?workflow_id=` optional) |
+| GET | `/workflows/runs/{run_id}` | Run detail (`step_runs` / `node_runs`) |
+| POST | `/workflows/runs/{run_id}/resume` | Resume after approval |
+| GET | `/workflows/approvals/pending` | Pending approvals |
+| POST | `/workflows/approvals/{approval_id}/approve` | Approve |
+| POST | `/workflows/approvals/{approval_id}/reject` | Reject |
+
+**POST /workflows/{workflow_id}/run-once request body:**
+```json
+{
+  "payload": { "query": "example input" }
+}
+```
+
+**Channel workflow rules** (bindings, preview, templates, stats): `/channels/{channel_id}/workflows/*` and `/channels/templates/workflow`.
+
+**Schedule triggers**: `/skill-schedules` (optional `workflow_id`).
+
+---
+
 ## Channel Management
 
 | Method | Path | Description |

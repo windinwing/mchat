@@ -5,7 +5,7 @@
 - [English README](README.md)
 - [产品导览（截图）](docs/product-tour.zh.md)
 - [产品路线图](docs/roadmap.zh.md)
-- [Workflow 编排（Beta）](docs/workflow-orchestrator.zh.md)
+- [Workflow orchestrator (Beta)](docs/workflow-orchestrator.en.md) · [中文](docs/workflow-orchestrator.zh.md)
 
 ## 界面预览 · Workflow（Beta）
 

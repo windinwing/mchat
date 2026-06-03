@@ -51,4 +51,4 @@ curl -sf -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5180/ | grep -q 200 &
 
 systemctl --user status mchat-backend.service --no-pager -l || true
 echo ""
-echo "Done. Web: http://10.98.8.15:5180/admin  API: http://10.98.8.15:3001/docs"
+echo "Done. Check your server URL for /admin and /docs"

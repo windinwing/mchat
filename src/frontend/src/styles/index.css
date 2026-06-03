@@ -88,3 +88,14 @@ body {
   min-height: 2.625rem;
   height: auto;
 }
+
+/* Workflow graph — ComfyUI-style minimap */
+.mchat-workflow-minimap {
+  width: 200px !important;
+  height: 132px !important;
+  background: rgb(255 255 255 / 0.92) !important;
+}
+
+.dark .mchat-workflow-minimap {
+  background: rgb(17 24 39 / 0.92) !important;
+}

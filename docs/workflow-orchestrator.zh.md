@@ -1,8 +1,10 @@
 # Workflow 编排器（Beta）
 
+**[English](workflow-orchestrator.en.md)** · 本文档为中文译本；实现细节以英文版与代码为准。
+
 > **状态：Beta** — 核心链路已可用于生产验证，但 API、图 DSL 与 UI 仍可能调整。详见下文「已知限制」。
 
-MChat Workflow 用于将多个 Skill 编排为可复用流程，统一支撑**手动触发**、**定时触发**与**频道消息触发**。设计文档与实现以代码为准；API 明细见 [api.zh.md](./api.zh.md#工作流-beta)。
+MChat Workflow 用于将多个 Skill 编排为可复用流程，统一支撑**手动触发**、**定时触发**与**频道消息触发**。设计文档与实现以代码为准；API 明细见 [api.zh.md](./api.zh.md#工作流-beta)（英文 API 索引见 [api.en.md — Workflows](./api.en.md#workflows-beta)）。
 
 界面截图见 [产品导览 · Workflow](product-tour.zh.md#workflow-编排beta)（含中英文列表页与图编辑器）。
 

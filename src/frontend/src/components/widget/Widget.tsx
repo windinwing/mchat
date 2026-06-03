@@ -288,8 +288,15 @@ export function Widget({
           </div>
         </div>
         {chat.error && (
-          <div className="shrink-0 mx-2 mt-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-600">
+          <div className="shrink-0 mx-2 mt-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-600 dark:bg-red-950/40 dark:border-red-900 dark:text-red-300">
             {chat.error}
+            <button
+              type="button"
+              className="ml-2 underline"
+              onClick={() => chat.setError(null)}
+            >
+              {t('common.close')}
+            </button>
           </div>
         )}
         <div className="flex-1 min-h-0">{chatBody}</div>

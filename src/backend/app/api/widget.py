@@ -404,6 +404,7 @@ async def widget_chat(
             visitor_token=body.visitor_token,
         )
         from app.bot.engine import process_message
+        from app.bot.reply_persist import ensure_assistant_reply_persisted
 
         skill_ids_override = await _resolve_skill_override_ids(
             db,
@@ -423,7 +424,15 @@ async def widget_chat(
             full_response += token
 
         await db.flush()
-        assistant_msg = await resolve_assistant_message(db, ctx.conversation.id)
+        assistant_msg = await ensure_assistant_reply_persisted(
+            db,
+            ctx.conversation,
+            ctx.user_message,
+            full_response,
+            ctx.ai_config,
+        )
+        if assistant_msg is None:
+            assistant_msg = await resolve_assistant_message(db, ctx.conversation.id)
         await db.commit()
 
         return WidgetChatResponse(
@@ -452,6 +461,7 @@ async def widget_chat_stream(
 
     async def event_generator():
         from app.bot.engine import process_message
+        from app.bot.reply_persist import ensure_assistant_reply_persisted
 
         async with async_session_factory() as db:
             try:
@@ -481,9 +491,17 @@ async def widget_chat_stream(
                     yield sse_line("token", {"content": token})
 
                 await db.flush()
-                assistant_msg = await resolve_assistant_message(
-                    db, ctx.conversation.id
+                assistant_msg = await ensure_assistant_reply_persisted(
+                    db,
+                    ctx.conversation,
+                    ctx.user_message,
+                    full_response,
+                    ctx.ai_config,
                 )
+                if assistant_msg is None:
+                    assistant_msg = await resolve_assistant_message(
+                        db, ctx.conversation.id
+                    )
                 await db.commit()
 
                 yield sse_line(

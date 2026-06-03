@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from app.core.config import settings
 
 
+def _backend_root() -> Path:
+    """Directory containing the `app` package (src/backend locally, /app in Docker)."""
+    return Path(__file__).resolve().parents[2]
+
+
 def resolve_upload_root(raw: str | None = None) -> Path:
-    """Return absolute upload root (relative paths are resolved from process cwd)."""
-    value = (raw if raw is not None else settings.upload_dir or "").strip()
-    if not value:
-        value = "../../uploads"
-    path = Path(value).expanduser()
+    """Return absolute upload root."""
+    if raw is None:
+        env_upload = os.environ.get("UPLOAD_DIR", "").strip()
+        raw = env_upload or (settings.upload_dir or "").strip()
+    if not raw:
+        raw = "../../uploads"
+    path = Path(raw).expanduser()
     if not path.is_absolute():
-        path = (Path.cwd() / path).resolve()
+        path = (_backend_root() / path).resolve()
     else:
         path = path.resolve()
     return path

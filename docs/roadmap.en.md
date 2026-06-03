@@ -181,7 +181,7 @@ Discuss on [GitHub Issues](https://github.com/windinwing/mchat/issues).
 | Templates | Patent multi-dimension report (zh/en), skill_name auto-bind |
 | Alerts | Failure/rejection webhook (`WORKFLOW_ALERT_WEBHOOK_URL`) |
 
-See [workflow-orchestrator.zh.md](workflow-orchestrator.zh.md) for DSL and template details.
+See [workflow-orchestrator.en.md](workflow-orchestrator.en.md) for DSL and template details ([中文](workflow-orchestrator.zh.md)).
 
 ### Planned
 

@@ -54,7 +54,13 @@ export function MessageBubble({
   const displayContent = isStreaming ? streamingContent || '' : message.content
   const throttledContent = useThrottledValue(displayContent, isStreaming ? 50 : 0)
   const isErrorReply =
-    !isUser && (displayContent.startsWith('Error:') || displayContent.includes('Connection error'))
+    !isUser &&
+    (message.extra_data?.is_error === true ||
+      displayContent.startsWith('Error:') ||
+      displayContent.includes('未配置') ||
+      displayContent.includes('No AI configuration') ||
+      displayContent.includes('模型工作台') ||
+      displayContent.includes('Connection error'))
   const assistantText = isErrorReply
     ? displayContent
     : prepareAssistantMarkdown(throttledContent)

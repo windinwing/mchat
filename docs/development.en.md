@@ -9,13 +9,21 @@ git clone https://github.com/your-org/mchat.git
 cd mchat
 ```
 
-### 2. Start the development database
+### 2. One-shot setup (recommended)
 
 ```bash
-docker compose -f ops/docker/docker-compose.dev.yml up -d mysql
+make setup   # lite MySQL, sync .env, install, db init
+make dev
+# or: make docker-up-lite
 ```
 
-### 3. Backend development
+### 3. Start MySQL only (manual)
+
+```bash
+make db-mysql-dev
+```
+
+### 4. Backend development
 
 ```bash
 cd src/backend

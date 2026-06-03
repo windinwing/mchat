@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Short CLI launcher — use after `make install`, or: source scripts/env.sh
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CLI="$ROOT/src/backend/venv/bin/mchat"
+
+if [[ ! -x "$CLI" ]]; then
+  echo "mchat CLI not installed. Run: make install" >&2
+  echo "Or: source $ROOT/scripts/env.sh" >&2
+  exit 1
+fi
+
+exec "$CLI" "$@"

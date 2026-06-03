@@ -398,7 +398,7 @@
 
 ## 工作流（Beta）
 
-> 编排多个 Skill 为流程，支持线性步骤与 `graph_json` 图 DAG。详见 [workflow-orchestrator.zh.md](./workflow-orchestrator.zh.md)。
+> 编排多个 Skill 为流程，支持线性步骤与 `graph_json` 图 DAG。详见 [workflow-orchestrator.en.md](./workflow-orchestrator.en.md)（[中文](./workflow-orchestrator.zh.md)）。
 
 权限：`skills:read` / `skills:write`。
 

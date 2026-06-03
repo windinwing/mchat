@@ -15,8 +15,8 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Database
-    database_url: str = "mysql+aiomysql://mchat:mchat_password@localhost:3306/mchat"
+    # Database (lite MySQL: make setup / make db-mysql-dev → mchat / mchat123 / mchat)
+    database_url: str = "mysql+aiomysql://mchat:mchat123@localhost:3307/mchat"
 
     # JWT
     jwt_secret: str = "change-this-to-a-random-secret-key"
