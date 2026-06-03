@@ -64,6 +64,9 @@ class CustomerConfig(Base):
     plan: Mapped[str] = mapped_column(
         String(20), nullable=False, default="free"
     )  # free, free_trial, pro, enterprise
+    workspace_mode: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # null = auto from plan; local | container
     trial_ends_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

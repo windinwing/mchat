@@ -20,6 +20,8 @@ from app.schemas.skill_schedule import (
     SkillScheduleUpdate,
 )
 from app.skill.executor import execute_skill
+from app.workspace.context import workspace_execution_scope
+from app.workspace.resolver import build_workspace_context
 from app.services.workflow_service import WorkflowService
 
 
@@ -333,7 +335,10 @@ class SkillScheduleService:
                 if not skill.enabled:
                     raise RuntimeError(f"skill '{skill.name}' is disabled")
                 run.target_name = skill.name
-                raw_result = await execute_skill(skill, payload)
+                async with workspace_execution_scope(
+                    build_workspace_context(schedule.user_id)
+                ):
+                    raw_result = await execute_skill(skill, payload)
                 result_dict = _as_result_dict(raw_result)
                 has_error = bool(
                     isinstance(raw_result, dict) and raw_result.get("error")

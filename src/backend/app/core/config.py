@@ -132,6 +132,22 @@ class Settings(BaseSettings):
     # Optional note for ops/docs (e.g. /path/to/skills/patents)
     patent_skills_source: str = ""
 
+    # Tenant workspace (Plan A local volume + Plan B container sidecar)
+    workspace_root_dir: str = "../../data/tenants"
+    workspace_default_mode: str = "local"  # local | container
+    workspace_container_enabled: bool = False
+    workspace_container_image: str = "python:3.12-slim"
+    workspace_container_python: str = "python3"
+    workspace_container_name_prefix: str = "mchat-ws"
+    workspace_container_label: str = "mchat.workspace"
+    # Sidecar hardening (Phase 1): empty network = default bridge; use "none" to isolate
+    workspace_container_network: str = ""
+    workspace_container_pids_limit: int = 256
+    workspace_container_memory: str = ""  # e.g. 512m
+    workspace_container_cpus: str = ""  # e.g. 1.0
+    # Optional legacy Cloud studio root ({root}/{user_id}/{channel_id}); empty = unified layout
+    workspace_legacy_studio_dir: str = ""
+
     # File uploads
     upload_dir: str = "../../uploads"
     max_upload_size_mb: int = 50

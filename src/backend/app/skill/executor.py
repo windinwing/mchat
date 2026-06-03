@@ -17,6 +17,8 @@ from app.core.config import settings
 from app.utils.upload_paths import resolve_upload_root
 from app.models.skill import Skill
 from app.skill.deps import warm_skill_export_deps
+from app.workspace.context import get_workspace_context
+from app.workspace.factory import get_workspace_provider
 
 
 _SKIP_CONFIG_ENV_KEYS = frozenset({"secrets", "env", "prompt_body", "parameters"})
@@ -120,29 +122,49 @@ async def _execute_python_tool(
 
     def _run_blocking() -> Any:
         with _skill_secrets_env(skill):
-            os.environ["MCHAT_UPLOAD_DIR"] = str(resolve_upload_root())
-            warm_skill_export_deps(skill.name, skill_dir)
-            spec = importlib.util.spec_from_file_location(
-                f"skill_{skill.name}", script_path
-            )
-            if spec is None or spec.loader is None:
-                return {"error": f"Failed to load skill module: {skill.name}"}
+            ws_ctx = get_workspace_context()
+            if ws_ctx is not None:
+                provider = get_workspace_provider(ws_ctx)
+                env = provider.execution_env()
+                previous_env: dict[str, str | None] = {}
+                for key, value in env.items():
+                    previous_env[key] = os.environ.get(key)
+                    os.environ[key] = value
+                upload_dir = env.get("MCHAT_UPLOAD_DIR") or str(resolve_upload_root())
+            else:
+                previous_env = {}
+                upload_dir = str(resolve_upload_root())
+                os.environ["MCHAT_UPLOAD_DIR"] = upload_dir
 
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+            try:
+                warm_skill_export_deps(skill.name, skill_dir)
+                spec = importlib.util.spec_from_file_location(
+                    f"skill_{skill.name}", script_path
+                )
+                if spec is None or spec.loader is None:
+                    return {"error": f"Failed to load skill module: {skill.name}"}
 
-            if hasattr(module, "run"):
-                filtered = _filter_kwargs_for_callable(module.run, args)
-                return module.run(**filtered)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
 
-            if hasattr(module, "main"):
-                sig = inspect.signature(module.main)
-                if len(sig.parameters) == 0:
-                    return _dispatch_namespace_skill(skill_dir, module, args)
-                filtered = _filter_kwargs_for_callable(module.main, args)
-                return module.main(**filtered)
+                if hasattr(module, "run"):
+                    filtered = _filter_kwargs_for_callable(module.run, args)
+                    return module.run(**filtered)
 
-            return {"error": "No main() or run() function found in skill script"}
+                if hasattr(module, "main"):
+                    sig = inspect.signature(module.main)
+                    if len(sig.parameters) == 0:
+                        return _dispatch_namespace_skill(skill_dir, module, args)
+                    filtered = _filter_kwargs_for_callable(module.main, args)
+                    return module.main(**filtered)
+
+                return {"error": "No main() or run() function found in skill script"}
+            finally:
+                for key, old in previous_env.items():
+                    if old is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = old
 
     try:
         result = await asyncio.to_thread(_run_blocking)

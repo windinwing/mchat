@@ -14,7 +14,7 @@ from cloud.services.studio_memory_index import (
     StudioMemoryIndex,
     schedule_index_sync,
 )
-from cloud.utils.studio_paths import resolve_studio_workspace_root, safe_workspace_segment
+from app.workspace.paths import resolve_studio_path, safe_workspace_segment
 
 
 @dataclass
@@ -43,7 +43,7 @@ class StudioMemoryService:
             raise ValueError("Invalid studio memory workspace identifiers")
         self.user_id = uid
         self.channel_id = cid
-        self.workspace = resolve_studio_workspace_root() / uid / cid
+        self.workspace = resolve_studio_path(uid, cid)
 
     @classmethod
     def for_conversation(cls, conversation) -> StudioMemoryService | None:

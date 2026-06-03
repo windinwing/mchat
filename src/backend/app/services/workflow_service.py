@@ -56,9 +56,20 @@ from app.core.config import settings
 from app.data.workflow_templates import get_workflow_template, list_workflow_templates
 from app.skill.loader import SkillLoader
 from app.skill.executor import execute_skill
+from app.workspace.context import workspace_execution_scope
+from app.workspace.resolver import build_workspace_context
 
 _TEMPLATE_RE = re.compile(r"\$\{([^}]+)\}")
 logger = logging.getLogger(__name__)
+
+
+async def _execute_skill_for_user(
+    user_id: str, skill: Skill, payload: dict[str, Any], *, timeout_s: int = 0
+) -> Any:
+    async with workspace_execution_scope(build_workspace_context(user_id)):
+        if timeout_s > 0:
+            return await asyncio.wait_for(execute_skill(skill, payload), timeout=timeout_s)
+        return await execute_skill(skill, payload)
 
 
 def graph_for_template_export(
@@ -793,9 +804,13 @@ class WorkflowService:
                 for _attempt in range(retry_count + 1):
                     try:
                         if timeout_s > 0:
-                            raw = await asyncio.wait_for(execute_skill(skill, payload), timeout=timeout_s)
+                            raw = await _execute_skill_for_user(
+                                workflow.user_id, skill, payload, timeout_s=timeout_s
+                            )
                         else:
-                            raw = await execute_skill(skill, payload)
+                            raw = await _execute_skill_for_user(
+                                workflow.user_id, skill, payload
+                            )
                         result = _to_result_dict(raw)
                         has_error = bool(isinstance(raw, dict) and raw.get("error"))
                         if has_error:
@@ -1162,7 +1177,9 @@ class WorkflowService:
             await self.db.flush()
 
             try:
-                raw_result = await execute_skill(skill, payload)
+                raw_result = await _execute_skill_for_user(
+                    workflow.user_id, skill, payload
+                )
                 result = _to_result_dict(raw_result)
                 step_finished = datetime.now(timezone.utc)
                 failed = bool(isinstance(raw_result, dict) and raw_result.get("error"))

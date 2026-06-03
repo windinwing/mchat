@@ -229,6 +229,7 @@ def apply_schema_patches(conn: Connection) -> list[str]:
                 if dialect == "mysql"
                 else "BOOLEAN NOT NULL DEFAULT FALSE",
             ),
+            ("workspace_mode", "VARCHAR(20) NULL"),
         ]
         for col_name, col_def in cc_patches:
             if col_name not in cols:

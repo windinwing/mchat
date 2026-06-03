@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from app.core.config import settings
 from app.models.conversation import Conversation
 from cloud.bot.studio_memory import register_cloud_chat_extensions
 from cloud.config import cloud_settings
@@ -19,8 +20,9 @@ register_cloud_chat_extensions()
 
 @pytest.fixture
 def studio_root(tmp_path, monkeypatch):
-    root = tmp_path / "studio"
-    monkeypatch.setattr(cloud_settings, "studio_workspace_dir", str(root))
+    root = tmp_path / "tenants"
+    monkeypatch.setattr(settings, "workspace_root_dir", str(root))
+    monkeypatch.setattr(settings, "workspace_legacy_studio_dir", "")
     monkeypatch.setattr(cloud_settings, "studio_memory_enabled", True)
     return root
 

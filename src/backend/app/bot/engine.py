@@ -436,12 +436,20 @@ async def process_message(
                     if cmd == "search" and tool_args.get("details") is None:
                         tool_args["details"] = True
                 try:
+                    from app.workspace.resolver import workspace_user_id_for_execution
+
+                    ws_user_id = workspace_user_id_for_execution(
+                        customer_config=customer_config,
+                        fallback_user_id=ai_config.user_id,
+                    )
                     tool_result = await _execute_tool(
                         tool_name,
                         tool_args,
                         tool_skills,
                         db_session,
                         studio_ctx=studio_ctx,
+                        user_id=ws_user_id,
+                        customer_config=customer_config,
                     )
                 except BaseException as e:
                     logger.error(f"Tool execution crashed: {e}", exc_info=True)
@@ -619,6 +627,8 @@ async def _execute_tool(
     db_session: AsyncSession,
     *,
     studio_ctx: Any | None = None,
+    user_id: str | None = None,
+    customer_config: CustomerConfig | None = None,
 ) -> Any:
     """Execute a skill tool function."""
     extension_result = chat_extensions.execute_extension_tool(
@@ -627,12 +637,28 @@ async def _execute_tool(
     if extension_result is not None:
         return extension_result
 
+    from app.workspace.context import workspace_execution_scope
+    from app.workspace.resolver import build_workspace_context
+
+    channel_id = getattr(studio_ctx, "channel_id", None) if studio_ctx else None
+    if channel_id is None and customer_config is not None:
+        channel_id = customer_config.id
+
+    ws_ctx = None
+    if user_id:
+        ws_ctx = build_workspace_context(
+            user_id,
+            customer_config=customer_config,
+            channel_id=channel_id,
+        )
+
     for skill in skills:
         if skill.name == tool_name and skill.enabled:
             try:
                 from app.skill.executor import execute_skill
 
-                return await execute_skill(skill, tool_args)
+                async with workspace_execution_scope(ws_ctx):
+                    return await execute_skill(skill, tool_args)
             except BaseException as e:
                 logger.error(f"Tool {tool_name} execution failed: {e}")
                 return {"error": str(e)}
