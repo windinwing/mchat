@@ -220,9 +220,7 @@ def apply_schema_patches(conn: Connection) -> list[str]:
             ("usage_messages_limit", "INTEGER NOT NULL DEFAULT 1000"),
             ("usage_tokens_limit", "INTEGER NOT NULL DEFAULT 100000"),
             ("last_usage_reset_at", "DATETIME NULL"),
-            ("subscription_ends_at", "DATETIME NULL"),
             ("active_order_id", "VARCHAR(36) NULL"),
-            ("skill_bindings", "JSON NULL" if dialect == "mysql" else "TEXT NULL"),
             (
                 "ai_override",
                 "BOOLEAN NOT NULL DEFAULT 0"
