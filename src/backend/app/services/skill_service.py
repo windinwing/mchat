@@ -70,10 +70,26 @@ class SkillService:
         self.db = db
 
     @staticmethod
-    def _skills_root() -> Path:
-        from app.core.skills_paths import resolve_skills_root
+    def _skills_root(user_id: str) -> Path:
+        from app.workspace.paths import ensure_execution_layout, tenant_skills_dir
 
-        return resolve_skills_root()
+        root = tenant_skills_dir(user_id)
+        ensure_execution_layout(root.parent)
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    @staticmethod
+    def _enforce_quota(user_id: str, *, additional_bytes: int = 0) -> None:
+        from app.workspace.disk_usage import check_soft_quota
+        from app.workspace.resolver import build_workspace_context
+
+        ctx = build_workspace_context(user_id)
+        message = check_soft_quota(ctx, additional_bytes=additional_bytes)
+        if message:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=message,
+            )
 
     @staticmethod
     def _skill_directory(skill: Skill) -> Path | None:
@@ -86,10 +102,17 @@ class SkillService:
             return skill_md
         return None
 
-    def _is_managed_skill_dir(self, directory: Path) -> bool:
-        """Only delete directories inside the configured skills folder."""
+    def _is_managed_skill_dir(self, directory: Path, user_id: str) -> bool:
+        """Only delete directories inside tenant skills or legacy global skills/."""
         try:
-            directory.resolve().relative_to(self._skills_root())
+            directory.resolve().relative_to(self._skills_root(user_id))
+            return True
+        except ValueError:
+            pass
+        try:
+            from app.core.skills_paths import resolve_skills_root
+
+            directory.resolve().relative_to(resolve_skills_root())
             return True
         except ValueError:
             return False
@@ -98,8 +121,8 @@ class SkillService:
         directory = self._skill_directory(skill)
         if directory is None or not directory.exists():
             return
-        if not self._is_managed_skill_dir(directory):
-            logger.warning(f"Skip deleting skill dir outside skills root: {directory}")
+        if not self._is_managed_skill_dir(directory, skill.user_id):
+            logger.warning(f"Skip deleting skill dir outside managed roots: {directory}")
             return
         shutil.rmtree(directory)
         logger.info(f"Removed skill directory: {directory}")
@@ -199,8 +222,7 @@ class SkillService:
         source_name: str,
         name_hint: str | None = None,
     ) -> SkillResponse:
-        skills_dir = self._skills_root()
-        skills_dir.mkdir(parents=True, exist_ok=True)
+        skills_dir = self._skills_root(user_id)
 
         try:
             meta = read_skill_meta_from_zip(content)
@@ -249,6 +271,8 @@ class SkillService:
         if extract_path.exists():
             shutil.rmtree(extract_path)
         extract_path.mkdir(parents=True, exist_ok=True)
+
+        self._enforce_quota(user_id, additional_bytes=len(content))
 
         try:
             extract_skill_zip(content, extract_path)
@@ -361,7 +385,7 @@ class SkillService:
         """Sync DB with skills/ on disk: update existing, add new, drop stale."""
         await self._prune_stale_filesystem_skills(user_id)
 
-        loader = SkillLoader()
+        loader = SkillLoader(user_id=user_id)
         skills = loader.scan_skills()
         count = 0
         server_ops_names: list[str] = []
@@ -764,6 +788,7 @@ class SkillService:
 
         target.parent.mkdir(parents=True, exist_ok=True)
         content = await file.read()
+        self._enforce_quota(user_id, additional_bytes=len(content))
         target.write_bytes(content)
         return {"path": str(target.relative_to(directory)), "name": target.name, "written": True}
 
@@ -789,6 +814,8 @@ class SkillService:
             raise HTTPException(status_code=403, detail="Path traversal denied")
 
         target.parent.mkdir(parents=True, exist_ok=True)
+        encoded = content.encode("utf-8")
+        self._enforce_quota(user_id, additional_bytes=len(encoded))
         target.write_text(content, encoding="utf-8")
         return {"path": str(target.relative_to(directory)), "name": target.name, "written": True}
 
@@ -796,8 +823,7 @@ class SkillService:
         self, *, user_id: str, name: str, description: str | None = None, skill_type: str = "tool"
     ) -> SkillResponse:
         """Create a new skill directory with a minimal SKILL.md."""
-        skills_dir = self._skills_root()
-        skills_dir.mkdir(parents=True, exist_ok=True)
+        skills_dir = self._skills_root(user_id)
 
         folder_name = self._safe_folder_name(name)
         skill_dir = skills_dir / folder_name

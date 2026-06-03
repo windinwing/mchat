@@ -2,92 +2,101 @@
 
 from __future__ import annotations
 
-import asyncio
-import importlib.util
-import inspect
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Iterator
 
 from loguru import logger
 
-from app.core.config import settings
-from app.utils.upload_paths import resolve_upload_root
 from app.models.skill import Skill
 from app.skill.deps import warm_skill_export_deps
 from app.workspace.context import get_workspace_context
 from app.workspace.factory import get_workspace_provider
+from app.workspace.skill_sync import ensure_skill_in_tenant
 
 
 _SKIP_CONFIG_ENV_KEYS = frozenset({"secrets", "env", "prompt_body", "parameters"})
 
 
-@contextmanager
-def _skill_secrets_env(skill: Skill) -> Iterator[None]:
-    """Inject skill secrets and scalar config options into process env."""
+def _skill_secrets_env_dict(skill: Skill) -> dict[str, str]:
     config = skill.config or {}
     secrets = config.get("secrets") or config.get("env") or {}
     if not isinstance(secrets, dict):
         secrets = {}
-
     prefix = f"MCHAT_SKILL_{skill.name.upper().replace('-', '_')}_"
-    previous: dict[str, str | None] = {}
-    injected: list[str] = []
-
-    def _set_env(env_key: str, value: Any) -> None:
+    env: dict[str, str] = {}
+    for key, value in secrets.items():
         if value is None or str(value).strip() == "":
-            return
-        env_key = str(env_key).strip()
-        if env_key not in previous:
-            previous[env_key] = os.environ.get(env_key)
-            injected.append(env_key)
-        os.environ[env_key] = str(value)
+            continue
+        env_key = str(key).strip()
+        env[f"{prefix}{env_key}"] = str(value)
+        env[env_key] = str(value)
+    for key, value in config.items():
+        if key in _SKIP_CONFIG_ENV_KEYS:
+            continue
+        if isinstance(value, (dict, list)):
+            continue
+        env[str(key)] = str(value)
+        env[f"{prefix}{str(key).upper()}"] = str(value)
+    return env
 
+
+@contextmanager
+def _skill_secrets_env(skill: Skill) -> Iterator[None]:
+    """Inject skill secrets and scalar config options into process env."""
+    env = _skill_secrets_env_dict(skill)
+    previous: dict[str, str | None] = {}
     try:
-        for key, value in secrets.items():
-            env_key = str(key).strip()
-            _set_env(f"{prefix}{env_key}", value)
-            _set_env(env_key, value)
-
-        for key, value in config.items():
-            if key in _SKIP_CONFIG_ENV_KEYS:
-                continue
-            if isinstance(value, (dict, list)):
-                continue
-            _set_env(str(key), value)
-            _set_env(f"{prefix}{str(key).upper()}", value)
-
+        for key, value in env.items():
+            previous[key] = os.environ.get(key)
+            os.environ[key] = value
         yield
     finally:
-        for key in injected:
-            old = previous.get(key)
+        for key, old in previous.items():
             if old is None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = old
 
 
+def _resolve_script_path(skill_dir: Path) -> Path | None:
+    for name in ("main.py", "tool.py"):
+        candidate = skill_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _normalize_tool_result(result: Any) -> Any:
+    if result is None:
+        return {"ok": True, "message": "技能执行完成（无返回内容）"}
+    if isinstance(result, dict):
+        return _finalize_tool_dict(result)
+    if isinstance(result, (str, int, float, bool, list)):
+        return result
+    return str(result)
+
+
+def _finalize_tool_dict(result: dict[str, Any]) -> dict[str, Any]:
+    out = dict(result)
+    for key in ("files", "_internal"):
+        out.pop(key, None)
+    assets = out.get("outbound_assets")
+    if assets is not None and not isinstance(assets, list):
+        out.pop("outbound_assets", None)
+    return out
+
+
 async def execute_skill(skill: Skill, args: dict[str, Any]) -> Any:
-    """Execute a skill tool function.
-
-    Supports:
-    - Python script in the skill directory
-    - Shell commands defined in skill config
-    - Webhook calls
-    """
+    """Execute a skill tool function."""
     skill_type = skill.skill_type
-
     try:
-        if skill_type == "tool":
+        if skill_type in ("tool", "function"):
             return await _execute_python_tool(skill, args)
-        elif skill_type == "function":
-            return await _execute_python_tool(skill, args)
-        elif skill_type == "webhook":
+        if skill_type == "webhook":
             return await _execute_webhook(skill, args)
-        else:
-            return {"error": f"Unknown skill type: {skill_type}"}
+        return {"error": f"Unknown skill type: {skill_type}"}
     except SystemExit as e:
         logger.error(f"Skill '{skill.name}' called sys.exit({e.code})")
         return {
@@ -102,74 +111,56 @@ async def execute_skill(skill: Skill, args: dict[str, Any]) -> Any:
         return {"error": str(e)}
 
 
-async def _execute_python_tool(
-    skill: Skill, args: dict[str, Any]
-) -> Any:
-    """Execute a Python-based skill tool."""
+async def _execute_python_tool(skill: Skill, args: dict[str, Any]) -> Any:
     if not skill.path:
         return {"error": "No path defined for skill"}
 
-    skill_path = Path(skill.path)
-    skill_dir = skill_path.parent
+    ws_ctx = get_workspace_context()
+    skill_dir: Path
+    if ws_ctx is not None:
+        try:
+            skill_dir = ensure_skill_in_tenant(skill, ws_ctx)
+        except FileNotFoundError as e:
+            return {"error": str(e)}
+    else:
+        skill_dir = Path(skill.path).resolve()
+        if skill_dir.is_file():
+            skill_dir = skill_dir.parent
 
-    # Look for main.py or tool.py in the skill directory
-    script_path = skill_dir / "main.py"
-    if not script_path.exists():
-        script_path = skill_dir / "tool.py"
-
-    if not script_path.exists():
+    script_path = _resolve_script_path(skill_dir)
+    if script_path is None:
         return {"error": f"No script found in {skill_dir}"}
 
-    def _run_blocking() -> Any:
+    extra_env = _skill_secrets_env_dict(skill)
+    warm_skill_export_deps(skill.name, skill_dir)
+
+    if ws_ctx is not None:
+        provider = get_workspace_provider(ws_ctx)
+        try:
+            raw = await provider.run_python_skill(
+                script_path=script_path,
+                args=args,
+                extra_env=extra_env,
+            )
+        except BaseException as e:
+            logger.error(f"Python tool execution failed: {e}")
+            return {"error": str(e)}
+        return _normalize_tool_result(raw)
+
+    def _run_local() -> Any:
         with _skill_secrets_env(skill):
-            ws_ctx = get_workspace_context()
-            if ws_ctx is not None:
-                provider = get_workspace_provider(ws_ctx)
-                env = provider.execution_env()
-                previous_env: dict[str, str | None] = {}
-                for key, value in env.items():
-                    previous_env[key] = os.environ.get(key)
-                    os.environ[key] = value
-                upload_dir = env.get("MCHAT_UPLOAD_DIR") or str(resolve_upload_root())
-            else:
-                previous_env = {}
-                upload_dir = str(resolve_upload_root())
-                os.environ["MCHAT_UPLOAD_DIR"] = upload_dir
+            from app.utils.upload_paths import resolve_upload_root
 
-            try:
-                warm_skill_export_deps(skill.name, skill_dir)
-                spec = importlib.util.spec_from_file_location(
-                    f"skill_{skill.name}", script_path
-                )
-                if spec is None or spec.loader is None:
-                    return {"error": f"Failed to load skill module: {skill.name}"}
+            os.environ["MCHAT_UPLOAD_DIR"] = str(resolve_upload_root())
+            from app.workspace.skill_runner import execute_skill_script
 
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-
-                if hasattr(module, "run"):
-                    filtered = _filter_kwargs_for_callable(module.run, args)
-                    return module.run(**filtered)
-
-                if hasattr(module, "main"):
-                    sig = inspect.signature(module.main)
-                    if len(sig.parameters) == 0:
-                        return _dispatch_namespace_skill(skill_dir, module, args)
-                    filtered = _filter_kwargs_for_callable(module.main, args)
-                    return module.main(**filtered)
-
-                return {"error": "No main() or run() function found in skill script"}
-            finally:
-                for key, old in previous_env.items():
-                    if old is None:
-                        os.environ.pop(key, None)
-                    else:
-                        os.environ[key] = old
+            return execute_skill_script(script_path, args)
 
     try:
-        result = await asyncio.to_thread(_run_blocking)
-        return _normalize_tool_result(result)
+        import asyncio
 
+        raw = await asyncio.to_thread(_run_local)
+        return _normalize_tool_result(raw)
     except SystemExit as e:
         logger.error(f"Python tool '{skill.name}' sys.exit({e.code})")
         return {
@@ -183,121 +174,11 @@ async def _execute_python_tool(
         return {"error": str(e)}
 
 
-def _filter_kwargs_for_callable(func: Any, args: dict[str, Any]) -> dict[str, Any]:
-    """Pass only parameters accepted by the skill entry function."""
-    sig = inspect.signature(func)
-    params = sig.parameters
-    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        return {k: v for k, v in args.items() if v is not None}
-    return {
-        k: v
-        for k, v in args.items()
-        if k in params and v is not None
-    }
-
-
-def _args_to_namespace(args: dict[str, Any]) -> SimpleNamespace:
-    """Map tool JSON args to argparse-style namespace (patent-search CLI skills)."""
-    return SimpleNamespace(
-        command=str(args.get("command") or "search").lower(),
-        query=args.get("query"),
-        patent_id=args.get("patent_id"),
-        company_name=args.get("company_name"),
-        dimension=args.get("dimension"),
-        page=int(args.get("page") or 1),
-        page_size=int(args.get("page_size") or args.get("pageSize") or 10),
-        scope=args.get("scope") or "cn",
-        sort=args.get("sort") or "relation",
-        details=bool(args.get("details")),
-        limit=int(args.get("limit") or 20),
-        type=args.get("type") or "software",
-        field=args.get("field"),
-        detail=bool(args.get("detail")),
-        trademark_id=args.get("trademark_id") or args.get("trademark-id"),
-    )
-
-
-def _load_skill_module(skill_dir: Path, filename: str, module_key: str) -> Any | None:
-    path = skill_dir / filename
-    if not path.exists():
-        return None
-    spec = importlib.util.spec_from_file_location(module_key, path)
-    if spec is None or spec.loader is None:
-        return None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _dispatch_namespace_skill(
-    skill_dir: Path, main_module: Any, args: dict[str, Any]
-) -> Any:
-    """Execute CLI-oriented skills whose main() has no parameters (e.g. patent-search)."""
-    skill_mod = _load_skill_module(
-        skill_dir, "patent_skill.py", f"skill_patent_{skill_dir.name}"
-    )
-    api_mod = _load_skill_module(
-        skill_dir, "patent_api.py", f"skill_api_{skill_dir.name}"
-    )
-    if skill_mod is None or api_mod is None:
-        return {
-            "error": (
-                "技能 main() 不支持工具参数；请为技能添加 run(**kwargs)，"
-                "或提供 patent_skill.py / patent_api.py 命令分发模块。"
-            )
-        }
-
-    patent_api_cls = getattr(api_mod, "PatentAPI", None)
-    patent_skill_cls = getattr(skill_mod, "PatentSkill", None)
-    if patent_api_cls is None or patent_skill_cls is None:
-        return {"error": "专利技能缺少 PatentAPI / PatentSkill 类"}
-
-    api = patent_api_cls()
-    skill = patent_skill_cls(api)
-
-    if hasattr(main_module, "handle_analysis"):
-        skill.handle_analysis = lambda a: main_module.handle_analysis(skill, a)
-    if hasattr(main_module, "handle_help"):
-        skill.handle_help = lambda a: main_module.handle_help(skill, a)
-
-    ns = _args_to_namespace(args)
-    handler = skill.commands.get(ns.command)
-    if not handler:
-        return {"error": f"Unknown command: {ns.command}"}
-    return handler(ns)
-
-
-def _normalize_tool_result(result: Any) -> Any:
-    """Ensure tool output is JSON-serializable for the LLM."""
-    if result is None:
-        return {"ok": True, "message": "技能执行完成（无返回内容）"}
-    if isinstance(result, dict):
-        return _finalize_tool_dict(result)
-    if isinstance(result, (str, int, float, bool, list)):
-        return result
-    return str(result)
-
-
-def _finalize_tool_dict(result: dict[str, Any]) -> dict[str, Any]:
-    """保留 outbound_assets；去掉仅供执行器使用的内部字段。"""
-    out = dict(result)
-    for key in ("files", "_internal"):
-        out.pop(key, None)
-    assets = out.get("outbound_assets")
-    if assets is not None and not isinstance(assets, list):
-        out.pop("outbound_assets", None)
-    return out
-
-
-async def _execute_webhook(
-    skill: Skill, args: dict[str, Any]
-) -> Any:
-    """Execute a webhook-based skill."""
+async def _execute_webhook(skill: Skill, args: dict[str, Any]) -> Any:
     import httpx
 
     config = skill.config or {}
     webhook_url = config.get("url", "")
-
     if not webhook_url:
         return {"error": "No webhook URL configured"}
 

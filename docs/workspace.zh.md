@@ -1,5 +1,7 @@
 # Tenant Workspace — 控制面 + 执行面（Phase 1 / Phase 2）
 
+详细设计（目标 vs 现状差距、工程任务）：见 **[workspace-phase1.zh.md](./workspace-phase1.zh.md)**。
+
 ## 结论（与当前代码对齐）
 
 | 方向 | 可行性 | 建议 |

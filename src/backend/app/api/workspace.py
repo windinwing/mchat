@@ -10,10 +10,12 @@ from app.core.database import get_db
 from app.middleware.auth import get_current_user, has_global_scope
 from app.models.customer import CustomerConfig
 from app.models.user import User
-from app.schemas.workspace import WorkspaceStatusResponse
+from app.schemas.workspace import SidecarStatusResponse, WorkspaceStatusResponse
 from app.workspace.context import workspace_execution_scope
+from app.workspace.disk_usage import tenant_execution_usage_bytes
 from app.workspace.factory import get_workspace_provider
 from app.workspace.resolver import build_workspace_context
+from app.workspace.sidecar import sidecar_inspect
 
 router = APIRouter()
 
@@ -24,7 +26,7 @@ async def get_workspace_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> WorkspaceStatusResponse:
-    """Return resolved workspace mode and limits for the current user."""
+    """Return resolved workspace mode, sidecar state, disk usage, and execution env."""
     customer_config: CustomerConfig | None = None
     channel_id: str | None = None
     if customer_id:
@@ -54,6 +56,7 @@ async def get_workspace_status(
     async with workspace_execution_scope(ctx) as ready:
         assert ready is not None
         provider = get_workspace_provider(ready)
+        sidecar_raw = sidecar_inspect(ready.container_name)
         return WorkspaceStatusResponse(
             user_id=ready.user_id,
             customer_id=ready.customer_id,
@@ -63,7 +66,11 @@ async def get_workspace_status(
             fallback_reason=ready.fallback_reason,
             tenant_root=str(ready.tenant_root),
             uploads_dir=str(ready.uploads_dir()),
+            skills_dir=str(ready.skills_dir()),
+            data_dir=str(ready.data_dir()),
             container_name=ready.container_name,
+            sidecar=SidecarStatusResponse(**sidecar_raw),
+            disk_usage_bytes=tenant_execution_usage_bytes(ready.tenant_root),
             limits={
                 "shell_enabled": ready.limits.shell_enabled,
                 "studio_enabled": ready.limits.studio_enabled,

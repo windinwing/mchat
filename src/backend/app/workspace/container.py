@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import subprocess
+from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -12,6 +15,7 @@ from app.core.config import settings
 from app.workspace.local import LocalWorkspaceProvider
 from app.workspace.paths import ensure_execution_layout
 from app.workspace.security import execution_volume_mounts, sidecar_run_args
+from app.workspace.skill_runner import container_runner_path, deploy_runner_script
 from app.workspace.types import WorkspaceContext, WorkspaceMode
 
 
@@ -38,6 +42,7 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
 
     async def ensure_ready(self) -> WorkspaceContext:
         ensure_execution_layout(self.ctx.tenant_root)
+        deploy_runner_script(self.ctx.tenant_root)
         if not docker_available():
             self.ctx.effective_mode = WorkspaceMode.LOCAL
             self.ctx.fallback_reason = "docker_unavailable"
@@ -46,7 +51,7 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
                 "falling back to local for user {}",
                 self.ctx.user_id,
             )
-            return self.ctx
+            return await super().ensure_ready()
 
         try:
             await asyncio.to_thread(self._ensure_container_sync)
@@ -60,32 +65,78 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
                 self.ctx.user_id,
                 exc,
             )
+            return await super().ensure_ready()
         return self.ctx
 
-    def execution_env(self) -> dict[str, str]:
-        """Container paths when running inside sidecar; host paths when local fallback."""
-        if self.ctx.effective_mode == WorkspaceMode.CONTAINER:
-            root = "/workspace"
-            uploads = f"{root}/uploads"
-        else:
-            uploads_path = self.ctx.uploads_dir()
-            uploads_path.mkdir(parents=True, exist_ok=True)
-            root = str(self.ctx.tenant_root)
-            uploads = str(uploads_path)
+    def _container_script_path(self, script_path: Path) -> str:
+        """Map host tenant script path to in-container path."""
+        rel = script_path.resolve().relative_to(self.ctx.tenant_root.resolve())
+        return f"/workspace/{rel.as_posix()}"
 
-        env = {
-            "MCHAT_WORKSPACE_ROOT": root,
-            "MCHAT_UPLOAD_DIR": uploads,
-            "MCHAT_WORKSPACE_SKILLS_DIR": f"{root}/skills",
-            "MCHAT_WORKSPACE_DATA_DIR": f"{root}/data",
-            "MCHAT_WORKSPACE_MODE": self.ctx.effective_mode.value,
-            "MCHAT_WORKSPACE_USER_ID": self.ctx.user_id,
-        }
-        if self.ctx.customer_id:
-            env["MCHAT_WORKSPACE_CUSTOMER_ID"] = self.ctx.customer_id
-        if self.ctx.channel_id:
-            env["MCHAT_WORKSPACE_CHANNEL_ID"] = self.ctx.channel_id
-        return env
+    async def run_python_skill(
+        self,
+        *,
+        script_path: Path,
+        args: dict[str, Any],
+        extra_env: dict[str, str] | None = None,
+    ) -> Any:
+        if self.ctx.effective_mode != WorkspaceMode.CONTAINER:
+            return await super().run_python_skill(
+                script_path=script_path,
+                args=args,
+                extra_env=extra_env,
+            )
+
+        name = self.ctx.container_name
+        if not name:
+            return await super().run_python_skill(
+                script_path=script_path,
+                args=args,
+                extra_env=extra_env,
+            )
+
+        try:
+            container_script = self._container_script_path(script_path)
+        except ValueError:
+            return {
+                "error": "Skill script must live under tenant workspace for container execution"
+            }
+
+        env = {**self.execution_env(), **(extra_env or {})}
+        env["MCHAT_SKILL_ARGS"] = json.dumps(args, ensure_ascii=False)
+        env_args: list[str] = []
+        for key, value in env.items():
+            env_args.extend(["-e", f"{key}={value}"])
+
+        cmd = [
+            *self._docker_cmd(),
+            "exec",
+            *env_args,
+            name,
+            settings.workspace_container_python,
+            container_runner_path(),
+            container_script,
+        ]
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        stdout = (proc.stdout or "").strip()
+        stderr = (proc.stderr or "").strip()
+        if proc.returncode != 0:
+            detail = stderr or stdout
+            return {
+                "error": detail or f"container skill failed (exit {proc.returncode})"
+            }
+        if not stdout:
+            return {"ok": True, "message": "技能在容器内执行完成（无返回内容）"}
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError:
+            return stdout
 
     def _docker_cmd(self) -> list[str]:
         return [shutil.which("docker") or "docker"]

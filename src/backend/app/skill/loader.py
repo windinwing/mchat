@@ -16,8 +16,16 @@ from app.core.skills_paths import iter_skills_roots, resolve_skills_root
 class SkillLoader:
     """Scans the skills directory for SKILL.md files and parses them."""
 
-    def __init__(self, skills_dir: str | None = None) -> None:
-        if skills_dir is not None:
+    def __init__(self, skills_dir: str | None = None, *, user_id: str | None = None) -> None:
+        if user_id:
+            from app.workspace.paths import ensure_execution_layout, tenant_root
+
+            tr = tenant_root(user_id)
+            ensure_execution_layout(tr)
+            tenant = tr / "skills"
+            tenant.mkdir(parents=True, exist_ok=True)
+            self.skills_roots = [tenant, *iter_skills_roots()]
+        elif skills_dir is not None:
             from app.core.skills_paths import resolve_skills_root
 
             self.skills_roots = [resolve_skills_root(skills_dir)]

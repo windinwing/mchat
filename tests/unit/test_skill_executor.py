@@ -2,7 +2,8 @@ import importlib.util
 import textwrap
 from pathlib import Path
 
-from app.skill.executor import _dispatch_namespace_skill, _filter_kwargs_for_callable
+from app.workspace.skill_runner import _dispatch_namespace as _dispatch_namespace_skill
+from app.workspace.skill_runner import _filter_kwargs as _filter_kwargs_for_callable
 
 
 def test_filter_kwargs_for_callable():

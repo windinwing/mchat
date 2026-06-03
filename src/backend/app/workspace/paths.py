@@ -38,6 +38,10 @@ def tenant_root(user_id: str, *, workspace_root: Path | None = None) -> Path:
     return root / uid
 
 
+def tenant_skills_dir(user_id: str, *, workspace_root: Path | None = None) -> Path:
+    return tenant_root(user_id, workspace_root=workspace_root) / "skills"
+
+
 def tenant_uploads_dir(user_id: str, *, workspace_root: Path | None = None) -> Path:
     return tenant_root(user_id, workspace_root=workspace_root) / "uploads"
 
