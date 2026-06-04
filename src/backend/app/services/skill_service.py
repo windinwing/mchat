@@ -8,7 +8,9 @@ import re
 import shutil
 import socket
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from fastapi import HTTPException, UploadFile, status
@@ -19,9 +21,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.skill import Skill
-from app.schemas.skill import SkillCatalogItem, SkillResponse, SkillUpdate
+from app.schemas.skill import (
+    SkillCacheEntry,
+    SkillCacheRefreshResponse,
+    SkillCacheStatusResponse,
+    SkillCatalogItem,
+    SkillResponse,
+    SkillUpdate,
+)
 from app.skill.loader import SkillLoader
 from app.skill.ops_policy import SCOPE_NOTIFICATION, SCOPE_SERVER_OPS, is_server_ops_skill
+from app.skill.utils import read_skill_md_body
 from app.skill.zip_utils import extract_skill_zip, read_skill_meta_from_zip
 
 
@@ -81,15 +91,9 @@ class SkillService:
     _PLAN_RANK = {"free": 0, "free_trial": 1, "pro": 2, "enterprise": 3}
 
     async def _best_plan_for_user(self, user_id: str) -> str:
-        from app.models.customer import CustomerConfig
+        from app.workspace.skill_policy import best_plan_for_user
 
-        result = await self.db.execute(
-            select(CustomerConfig.plan).where(CustomerConfig.user_id == user_id)
-        )
-        plans = [row[0] for row in result.all() if row[0]]
-        if not plans:
-            return "free"
-        return max(plans, key=lambda p: self._PLAN_RANK.get((p or "free").lower(), 0))
+        return await best_plan_for_user(self.db, user_id)
 
     async def _enforce_quota(self, user_id: str, *, additional_bytes: int = 0) -> None:
         from app.workspace.disk_usage import check_soft_quota
@@ -107,13 +111,22 @@ class SkillService:
     async def _require_tenant_skill_authoring(self, user_id: str) -> None:
         from app.workspace.skill_policy import (
             TENANT_SKILL_AUTHORING_REQUIRES_CONTAINER,
-            user_container_entitled,
+            user_may_author_tenant_skills,
         )
 
-        if not await user_container_entitled(self.db, user_id):
+        if not await user_may_author_tenant_skills(self.db, user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=TENANT_SKILL_AUTHORING_REQUIRES_CONTAINER,
+            )
+
+    async def _require_skill_files_writable(self, user_id: str, skill: Skill) -> None:
+        from app.workspace.skill_policy import user_may_edit_skill_files
+
+        if not await user_may_edit_skill_files(self.db, user_id, skill):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="platform_skill_readonly",
             )
 
     async def _refresh_storage_usage(self, user_id: str) -> None:
@@ -353,6 +366,140 @@ class SkillService:
         skills = result.scalars().all()
         return [SkillResponse.model_validate(s) for s in skills]
 
+    @staticmethod
+    def _disk_body_and_mtime(path: str | None) -> tuple[str, datetime | None]:
+        if not path:
+            return "", None
+        skill_md = Path(path)
+        if not skill_md.is_file():
+            return "", None
+        try:
+            body = read_skill_md_body(skill_md)
+            mtime = datetime.fromtimestamp(skill_md.stat().st_mtime, tz=timezone.utc)
+            return body, mtime
+        except OSError:
+            return "", None
+
+    def _apply_disk_skill_row(self, skill: Skill, skill_data: dict[str, Any]) -> None:
+        from app.workspace.skill_policy import (
+            SKILL_ORIGIN_PLATFORM,
+            SKILL_ORIGIN_TENANT,
+            skill_origin_for_disk_path,
+        )
+
+        disk_cfg = skill_data.get("config") or {}
+        skill.description = skill_data.get("description")
+        skill.skill_type = skill_data.get("type", "tool")
+        skill.path = skill_data.get("path")
+        merged = dict(skill.config or {})
+        merged.update(
+            {k: v for k, v in disk_cfg.items() if k not in ("secrets", "env")}
+        )
+        path = skill_data.get("path") or ""
+        origin = skill_origin_for_disk_path(
+            path,
+            user_id=str(skill.user_id),
+            skill_name=str(skill_data.get("name") or skill.name),
+        )
+        merged["origin"] = (
+            SKILL_ORIGIN_TENANT if origin == SKILL_ORIGIN_TENANT else SKILL_ORIGIN_PLATFORM
+        )
+        if disk_cfg.get("prompt_body"):
+            merged["prompt_body"] = disk_cfg["prompt_body"]
+        skill.config = merged
+
+    async def list_cache_status(self, user_id: str) -> SkillCacheStatusResponse:
+        """Compare DB prompt_body/path with on-disk SKILL.md scan."""
+        result = await self.db.execute(
+            select(Skill).where(Skill.user_id == user_id).order_by(Skill.name)
+        )
+        rows = list(result.scalars().all())
+        scanned = {
+            s["name"]: s for s in SkillLoader(user_id=user_id).scan_skills()
+        }
+        items: list[SkillCacheEntry] = []
+        for skill in rows:
+            cached = str((skill.config or {}).get("prompt_body") or "")
+            canonical = scanned.get(skill.name)
+            canonical_path = str(canonical.get("path") or "") if canonical else None
+            db_path = skill.path or None
+            disk_path = canonical_path or db_path
+            disk_body, disk_mtime = self._disk_body_and_mtime(disk_path)
+            disk_missing = not disk_path or not Path(disk_path).is_file()
+            path_stale = bool(
+                canonical_path and db_path and canonical_path != db_path
+            )
+            prompt_body_stale = cached.strip() != disk_body.strip()
+            if disk_missing and not cached.strip():
+                prompt_body_stale = False
+            items.append(
+                SkillCacheEntry(
+                    skill_id=skill.id,
+                    name=skill.name,
+                    db_path=db_path,
+                    canonical_path=canonical_path,
+                    prompt_body_stale=prompt_body_stale,
+                    path_stale=path_stale,
+                    disk_missing=disk_missing,
+                    cached_chars=len(cached),
+                    disk_chars=len(disk_body),
+                    disk_modified_at=disk_mtime,
+                )
+            )
+        stale_count = sum(
+            1
+            for i in items
+            if i.prompt_body_stale or i.path_stale or i.disk_missing
+        )
+        return SkillCacheStatusResponse(items=items, stale_count=stale_count)
+
+    async def refresh_skill_cache(
+        self, skill_id: str, user_id: str
+    ) -> SkillResponse:
+        """Reload one skill row from disk (path + prompt_body cache)."""
+        result = await self.db.execute(
+            select(Skill).where(Skill.id == skill_id, Skill.user_id == user_id)
+        )
+        skill = result.scalar_one_or_none()
+        if skill is None:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        loader = SkillLoader(user_id=user_id)
+        scanned = {s["name"]: s for s in loader.scan_skills()}
+        skill_data = scanned.get(skill.name)
+        if skill_data is None and skill.path:
+            skill_md = Path(skill.path)
+            if skill_md.is_file():
+                skill_data = loader._parse_skill_md(skill_md)
+        if skill_data is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Skill not found on disk; edit files or run full reload",
+            )
+        self._apply_disk_skill_row(skill, skill_data)
+        await self.db.flush()
+        await self.db.refresh(skill)
+        return SkillResponse.model_validate(skill)
+
+    async def refresh_stale_caches(self, user_id: str) -> SkillCacheRefreshResponse:
+        """Refresh all skills whose DB cache differs from disk."""
+        status = await self.list_cache_status(user_id)
+        refreshed = 0
+        for entry in status.items:
+            if not (
+                entry.prompt_body_stale
+                or entry.path_stale
+                or entry.disk_missing
+            ):
+                continue
+            if entry.disk_missing:
+                continue
+            await self.refresh_skill_cache(entry.skill_id, user_id)
+            refreshed += 1
+        return SkillCacheRefreshResponse(
+            refreshed=refreshed,
+            message=f"Refreshed {refreshed} skill cache(s) from disk",
+        )
+
     async def update_skill(
         self, skill_id: str, user_id: str, data: SkillUpdate
     ) -> SkillResponse | None:
@@ -465,6 +612,8 @@ class SkillService:
                 merged["origin"] = (
                     SKILL_ORIGIN_TENANT if origin == SKILL_ORIGIN_TENANT else SKILL_ORIGIN_PLATFORM
                 )
+                if disk_cfg.get("prompt_body"):
+                    merged["prompt_body"] = disk_cfg["prompt_body"]
                 existing.config = merged
                 if not restricted:
                     existing.enabled = True
@@ -838,11 +987,7 @@ class SkillService:
             raise HTTPException(status_code=404, detail="Skill not found")
         if skill.skill_type == "builtin":
             raise HTTPException(status_code=403, detail="Cannot modify built-in skills")
-        from app.workspace.skill_policy import is_tenant_authored_skill
-
-        if not is_tenant_authored_skill(skill, user_id):
-            raise HTTPException(status_code=403, detail="platform_skill_readonly")
-        await self._require_tenant_skill_authoring(user_id)
+        await self._require_skill_files_writable(user_id, skill)
 
         directory = self._skill_directory(skill)
         if directory is None or not directory.exists():
@@ -872,11 +1017,7 @@ class SkillService:
             raise HTTPException(status_code=404, detail="Skill not found")
         if skill.skill_type == "builtin":
             raise HTTPException(status_code=403, detail="Cannot edit built-in skills")
-        from app.workspace.skill_policy import is_tenant_authored_skill
-
-        if not is_tenant_authored_skill(skill, user_id):
-            raise HTTPException(status_code=403, detail="platform_skill_readonly")
-        await self._require_tenant_skill_authoring(user_id)
+        await self._require_skill_files_writable(user_id, skill)
 
         directory = self._skill_directory(skill)
         if directory is None or not directory.exists():

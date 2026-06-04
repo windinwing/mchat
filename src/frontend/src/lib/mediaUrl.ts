@@ -1,7 +1,13 @@
 import type { Message } from '@/stores/chat'
 
 /** Storage keys written by MChat upload workflows. */
-const UPLOAD_KEY_PREFIXES = ['chat/', 'knowledge/', 'disclosure/', 'embedding_models/']
+const UPLOAD_KEY_PREFIXES = [
+  'chat/',
+  'knowledge/',
+  'disclosure/',
+  'embedding_models/',
+  'workflow_reports/',
+]
 
 function isUploadStorageKey(key: string): boolean {
   return UPLOAD_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))

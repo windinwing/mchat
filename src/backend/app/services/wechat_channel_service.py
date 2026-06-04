@@ -35,6 +35,8 @@ from app.services.channel_service import (
 )
 from app.core.database import async_session_factory
 
+from app.utils.wechat_miniprogram import rewrite_miniprogram_links
+
 WECHAT_CONTACT_PREFIX = "wechat_channel:"
 _WECHAT_PASSIVE_REPLY_TIMEOUT_SECONDS = 4.2
 _WECHAT_ACTIVE_PUSH_DEFAULT = True
@@ -60,9 +62,8 @@ def _active_push_enabled(config: dict[str, Any]) -> bool:
     return normalized not in {"0", "false", "off", "no", "n"}
 
 
-def _to_wechat_plain_text(content: str) -> str:
-    """Convert model markdown-like output into plain text for OA display."""
-    text = html.unescape(content or "")
+def _markdown_to_wechat_plain(text: str) -> str:
+    """Strip markdown after links resolved."""
     text = text.replace("\r\n", "\n")
     text = _MARKDOWN_LINK_RE.sub(r"\1 \2", text)
     text = re.sub(r"```(?:[a-zA-Z0-9_+-]+)?\n?", "", text)
@@ -79,6 +80,17 @@ def _to_wechat_plain_text(content: str) -> str:
     if len(text) > _WECHAT_TEXT_LIMIT:
         return text[: _WECHAT_TEXT_LIMIT - 3] + "..."
     return text
+
+
+async def _to_wechat_plain_text(content: str) -> str:
+    """Convert model markdown-like output into plain text for OA display."""
+    from app.services.miniprogram_link_service import rewrite_miniprogram_links_async
+
+    text = html.unescape(content or "")
+    text = await rewrite_miniprogram_links_async(text)
+    if "weixin://dl/business/" in text:
+        text = rewrite_miniprogram_links(text)
+    return _markdown_to_wechat_plain(text)
 
 
 def _wechat_text_error(data: dict[str, Any]) -> str:
@@ -143,10 +155,11 @@ async def _send_wechat_customer_text(
     openid: str,
     content: str,
 ) -> None:
+    plain = await _to_wechat_plain_text(content)
     payload = {
         "touser": openid,
         "msgtype": "text",
-        "text": {"content": _to_wechat_plain_text(content)},
+        "text": {"content": plain},
     }
     token = await _fetch_wechat_access_token(app_id, app_secret)
 
@@ -349,7 +362,7 @@ async def _dispatch_message(
         event = (parsed.get("event") or "").lower()
         if event == "subscribe":
             welcome = await _welcome_for_customer(customer_id, db)
-            return _to_wechat_plain_text(
+            return await _to_wechat_plain_text(
                 welcome or "欢迎关注！直接发送文字即可开始对话。"
             )
         return ""
@@ -376,14 +389,14 @@ async def _dispatch_message(
             )
             if queued:
                 return ""
-            return _to_wechat_plain_text(fallback_reply)
+            return await _to_wechat_plain_text(fallback_reply)
 
         return await _process_text_message(
             channel, customer_id, openid, text, db, client_ip=client_ip
         )
 
     if msg_type in ("image", "voice", "video", "shortvideo", "location", "link"):
-        return _to_wechat_plain_text("暂仅支持文字消息，请直接输入您的问题。")
+        return await _to_wechat_plain_text("暂仅支持文字消息，请直接输入您的问题。")
 
     return ""
 
@@ -592,13 +605,13 @@ async def _process_text_message(
             openid,
         )
         await db.rollback()
-        return _to_wechat_plain_text("消息已收到，正在处理中。请稍后再发“继续”获取回复。")
+        return await _to_wechat_plain_text("消息已收到，正在处理中。请稍后再发“继续”获取回复。")
     except Exception as e:
         logger.error(f"WeChat AI reply failed: {e}", exc_info=True)
         await db.rollback()
-        return _to_wechat_plain_text(f"处理消息时出错：{e}")
+        return await _to_wechat_plain_text(f"处理消息时出错：{e}")
 
     reply = (full_response or "").strip()
     if not reply:
         reply = "抱歉，我暂时无法回复，请稍后再试。"
-    return _to_wechat_plain_text(reply)
+    return await _to_wechat_plain_text(reply)

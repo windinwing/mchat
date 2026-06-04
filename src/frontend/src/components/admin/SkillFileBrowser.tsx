@@ -26,10 +26,17 @@ interface Props {
   skillId: string
   skillName: string
   open: boolean
+  writable?: boolean
   onClose: () => void
 }
 
-export function SkillFileBrowser({ skillId, skillName, open, onClose }: Props) {
+export function SkillFileBrowser({
+  skillId,
+  skillName,
+  open,
+  writable = true,
+  onClose,
+}: Props) {
   const { t } = useTranslation()
   const [files, setFiles] = useState<SkillFile[]>([])
   const [loading, setLoading] = useState(true)
@@ -130,16 +137,18 @@ export function SkillFileBrowser({ skillId, skillName, open, onClose }: Props) {
       />
       {!selectedFile ? (
         <div className="space-y-2">
-          <div className="flex items-center justify-end">
-            <Button
-              size="sm"
-              leftIcon={uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              onClick={() => fileInputRef.current?.click()}
-              isLoading={uploading}
-            >
-              {t('skills.uploadFile')}
-            </Button>
-          </div>
+          {writable && (
+            <div className="flex items-center justify-end">
+              <Button
+                size="sm"
+                leftIcon={uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                onClick={() => fileInputRef.current?.click()}
+                isLoading={uploading}
+              >
+                {t('skills.uploadFile')}
+              </Button>
+            </div>
+          )}
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Spinner size="sm" />
@@ -224,6 +233,7 @@ export function SkillFileBrowser({ skillId, skillName, open, onClose }: Props) {
                     className="w-full h-96 font-mono text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-3 resize-none"
                     value={editingContent}
                     onChange={(e) => setEditingContent(e.target.value)}
+                    readOnly={!writable}
                     spellCheck={false}
                   />
                 )}
@@ -237,11 +247,13 @@ export function SkillFileBrowser({ skillId, skillName, open, onClose }: Props) {
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="secondary" size="sm" onClick={backToList} leftIcon={<X className="w-4 h-4" />}>
-                  {t('common.cancel')}
+                  {writable ? t('common.cancel') : t('common.close')}
                 </Button>
-                <Button size="sm" onClick={saveFile} isLoading={saving} leftIcon={<Save className="w-4 h-4" />}>
-                  {t('common.save')}
-                </Button>
+                {writable && (
+                  <Button size="sm" onClick={saveFile} isLoading={saving} leftIcon={<Save className="w-4 h-4" />}>
+                    {t('common.save')}
+                  </Button>
+                )}
               </div>
             </>
           ) : (

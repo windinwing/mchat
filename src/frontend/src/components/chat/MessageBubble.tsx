@@ -9,6 +9,7 @@ import { createMarkdownComponents } from './markdownComponents'
 import { useThrottledValue } from '@/hooks/useThrottledValue'
 import { resolveUploadUrl } from '@/lib/mediaUrl'
 import { prepareAssistantMarkdown } from '@/lib/patentMessage'
+import { rewriteMiniProgramLinksInMarkdown } from '@/lib/wechatMiniProgram'
 
 interface MessageBubbleProps {
   message: Message
@@ -63,7 +64,7 @@ export function MessageBubble({
       displayContent.includes('Connection error'))
   const assistantText = isErrorReply
     ? displayContent
-    : prepareAssistantMarkdown(throttledContent)
+    : rewriteMiniProgramLinksInMarkdown(prepareAssistantMarkdown(throttledContent))
 
   type Attachment = { url?: string; name?: string; mime?: string }
   type OutboundAsset = {

@@ -8,6 +8,8 @@ from app.core.database import get_db
 from app.middleware.auth import require_permission, Permission
 from app.models.user import User
 from app.schemas.skill import (
+    SkillCacheRefreshResponse,
+    SkillCacheStatusResponse,
     SkillCatalogResponse,
     SkillCreate,
     SkillInstallUrlRequest,
@@ -22,6 +24,7 @@ router = APIRouter()
 class SkillCapabilitiesResponse(BaseModel):
     tenant_skill_authoring: bool = False
     container_entitled: bool = False
+    platform_skill_editing: bool = False
 
 
 @router.get("/capabilities", response_model=SkillCapabilitiesResponse)
@@ -30,12 +33,17 @@ async def skill_capabilities(
     db: AsyncSession = Depends(get_db),
 ):
     """Whether current user may create/edit tenant skills (container workspace)."""
-    from app.workspace.skill_policy import user_container_entitled
+    from app.middleware.auth import has_global_scope
+    from app.workspace.skill_policy import (
+        user_container_entitled,
+        user_may_author_tenant_skills,
+    )
 
     entitled = await user_container_entitled(db, admin.id)
     return SkillCapabilitiesResponse(
-        tenant_skill_authoring=entitled,
+        tenant_skill_authoring=await user_may_author_tenant_skills(db, admin.id),
         container_entitled=entitled,
+        platform_skill_editing=await has_global_scope(admin, db),
     )
 
 
@@ -85,6 +93,19 @@ async def update_skill(
     return skill
 
 
+@router.post("/{skill_id}/refresh-cache", response_model=SkillResponse)
+async def refresh_skill_cache(
+    skill_id: str,
+    admin: User = Depends(require_permission(Permission.SKILLS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reload one skill's DB cache (path, prompt_body) from disk."""
+    service = SkillService(db)
+    skill = await service.refresh_skill_cache(skill_id=skill_id, user_id=admin.id)
+    await db.commit()
+    return skill
+
+
 @router.post("/reload")
 async def reload_skills(
     admin: User = Depends(require_permission(Permission.SKILLS_WRITE)),
@@ -93,6 +114,28 @@ async def reload_skills(
     """Reload skills from filesystem."""
     service = SkillService(db)
     return await service.reload_skills(user_id=admin.id)
+
+
+@router.get("/cache-status", response_model=SkillCacheStatusResponse)
+async def skill_cache_status(
+    admin: User = Depends(require_permission(Permission.SKILLS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """List DB vs disk cache drift for each skill."""
+    service = SkillService(db)
+    return await service.list_cache_status(user_id=admin.id)
+
+
+@router.post("/cache/refresh-stale", response_model=SkillCacheRefreshResponse)
+async def refresh_stale_skill_caches(
+    admin: User = Depends(require_permission(Permission.SKILLS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Refresh prompt_body/path from disk for all stale skills."""
+    service = SkillService(db)
+    result = await service.refresh_stale_caches(user_id=admin.id)
+    await db.commit()
+    return result
 
 
 @router.delete("/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)

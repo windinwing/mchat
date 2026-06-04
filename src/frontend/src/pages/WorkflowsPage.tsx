@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Eye, LayoutTemplate, Network, Play, Plus, RefreshCw, Trash2, Workflow } from 'lucide-react'
+import { Eye, LayoutTemplate, Network, Pencil, Play, Plus, RefreshCw, Trash2, Workflow } from 'lucide-react'
 
 import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
@@ -13,7 +13,9 @@ import { Dialog } from '@/components/ui/Dialog'
 import { toast } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
 import { WorkflowGraphEditor, type WorkflowGraphValue } from '@/components/workflow/WorkflowGraphEditor'
-import { extractStartInputFields } from '@/lib/workflowSkillMeta'
+import { WorkflowReportPanel } from '@/components/workflow/WorkflowReportPanel'
+import { extractStartInputFields, graphNeedsReportTitle, buildDefaultReportTitle } from '@/lib/workflowSkillMeta'
+import { resolveRunDisplayName, runListSubtitle } from '@/lib/workflowRunLabel'
 
 interface Skill {
   id: string
@@ -46,6 +48,7 @@ interface WorkflowRun {
   id: string
   workflow_id: string
   workflow_name: string
+  display_name?: string
   trigger_type: string
   status: string
   input_payload?: Record<string, unknown> | null
@@ -124,9 +127,13 @@ export function WorkflowsPage() {
   const [graphOpen, setGraphOpen] = useState(false)
   const [runInputOpen, setRunInputOpen] = useState(false)
   const [runInputValues, setRunInputValues] = useState<Record<string, string>>({})
+  const reportTitleTouchedRef = useRef(false)
   const [runTarget, setRunTarget] = useState<WorkflowItem | null>(null)
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [creatingTemplateId, setCreatingTemplateId] = useState<string | null>(null)
+  const [createFromTplOpen, setCreateFromTplOpen] = useState(false)
+  const [createFromTplTarget, setCreateFromTplTarget] = useState<WorkflowTemplate | null>(null)
+  const [createFromTplName, setCreateFromTplName] = useState('')
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [saveTemplateTarget, setSaveTemplateTarget] = useState<WorkflowItem | null>(null)
   const [templateNameInput, setTemplateNameInput] = useState('')
@@ -145,6 +152,38 @@ export function WorkflowsPage() {
   useEffect(() => {
     loadAll()
   }, [uiLocale])
+
+  const hasRunningJobs = runs.some((r) => r.status === 'running')
+
+  useEffect(() => {
+    if (!hasRunningJobs && !(selectedRunDetail?.status === 'running' && runDetailOpen)) {
+      return
+    }
+    const timer = window.setInterval(async () => {
+      try {
+        const runData = await api.get<WorkflowRun[]>('/workflows/runs/list', { limit: '40' })
+        setRuns(runData)
+        if (runDetailOpen && selectedRunDetail?.id) {
+          const detail = await api.get<WorkflowRunDetail>(
+            `/workflows/runs/${selectedRunDetail.id}`
+          )
+          setSelectedRunDetail(detail)
+        }
+      } catch {
+        /* ignore poll errors */
+      }
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [hasRunningJobs, runDetailOpen, selectedRunDetail?.id, selectedRunDetail?.status])
+
+  const refreshRuns = async () => {
+    try {
+      const runData = await api.get<WorkflowRun[]>('/workflows/runs/list', { limit: '40' })
+      setRuns(runData)
+    } catch {
+      /* ignore */
+    }
+  }
 
   const loadAll = async () => {
     setLoading(true)
@@ -243,12 +282,99 @@ export function WorkflowsPage() {
     }
   }
 
+  const rerunRun = async (run: WorkflowRun) => {
+    if (run.status === 'running') {
+      toast(t('workflows.toastRunAlreadyRunning'), { type: 'warning' })
+      return
+    }
+    setRunningMap((prev) => ({ ...prev, [run.workflow_id]: true }))
+    try {
+      const payload = (run.input_payload as Record<string, unknown> | null) || {}
+      const detail = await api.post<WorkflowRunDetail>(`/workflows/${run.workflow_id}/run-once`, {
+        payload,
+      })
+      toast(t('workflows.toastRunQueued'), { type: 'success' })
+      if (detail?.id) {
+        setRuns((prev) => [detail as WorkflowRun, ...prev.filter((r) => r.id !== detail.id)])
+        setSelectedRunDetail(detail)
+        setRunDetailOpen(true)
+      } else {
+        await refreshRuns()
+      }
+    } catch (err: any) {
+      toast(t('workflows.toastRunFailed'), { type: 'error', message: err.message })
+    } finally {
+      setRunningMap((prev) => ({ ...prev, [run.workflow_id]: false }))
+    }
+  }
+
+  const [renameRunOpen, setRenameRunOpen] = useState(false)
+  const [renameRunTarget, setRenameRunTarget] = useState<WorkflowRun | null>(null)
+  const [renameRunLabel, setRenameRunLabel] = useState('')
+  const [renamingRun, setRenamingRun] = useState(false)
+
+  const openRenameRun = (run: WorkflowRun) => {
+    setRenameRunTarget(run)
+    setRenameRunLabel(resolveRunDisplayName(run))
+    setRenameRunOpen(true)
+  }
+
+  const confirmRenameRun = async () => {
+    if (!renameRunTarget || !renameRunLabel.trim()) return
+    setRenamingRun(true)
+    try {
+      const updated = await api.patch<WorkflowRun>(`/workflows/runs/${renameRunTarget.id}`, {
+        run_label: renameRunLabel.trim(),
+      })
+      setRuns((prev) =>
+        prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)),
+      )
+      if (selectedRunDetail?.id === updated.id) {
+        setSelectedRunDetail((prev) => (prev ? { ...prev, ...updated } : prev))
+      }
+      toast(t('workflows.toastRunRenamed'), { type: 'success' })
+      setRenameRunOpen(false)
+      setRenameRunTarget(null)
+    } catch (err: any) {
+      toast(t('workflows.toastRunRenameFailed'), { type: 'error', message: err.message })
+    } finally {
+      setRenamingRun(false)
+    }
+  }
+
+  const deleteRun = async (run: WorkflowRun) => {
+    if (run.status === 'running') {
+      toast(t('workflows.toastRunAlreadyRunning'), { type: 'warning' })
+      return
+    }
+    if (!window.confirm(t('workflows.deleteRunConfirm', { name: resolveRunDisplayName(run) }))) return
+    try {
+      await api.delete(`/workflows/runs/${run.id}`)
+      setRuns((prev) => prev.filter((r) => r.id !== run.id))
+      if (selectedRunDetail?.id === run.id) {
+        setRunDetailOpen(false)
+        setSelectedRunDetail(null)
+      }
+      toast(t('workflows.toastRunDeleted'), { type: 'success' })
+    } catch (err: any) {
+      toast(t('workflows.toastRunDeleteFailed'), { type: 'error', message: err.message })
+    }
+  }
+
   const runOnce = async (row: WorkflowItem, payload: Record<string, unknown> = {}) => {
     setRunningMap((prev) => ({ ...prev, [row.id]: true }))
     try {
-      await api.post(`/workflows/${row.id}/run-once`, { payload })
-      toast(t('workflows.toastRunTriggered'), { type: 'success' })
-      await loadAll()
+      const detail = await api.post<WorkflowRunDetail>(`/workflows/${row.id}/run-once`, {
+        payload,
+      })
+      toast(t('workflows.toastRunQueued'), { type: 'success' })
+      if (detail?.id) {
+        setRuns((prev) => [detail as WorkflowRun, ...prev.filter((r) => r.id !== detail.id)])
+        setSelectedRunDetail(detail)
+        setRunDetailOpen(true)
+      } else {
+        await refreshRuns()
+      }
     } catch (err: any) {
       toast(t('workflows.toastRunFailed'), { type: 'error', message: err.message })
     } finally {
@@ -258,28 +384,117 @@ export function WorkflowsPage() {
     }
   }
 
+  const skillOpts = useMemo(() => skills.map((s) => ({ id: s.id, name: s.name })), [skills])
+
   const openRunDialog = (row: WorkflowItem) => {
-    const fields = extractStartInputFields(row.graph_json?.nodes || [])
+    const nodes = row.graph_json?.nodes || []
+    const fields = extractStartInputFields(nodes, { t, skills: skillOpts })
     const defaults: Record<string, string> = {}
     for (const f of fields) defaults[f.key] = ''
+    reportTitleTouchedRef.current = false
     setRunTarget(row)
     setRunInputValues(defaults)
     setRunInputOpen(true)
   }
 
+  const handleRunInputChange = (key: string, value: string) => {
+    if (key === 'report_title') {
+      reportTitleTouchedRef.current = true
+    }
+    setRunInputValues((prev) => {
+      const next = { ...prev, [key]: value }
+      const nodes = runTarget?.graph_json?.nodes || []
+      if (
+        key === 'keyword' &&
+        runTarget &&
+        graphNeedsReportTitle(nodes, skillOpts) &&
+        !reportTitleTouchedRef.current
+      ) {
+        next.report_title = buildDefaultReportTitle(value, {
+          industry: prev.industry,
+          locale: uiLocale,
+        })
+      }
+      if (
+        key === 'industry' &&
+        runTarget &&
+        graphNeedsReportTitle(nodes, skillOpts) &&
+        !reportTitleTouchedRef.current &&
+        next.keyword?.trim()
+      ) {
+        next.report_title = buildDefaultReportTitle(next.keyword, {
+          industry: value,
+          locale: uiLocale,
+        })
+      }
+      return next
+    })
+  }
+
   const confirmRun = async () => {
     if (!runTarget) return
-    const fields = extractStartInputFields(runTarget.graph_json?.nodes || [])
+    const nodes = runTarget.graph_json?.nodes || []
+    const fields = extractStartInputFields(nodes, { t, skills: skillOpts })
     for (const f of fields) {
       if (f.required && !runInputValues[f.key]?.trim()) {
         toast(t('workflows.runInputRequired', { field: f.label }), { type: 'error' })
         return
       }
     }
-    await runOnce(runTarget, runInputValues)
+    const payload: Record<string, string> = { ...runInputValues, _locale: uiLocale }
+    if (graphNeedsReportTitle(nodes, skillOpts)) {
+      const title =
+        payload.report_title?.trim() ||
+        buildDefaultReportTitle(payload.keyword || '', {
+          industry: payload.industry,
+          locale: uiLocale,
+        })
+      if (title) payload.report_title = title
+    } else if (!payload.report_title?.trim()) {
+      delete payload.report_title
+    }
+    await runOnce(runTarget, payload)
+  }
+
+  const suggestWorkflowName = (baseName: string) => {
+    const base = baseName.trim()
+    const taken = new Set(workflows.map((w) => w.name.trim()))
+    if (!taken.has(base)) return base
+    let n = 2
+    while (taken.has(`${base} (${n})`)) n += 1
+    return `${base} (${n})`
+  }
+
+  const openCreateFromTemplate = (tpl: WorkflowTemplate) => {
+    setCreateFromTplTarget(tpl)
+    setCreateFromTplName(suggestWorkflowName(tpl.name))
+    setCreateFromTplOpen(true)
+  }
+
+  const confirmCreateFromTemplate = async () => {
+    if (!createFromTplTarget || !createFromTplName.trim()) return
+    setCreatingTemplateId(createFromTplTarget.id)
+    try {
+      await api.post(`/workflows/from-template/${createFromTplTarget.id}`, {
+        name: createFromTplName.trim(),
+      })
+      toast(t('workflows.toastTemplateCreated'), { type: 'success' })
+      setCreateFromTplOpen(false)
+      setCreateFromTplTarget(null)
+      await loadAll()
+    } catch (err: any) {
+      toast(t('workflows.toastTemplateCreateFailed'), { type: 'error', message: err.message })
+    } finally {
+      setCreatingTemplateId(null)
+    }
   }
 
   const createFromTemplate = async (templateId: string) => {
+    const tpl = templates.find((t) => t.id === templateId)
+    if (tpl) {
+      openCreateFromTemplate(tpl)
+      return
+    }
     setCreatingTemplateId(templateId)
     try {
       await api.post(`/workflows/from-template/${templateId}`, {})
@@ -365,7 +580,7 @@ export function WorkflowsPage() {
           size="sm"
           variant="secondary"
           isLoading={creatingTemplateId === tpl.id}
-          onClick={() => createFromTemplate(tpl.id)}
+          onClick={() => openCreateFromTemplate(tpl)}
         >
           {t('workflows.useTemplate')}
         </Button>
@@ -536,6 +751,15 @@ export function WorkflowsPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{row.name}</p>
+                      <button
+                        type="button"
+                        title={t('workflows.renameWorkflow')}
+                        aria-label={t('workflows.renameWorkflow')}
+                        onClick={() => openEdit(row)}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
                       <Badge variant={row.enabled ? 'success' : 'default'}>
                         {row.enabled ? t('common.enabled') : t('common.disabled')}
                       </Badge>
@@ -572,9 +796,15 @@ export function WorkflowsPage() {
                     <Button size="sm" variant="outline" onClick={() => openEdit(row)}>
                       {t('common.edit')}
                     </Button>
-                    <Button size="sm" variant="danger" leftIcon={<Trash2 className="w-4 h-4" />} onClick={() => deleteWorkflow(row)}>
-                      {t('common.delete')}
-                    </Button>
+                    <button
+                      type="button"
+                      title={t('common.delete')}
+                      aria-label={t('common.delete')}
+                      onClick={() => deleteWorkflow(row)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -626,13 +856,29 @@ export function WorkflowsPage() {
             </div>
           ) : (
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
-              {runs.map((run) => (
+              {runs.map((run) => {
+                const runTitle = resolveRunDisplayName(run)
+                const runSubtitle = runListSubtitle(run)
+                return (
                 <div key={run.id} className="px-6 py-3 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {run.workflow_name}
-                    </p>
+                    <div className="flex items-center gap-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                        {runTitle}
+                      </p>
+                      <button
+                        type="button"
+                        title={t('workflows.renameRunRecord')}
+                        aria-label={t('workflows.renameRunRecord')}
+                        disabled={run.status === 'running'}
+                        onClick={() => openRenameRun(run)}
+                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                     <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      {runSubtitle ? `${runSubtitle} · ` : ''}
                       {formatDate(run.started_at)} · {run.trigger_type}
                       {run.error ? ` · ${run.error}` : ''}
                     </p>
@@ -662,6 +908,26 @@ export function WorkflowsPage() {
                     >
                       {t('workflows.viewDetail')}
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      leftIcon={<RefreshCw className="w-4 h-4" />}
+                      isLoading={!!runningMap[run.workflow_id]}
+                      disabled={run.status === 'running'}
+                      onClick={() => rerunRun(run)}
+                    >
+                      {t('workflows.rerun')}
+                    </Button>
+                    <button
+                      type="button"
+                      title={t('workflows.deleteRun')}
+                      aria-label={t('workflows.deleteRun')}
+                      disabled={run.status === 'running'}
+                      onClick={() => deleteRun(run)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-40 dark:text-red-400 dark:hover:bg-red-950/40"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                     {run.status === 'paused' ? (
                       <Button size="sm" variant="secondary" onClick={() => resumeRun(run.id)}>
                         {t('workflows.resumeRun')}
@@ -669,7 +935,8 @@ export function WorkflowsPage() {
                     ) : null}
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>
@@ -699,10 +966,44 @@ export function WorkflowsPage() {
         </div>
       </Dialog>
 
-      <Dialog open={runDetailOpen} onClose={() => setRunDetailOpen(false)} title={t('workflows.runDetailTitle')} size="xl">
+      <Dialog
+        open={runDetailOpen}
+        onClose={() => setRunDetailOpen(false)}
+        title={
+          selectedRunDetail
+            ? resolveRunDisplayName(selectedRunDetail)
+            : t('workflows.runDetailTitle')
+        }
+        size="xl"
+      >
         {selectedRunDetail && (
           <div className="space-y-4">
+            {selectedRunDetail.status === 'running' ? (
+              <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/80 dark:bg-blue-950/40 px-3 py-2 text-sm text-blue-800 dark:text-blue-200 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Spinner size="sm" />
+                  {t('workflows.runInProgressHint')}
+                </div>
+                <p className="text-xs text-blue-700/90 dark:text-blue-300/90 pl-6">
+                  {t('workflows.runInProgressCloseHint')}
+                </p>
+              </div>
+            ) : null}
+            {selectedRunDetail.status === 'failed' && selectedRunDetail.error ? (
+              <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50/80 dark:bg-red-950/40 px-3 py-2 space-y-1">
+                <p className="text-sm font-medium text-red-800 dark:text-red-200">
+                  {t('workflows.detailError')}
+                </p>
+                <pre className="text-xs text-red-700 dark:text-red-300 whitespace-pre-wrap break-words">
+                  {selectedRunDetail.error}
+                </pre>
+              </div>
+            ) : null}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+              <p className="text-gray-600 dark:text-gray-300">
+                <span className="font-medium">{t('workflows.detailReportTitle')}:</span>{' '}
+                {resolveRunDisplayName(selectedRunDetail)}
+              </p>
               <p className="text-gray-600 dark:text-gray-300"><span className="font-medium">{t('workflows.detailWorkflow')}:</span> {selectedRunDetail.workflow_name}</p>
               <p className="text-gray-600 dark:text-gray-300"><span className="font-medium">{t('workflows.detailStatus')}:</span> {selectedRunDetail.status}</p>
               <p className="text-gray-600 dark:text-gray-300"><span className="font-medium">{t('workflows.detailTriggerType')}:</span> {selectedRunDetail.trigger_type}</p>
@@ -729,6 +1030,11 @@ export function WorkflowsPage() {
                 </Button>
               </div>
             ) : null}
+
+            <WorkflowReportPanel
+              nodeRuns={selectedRunDetail.node_runs}
+              outputPayload={selectedRunDetail.output_payload ?? undefined}
+            />
 
             <div className="space-y-1">
               <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{t('workflows.detailStepRuns')}</p>
@@ -802,22 +1108,93 @@ export function WorkflowsPage() {
                 </div>
               </div>
             ) : null}
+            <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+              {selectedRunDetail.status !== 'running' ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    leftIcon={<RefreshCw className="w-4 h-4" />}
+                    isLoading={!!runningMap[selectedRunDetail.workflow_id]}
+                    onClick={() => rerunRun(selectedRunDetail)}
+                  >
+                    {t('workflows.rerun')}
+                  </Button>
+                  <button
+                    type="button"
+                    title={t('workflows.deleteRun')}
+                    aria-label={t('workflows.deleteRun')}
+                    onClick={() => deleteRun(selectedRunDetail)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </>
+              ) : null}
+              <Button variant="secondary" onClick={() => setRunDetailOpen(false)}>
+                {selectedRunDetail.status === 'running'
+                  ? t('workflows.runDetailClose')
+                  : t('common.close')}
+              </Button>
+            </div>
           </div>
         )}
+      </Dialog>
+      <Dialog open={renameRunOpen} onClose={() => setRenameRunOpen(false)} title={t('workflows.renameRunRecordTitle')} size="md">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('workflows.renameRunRecordHint')}</p>
+          <Input
+            label={t('workflows.renameRunRecordLabel')}
+            value={renameRunLabel}
+            onChange={(e) => setRenameRunLabel(e.target.value)}
+          />
+          {renameRunTarget ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              {t('workflows.detailWorkflow')}: {renameRunTarget.workflow_name}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setRenameRunOpen(false)}>{t('common.cancel')}</Button>
+            <Button onClick={confirmRenameRun} isLoading={renamingRun} disabled={!renameRunLabel.trim()}>
+              {t('common.save')}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+      <Dialog open={createFromTplOpen} onClose={() => setCreateFromTplOpen(false)} title={t('workflows.createFromTemplateTitle')} size="md">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('workflows.createFromTemplateHint')}</p>
+          <Input
+            label={t('workflows.formName')}
+            value={createFromTplName}
+            onChange={(e) => setCreateFromTplName(e.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCreateFromTplOpen(false)}>{t('common.cancel')}</Button>
+            <Button
+              onClick={confirmCreateFromTemplate}
+              isLoading={!!creatingTemplateId}
+              disabled={!createFromTplName.trim()}
+            >
+              {t('common.create')}
+            </Button>
+          </div>
+        </div>
       </Dialog>
       <Dialog open={runInputOpen} onClose={() => setRunInputOpen(false)} title={t('workflows.runInputTitle')}>
         <div className="space-y-3">
           <p className="text-sm text-gray-500 dark:text-gray-400">{t('workflows.runInputHint')}</p>
           {runTarget &&
-            extractStartInputFields(runTarget.graph_json?.nodes || []).map((field) => (
+            extractStartInputFields(runTarget.graph_json?.nodes || [], {
+              t,
+              skills: skillOpts,
+            }).map((field) => (
               <Input
                 key={field.key}
+                type={field.type === 'number' ? 'number' : 'text'}
                 label={field.label}
                 value={runInputValues[field.key] || ''}
                 placeholder={field.placeholder}
-                onChange={(e) =>
-                  setRunInputValues((prev) => ({ ...prev, [field.key]: e.target.value }))
-                }
+                onChange={(e) => handleRunInputChange(field.key, e.target.value)}
               />
             ))}
           <div className="flex justify-end gap-2 pt-2">

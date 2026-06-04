@@ -92,6 +92,27 @@ def test_build_workspace_context_user_denied(workspace_root, monkeypatch):
     assert ctx.mode.value == "local"
 
 
+def test_build_workspace_context_uses_owner_tenant_root_not_viewer(
+    workspace_root, monkeypatch
+):
+    """Admin inspecting another user's channel must resolve the owner's tenant paths."""
+    monkeypatch.setattr(settings, "workspace_container_enabled", True)
+    customer = CustomerConfig(
+        id="ch-1",
+        name="Tenant Agent",
+        user_id="tenant-owner",
+        plan="pro",
+        enabled=True,
+    )
+    ctx = build_workspace_context(
+        "tenant-owner",
+        customer_config=customer,
+        channel_id=customer.id,
+    )
+    assert ctx.tenant_root == workspace_root / "tenant-owner"
+    assert ctx.user_id == "tenant-owner"
+
+
 def test_legacy_studio_path(monkeypatch, tmp_path):
     legacy = tmp_path / "legacy-studio"
     monkeypatch.setattr(settings, "workspace_legacy_studio_dir", str(legacy))

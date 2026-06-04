@@ -25,7 +25,7 @@ rsync -avz --delete \
   --exclude 'src/backend/logs' \
   --exclude 'logs' \
   --exclude 'skills' \
-  --exclude 'data' \
+  --exclude '/data/' \
   --exclude 'uploads' \
   --exclude 'test.db' \
   --exclude '.pytest_cache' \

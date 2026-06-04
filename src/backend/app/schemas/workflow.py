@@ -102,6 +102,10 @@ class WorkflowRunOnceRequest(BaseModel):
     payload: dict | None = None
 
 
+class WorkflowRunRenameRequest(BaseModel):
+    run_label: str = Field(..., min_length=1, max_length=120)
+
+
 class WorkflowRunResumeRequest(BaseModel):
     payload: dict | None = None
 
@@ -126,6 +130,7 @@ class WorkflowRunResponse(BaseModel):
     id: str
     workflow_id: str
     workflow_name: str
+    display_name: str = ""
     trigger_type: str
     status: str
     input_payload: dict | None = None

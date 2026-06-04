@@ -16,6 +16,7 @@ from app.api.speech import router as speech_router
 from app.api.skill_schedule import router as skill_schedule_router
 from app.api.workflow import router as workflow_router
 from app.api.workspace import router as workspace_router
+from app.api.wechat_public import router as wechat_public_router
 
 api_router = APIRouter(prefix="/api")
 
@@ -37,3 +38,4 @@ api_router.include_router(settings_router, prefix="/settings", tags=["Settings"]
 api_router.include_router(channel_router, prefix="/channels", tags=["Channels"])
 api_router.include_router(health_router, prefix="/health", tags=["Health"])
 api_router.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])
+api_router.include_router(wechat_public_router, prefix="/wechat", tags=["WeChat"])

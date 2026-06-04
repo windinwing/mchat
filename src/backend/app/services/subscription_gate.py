@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.customer import CustomerConfig
 
@@ -72,6 +74,20 @@ def channel_subscription_active(config: CustomerConfig) -> bool:
         trial_ends_at=config.trial_ends_at,
         subscription_ends_at=config.subscription_ends_at,
     )
+
+
+async def active_customer_configs_for_user(
+    db: AsyncSession,
+    user_id: str,
+) -> list[CustomerConfig]:
+    """Enabled channels whose subscription/trial is still active."""
+    result = await db.execute(
+        select(CustomerConfig).where(
+            CustomerConfig.user_id == user_id,
+            CustomerConfig.enabled.is_(True),
+        )
+    )
+    return [c for c in result.scalars().all() if channel_subscription_active(c)]
 
 
 def subscription_inactive_message(config: CustomerConfig) -> str:

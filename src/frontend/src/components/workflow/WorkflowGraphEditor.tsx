@@ -541,6 +541,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
         ? {
             input_fields: [
               { key: 'keyword', label: t('workflows.inputKeyword'), placeholder: t('workflows.inputKeywordPh'), required: true },
+              { key: 'report_title', label: t('workflows.inputReportTitle'), placeholder: t('workflows.inputReportTitlePh'), required: false },
               { key: 'industry', label: t('workflows.inputIndustry'), placeholder: t('workflows.inputIndustryPh'), required: false },
             ],
           }
@@ -1208,6 +1209,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
                               <Input label={t('workflows.graphTimeoutSec')} type="number" value={String(selectedNodeConfig.timeout_seconds ?? 0)} onChange={(e) => updateNodeConfig('timeout_seconds', toSafeInt(e.target.value, 0))} />
                             </div>
                             <PayloadMapper
+                              skillName={String(selectedNodeConfig.skill_name || '')}
                               fields={startInputFields}
                               upstreamNodeIds={upstreamForSelected}
                               payload={(selectedNodeConfig.payload_template || {}) as Record<string, unknown>}

@@ -2,6 +2,10 @@ import type { Components } from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Copy, Check } from 'lucide-react'
+import {
+  isWechatBrowser,
+  normalizeMiniProgramHref,
+} from '@/lib/wechatMiniProgram'
 export function createMarkdownComponents(
   onCopy: (text: string) => void,
   copied: boolean,
@@ -113,25 +117,30 @@ export function createMarkdownComponents(
       )
     },
     a({ href, children }) {
-      const isMpLink = href?.startsWith('#小程序://') || href?.includes('/mini-program?')
+      const label = typeof children === 'string' ? children : undefined
+      const normalized = href ? normalizeMiniProgramHref(href, label) : { href: href || '', isMp: false }
+      const linkHref = normalized.href
+      const isMpLink = normalized.isMp
+      if (!linkHref) {
+        return <span className="text-sm text-gray-800 dark:text-gray-200">{children}</span>
+      }
       const handleMpLink = (e: React.MouseEvent<HTMLAnchorElement>) => {
         if (!isMpLink) return
         e.preventDefault()
-        const url = href!
-        const isWechat = /MicroMessenger/i.test(navigator.userAgent)
-        if (isWechat || url.includes('/mini-program?')) {
-          window.location.href = url
+        const isWechat = isWechatBrowser()
+        if (isWechat || linkHref.includes('/mini-program?')) {
+          window.location.href = linkHref
           return
         }
         if (typeof (window as any).wx?.miniProgram?.postMessage === 'function') {
-          ;(window as any).wx.miniProgram.postMessage({ data: { action: 'launchMiniProgram', url } })
+          ;(window as any).wx.miniProgram.postMessage({ data: { action: 'launchMiniProgram', url: linkHref } })
           return
         }
-        window.location.href = url
+        window.location.href = linkHref
       }
       return (
         <a
-          href={href}
+          href={linkHref}
           onClick={handleMpLink}
           target={isMpLink ? undefined : '_blank'}
           rel={isMpLink ? undefined : 'noopener noreferrer'}

@@ -15,6 +15,7 @@ from app.schemas.workflow import (
     WorkflowCreateFromTemplateRequest,
     WorkflowResponse,
     WorkflowRunDetailResponse,
+    WorkflowRunRenameRequest,
     WorkflowRunResumeRequest,
     WorkflowRunOnceRequest,
     WorkflowRunResponse,
@@ -198,6 +199,29 @@ async def resume_workflow_run(
         user_id=admin.id,
         request=request,
     )
+
+
+@router.patch("/runs/{run_id}", response_model=WorkflowRunResponse)
+async def rename_workflow_run(
+    run_id: str,
+    request: WorkflowRunRenameRequest,
+    admin: User = Depends(require_permission(Permission.SKILLS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await WorkflowService(db).update_run_label(
+        run_id=run_id,
+        user_id=admin.id,
+        run_label=request.run_label,
+    )
+
+
+@router.delete("/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workflow_run(
+    run_id: str,
+    admin: User = Depends(require_permission(Permission.SKILLS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    await WorkflowService(db).delete_run(run_id=run_id, user_id=admin.id)
 
 
 @router.get("/approvals/pending", response_model=list[WorkflowApprovalResponse])

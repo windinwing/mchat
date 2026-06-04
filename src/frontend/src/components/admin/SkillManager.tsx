@@ -11,9 +11,11 @@ import {
   Download,
   ExternalLink,
   FolderOpen,
+  Database,
   Plus,
 } from 'lucide-react'
 import api from '@/lib/api'
+import { SkillCachePanel } from '@/components/admin/SkillCachePanel'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -80,6 +82,10 @@ export function SkillManager() {
   const [createType, setCreateType] = useState('tool')
   const [creating, setCreating] = useState(false)
   const [canAuthorSkills, setCanAuthorSkills] = useState(false)
+  const [canEditPlatformSkills, setCanEditPlatformSkills] = useState(false)
+  const [fileBrowserWritable, setFileBrowserWritable] = useState(true)
+  const [cacheOpen, setCacheOpen] = useState(false)
+  const [cacheStaleCount, setCacheStaleCount] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -90,10 +96,20 @@ export function SkillManager() {
     try {
       const [data, caps] = await Promise.all([
         api.get<Skill[]>('/skills'),
-        api.get<{ tenant_skill_authoring: boolean }>('/skills/capabilities'),
+        api.get<{
+          tenant_skill_authoring: boolean
+          platform_skill_editing?: boolean
+        }>('/skills/capabilities'),
       ])
       setSkills(data)
       setCanAuthorSkills(Boolean(caps.tenant_skill_authoring))
+      setCanEditPlatformSkills(Boolean(caps.platform_skill_editing))
+      try {
+        const cache = await api.get<{ stale_count: number }>('/skills/cache-status')
+        setCacheStaleCount(cache.stale_count ?? 0)
+      } catch {
+        /* optional */
+      }
     } catch (err) {
       console.error('Failed to load skills:', err)
       toast(t('skills.toastLoadFailed'), { type: 'error' })
@@ -254,6 +270,17 @@ export function SkillManager() {
   const typeLabel = (skillType: string) =>
     skillType === 'builtin' ? t('skills.builtin') : t('skills.custom')
 
+  const isTenantOriginSkill = (skill: Skill) =>
+    skill.config?.origin === 'tenant' || skill.config?.origin !== 'platform'
+
+  const canBrowseSkillFiles = (skill: Skill) => {
+    if (skill.skill_type === 'builtin' || isServerOpsSkill(skill)) return false
+    if (canEditPlatformSkills) return true
+    return canAuthorSkills && isTenantOriginSkill(skill)
+  }
+
+  const canWriteSkillFiles = (skill: Skill) => canBrowseSkillFiles(skill)
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -305,6 +332,18 @@ export function SkillManager() {
             isLoading={reloading}
           >
             {t('skills.syncFromDisk')}
+          </Button>
+          <Button
+            variant="secondary"
+            leftIcon={<Database className="w-4 h-4" />}
+            onClick={() => setCacheOpen(true)}
+          >
+            {t('skills.cacheManage')}
+            {cacheStaleCount > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-amber-500 text-white text-xs font-semibold">
+                {cacheStaleCount}
+              </span>
+            )}
           </Button>
           {canAuthorSkills && (
             <Button
@@ -399,11 +438,12 @@ export function SkillManager() {
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
-                    {canAuthorSkills && skill.config?.origin === 'tenant' && (
+                    {canBrowseSkillFiles(skill) && (
                     <button
                       onClick={() => {
                         setFileBrowserSkillId(skill.id)
                         setFileBrowserSkillName(skill.name)
+                        setFileBrowserWritable(canWriteSkillFiles(skill))
                         setFileBrowserOpen(true)
                       }}
                       aria-label={t('skills.browseFiles')}
@@ -703,7 +743,14 @@ export function SkillManager() {
         skillId={fileBrowserSkillId}
         skillName={fileBrowserSkillName}
         open={fileBrowserOpen}
+        writable={fileBrowserWritable}
         onClose={() => setFileBrowserOpen(false)}
+      />
+
+      <SkillCachePanel
+        open={cacheOpen}
+        onClose={() => setCacheOpen(false)}
+        onRefreshed={loadSkills}
       />
 
       {/* Upload Dialog */}

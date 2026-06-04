@@ -20,13 +20,10 @@ from app.schemas.skill_schedule import (
     SkillScheduleUpdate,
 )
 from app.skill.executor import execute_skill
+from app.workspace.automation_context import build_automation_workspace_context
 from app.workspace.context import workspace_execution_scope
-from app.workspace.resolver import build_workspace_context
 from app.services.workflow_service import WorkflowService
-
-
-def _duration_ms(started_at: datetime, finished_at: datetime) -> int:
-    return max(0, int((finished_at - started_at).total_seconds() * 1000))
+from app.utils.datetime_utils import duration_ms as _duration_ms
 
 
 def _as_result_dict(result: Any) -> dict:
@@ -336,7 +333,7 @@ class SkillScheduleService:
                     raise RuntimeError(f"skill '{skill.name}' is disabled")
                 run.target_name = skill.name
                 async with workspace_execution_scope(
-                    build_workspace_context(schedule.user_id)
+                    await build_automation_workspace_context(self.db, schedule.user_id)
                 ):
                     raw_result = await execute_skill(skill, payload)
                 result_dict = _as_result_dict(raw_result)

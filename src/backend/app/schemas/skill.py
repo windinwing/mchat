@@ -55,3 +55,27 @@ class SkillCatalogResponse(BaseModel):
     """Catalog list response."""
     source: str = "clawhub"
     items: list[SkillCatalogItem]
+
+
+class SkillCacheEntry(BaseModel):
+    """DB cache vs on-disk SKILL.md comparison."""
+    skill_id: str
+    name: str
+    db_path: str | None = None
+    canonical_path: str | None = None
+    prompt_body_stale: bool = False
+    path_stale: bool = False
+    disk_missing: bool = False
+    cached_chars: int = 0
+    disk_chars: int = 0
+    disk_modified_at: datetime | None = None
+
+
+class SkillCacheStatusResponse(BaseModel):
+    items: list[SkillCacheEntry]
+    stale_count: int = 0
+
+
+class SkillCacheRefreshResponse(BaseModel):
+    refreshed: int
+    message: str

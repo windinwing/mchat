@@ -93,6 +93,14 @@ class Settings(BaseSettings):
     wechat_pay_api_key: str = ""
     wechat_pay_notify_path: str = "/api/pay/wechat/notify"
 
+    # WeChat JS-SDK for H5 wx-open-launch-weapp (fallback: first enabled wechat channel)
+    wechat_jssdk_app_id: str = ""
+    wechat_jssdk_app_secret: str = ""
+
+    # Mini program URL Link generation (target shop MP, e.g. wheelchair advisor)
+    miniprogram_jump_app_id: str = ""
+    miniprogram_jump_app_secret: str = ""
+
     # Default admin (created on first startup if missing)
     admin_username: str = "admin"
     admin_password: str = "admin123"

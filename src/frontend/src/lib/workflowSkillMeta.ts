@@ -100,12 +100,12 @@ export function defaultPayloadForSkill(skill: WorkflowSkillOption, upstreamNodeI
         return {
           command: 'chart',
           sections: '${nodes.merge.sections}',
-          title: '${input.keyword}',
+          title: '${input.report_title}',
         }
       }
       return {
         sections: '${nodes.merge.sections}',
-        title: '${input.keyword}',
+        title: '${input.report_title}',
       }
     case 'export':
       if (isPatentReport) {
@@ -113,8 +113,8 @@ export function defaultPayloadForSkill(skill: WorkflowSkillOption, upstreamNodeI
           command: 'all',
           sections: '${nodes.merge.sections}',
           charts: '${nodes.chart.charts}',
-          title: '${input.keyword}',
-          filename: '${input.keyword}-patent-report',
+          title: '${input.report_title}',
+          filename: '${input.report_title}',
         }
       }
       if (isPatentSearch) {
@@ -159,24 +159,93 @@ export interface InputFieldDef {
   label: string
   placeholder?: string
   required?: boolean
+  type?: 'text' | 'number'
+}
+
+/** True when graph includes patent-report chart/export nodes. */
+export function graphNeedsReportTitle(
+  nodes: Array<{ type: string; config?: Record<string, unknown> | null }>,
+  skills?: Array<{ id: string; name: string }>,
+): boolean {
+  for (const node of nodes) {
+    if (node.type !== 'skill') continue
+    const cfg = node.config as {
+      skill_name?: string
+      skill_id?: string
+      payload_template?: Record<string, unknown>
+    } | undefined
+    const skillName = String(cfg?.skill_name || '').toLowerCase()
+    if (skillName === 'patent-report' || skillName.includes('patent-report')) return true
+    if (skills?.length && cfg?.skill_id) {
+      const sk = skills.find((s) => s.id === cfg.skill_id)
+      if (sk?.name === 'patent-report') return true
+    }
+    const pt = cfg?.payload_template || {}
+    const cmd = String(pt.command || '').toLowerCase()
+    if (['chart', 'excel', 'word', 'ppt', 'all'].includes(cmd) && ('sections' in pt || 'title' in pt)) {
+      return true
+    }
+    const blob = JSON.stringify(pt)
+    if (blob.includes('report_title') || blob.includes('专利分析')) return true
+  }
+  return false
+}
+
+export function buildDefaultReportTitle(
+  keyword: string,
+  options?: { industry?: string; locale?: string },
+): string {
+  const kw = keyword.trim()
+  if (!kw) return ''
+  const industry = options?.industry?.trim()
+  const en = options?.locale?.startsWith('en')
+  if (en) {
+    return industry ? `${kw} (${industry}) Patent Analysis Report` : `${kw} Patent Analysis Report`
+  }
+  return industry ? `${kw}（${industry}）专利分析报告` : `${kw} 专利分析报告`
 }
 
 export function extractStartInputFields(
   nodes: Array<{ type: string; config?: Record<string, unknown> | null }>,
+  options?: { t?: (key: string) => string; skills?: Array<{ id: string; name: string }> },
 ): InputFieldDef[] {
   const start = nodes.find((n) => n.type === 'start')
   const fields = (start?.config as any)?.input_fields
+  let result: InputFieldDef[]
   if (!Array.isArray(fields)) {
-    return [
+    result = [
       { key: 'keyword', label: 'keyword', placeholder: '', required: true },
     ]
+  } else {
+    result = fields.map((f: any) => ({
+      key: String(f.key || ''),
+      label: String(f.label || f.key || ''),
+      placeholder: f.placeholder ? String(f.placeholder) : undefined,
+      required: Boolean(f.required),
+      type: (f.type === 'number' ? 'number' : 'text') as 'number' | 'text',
+    })).filter((f) => f.key)
   }
-  return fields.map((f: any) => ({
-    key: String(f.key || ''),
-    label: String(f.label || f.key || ''),
-    placeholder: f.placeholder ? String(f.placeholder) : undefined,
-    required: Boolean(f.required),
-  })).filter((f) => f.key)
+
+  if (graphNeedsReportTitle(nodes, options?.skills)) {
+    const keys = new Set(result.map((f) => f.key))
+    if (!keys.has('report_title')) {
+      const tr = (key: string, fallback: string) => (options?.t ? options.t(key) : fallback)
+      const field: InputFieldDef = {
+        key: 'report_title',
+        label: tr('workflows.inputReportTitle', '报告名称'),
+        placeholder: tr('workflows.inputReportTitlePh', '根据检索词自动生成，可修改'),
+        required: false,
+        type: 'text',
+      }
+      const keywordIdx = result.findIndex((f) => f.key === 'keyword')
+      if (keywordIdx >= 0) {
+        result.splice(keywordIdx + 1, 0, field)
+      } else {
+        result.unshift(field)
+      }
+    }
+  }
+  return result
 }
 
 export const PRESET_VAR_GROUPS = [

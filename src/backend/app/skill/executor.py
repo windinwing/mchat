@@ -80,8 +80,13 @@ def _normalize_tool_result(result: Any) -> Any:
 
 def _finalize_tool_dict(result: dict[str, Any]) -> dict[str, Any]:
     out = dict(result)
-    for key in ("files", "_internal"):
-        out.pop(key, None)
+    files = out.pop("files", None)
+    if isinstance(files, list) and files:
+        out["report_files"] = files
+    charts = out.get("charts")
+    if isinstance(charts, list) and charts:
+        out["report_charts"] = charts
+    out.pop("_internal", None)
     assets = out.get("outbound_assets")
     if assets is not None and not isinstance(assets, list):
         out.pop("outbound_assets", None)

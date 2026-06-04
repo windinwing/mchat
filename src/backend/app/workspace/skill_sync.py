@@ -51,12 +51,30 @@ def tenant_skill_is_current(source: Path, tenant_dir: Path) -> bool:
     """True when tenant copy matches platform source."""
     if not (tenant_dir / "SKILL.md").is_file() or not source.is_dir():
         return False
+    if tenant_missing_platform_files(source, tenant_dir):
+        return False
     try:
         return directory_content_fingerprint(source) == directory_content_fingerprint(
             tenant_dir
         )
     except OSError:
         return False
+
+
+def tenant_missing_platform_files(source: Path, tenant_dir: Path) -> bool:
+    """True when tenant copy is missing files present on platform (stale partial sync)."""
+    if not tenant_dir.is_dir():
+        return True
+    source = source.resolve()
+    for path in source.rglob("*"):
+        if not path.is_file():
+            continue
+        if any(part in _SKIP_FINGERPRINT_DIRS for part in path.parts):
+            continue
+        rel = path.relative_to(source)
+        if not (tenant_dir / rel).is_file():
+            return True
+    return False
 
 
 def sync_skill_directory_to_tenant(source_dir: Path, tenant_skills: Path) -> Path:

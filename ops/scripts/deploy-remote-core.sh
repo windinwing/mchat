@@ -25,7 +25,7 @@ rsync -avz --delete \
   --exclude 'src/backend/logs' \
   --exclude 'logs' \
   --exclude 'skills' \
-  --exclude 'data' \
+  --exclude '/data/' \
   --exclude 'uploads' \
   --exclude 'test.db' \
   --exclude '.pytest_cache' \
@@ -86,7 +86,7 @@ sync_skill_dir() {
 
 sync_skill_dir mchat-help
 sync_skill_dir mchat-ops
-for patent_skill in patent-search patent-transaction patent-disclosure; do
+for patent_skill in patent-search patent-transaction patent-disclosure patent-report; do
   sync_skill_dir "$patent_skill"
 done
 

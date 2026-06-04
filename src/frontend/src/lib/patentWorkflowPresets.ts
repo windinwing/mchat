@@ -68,6 +68,8 @@ export function buildPatentWorkflowPresets(
         command: 'analysis',
         query: '${input.keyword}',
         dimension: 'applicationYear',
+        year_from: '2020',
+        year_to: '2024',
       },
       i18n: {
         zh: { title: '年份趋势', description: `${searchSkill} · analysis/applicationYear` },
@@ -123,7 +125,7 @@ export function buildPatentWorkflowPresets(
       payloadTemplate: {
         command: 'chart',
         sections: '${nodes.merge.sections}',
-        title: '${input.keyword} 专利分析',
+        title: '${input.report_title}',
       },
       i18n: {
         zh: { title: '图表生成', description: `${reportSkill} · chart` },
@@ -137,8 +139,8 @@ export function buildPatentWorkflowPresets(
       payloadTemplate: {
         command: 'excel',
         sections: '${nodes.merge.sections}',
-        title: '${input.keyword} 专利分析',
-        filename: '${input.keyword}-patent-report',
+        title: '${input.report_title}',
+        filename: '${input.report_title}',
       },
       i18n: {
         zh: { title: '导出 Excel', description: `${reportSkill} · excel` },
@@ -153,8 +155,8 @@ export function buildPatentWorkflowPresets(
         command: 'word',
         sections: '${nodes.merge.sections}',
         charts: '${nodes.chart.charts}',
-        title: '${input.keyword} 专利分析',
-        filename: '${input.keyword}-patent-report',
+        title: '${input.report_title}',
+        filename: '${input.report_title}',
       },
       i18n: {
         zh: { title: '导出 Word', description: `${reportSkill} · word` },
@@ -169,8 +171,8 @@ export function buildPatentWorkflowPresets(
         command: 'ppt',
         sections: '${nodes.merge.sections}',
         charts: '${nodes.chart.charts}',
-        title: '${input.keyword} 专利分析',
-        filename: '${input.keyword}-patent-report',
+        title: '${input.report_title}',
+        filename: '${input.report_title}',
       },
       i18n: {
         zh: { title: '导出 PPT', description: `${reportSkill} · ppt` },
@@ -185,8 +187,8 @@ export function buildPatentWorkflowPresets(
         command: 'all',
         sections: '${nodes.merge.sections}',
         charts: '${nodes.chart.charts}',
-        title: '${input.keyword} 专利分析',
-        filename: '${input.keyword}-patent-report',
+        title: '${input.report_title}',
+        filename: '${input.report_title}',
       },
       i18n: {
         zh: { title: '全套报告导出', description: `${reportSkill} · all` },

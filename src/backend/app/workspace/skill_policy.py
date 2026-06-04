@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.skills_paths import resolve_skill_directory
-from app.models.customer import CustomerConfig
 from app.models.skill import Skill
 from app.models.user import User
+from app.services.subscription_gate import active_customer_configs_for_user
 from app.skill.ops_policy import is_server_ops_skill
+from app.workspace.channel_plan import channel_container_entitled
 from app.workspace.paths import tenant_skills_dir
 from app.workspace.resolver import resolve_workspace_mode
 from app.workspace.types import WorkspaceMode
@@ -26,14 +26,39 @@ TENANT_SKILL_EXECUTION_REQUIRES_CONTAINER = "tenant_skill_execution_requires_con
 _PLAN_RANK = {"free": 0, "free_trial": 1, "pro": 2, "enterprise": 3}
 
 
-async def _best_plan_for_user(db: AsyncSession, user_id: str) -> str:
-    result = await db.execute(
-        select(CustomerConfig.plan).where(CustomerConfig.user_id == user_id)
-    )
-    plans = [row[0] for row in result.all() if row[0]]
+async def best_plan_for_user(db: AsyncSession, user_id: str) -> str:
+    """Highest plan among enabled channels with active subscription/trial."""
+    configs = await active_customer_configs_for_user(db, user_id)
+    plans = [c.plan for c in configs if c.plan]
     if not plans:
         return "free"
     return max(plans, key=lambda p: _PLAN_RANK.get((p or "free").lower(), 0))
+
+
+async def _best_plan_for_user(db: AsyncSession, user_id: str) -> str:
+    return await best_plan_for_user(db, user_id)
+
+
+async def user_may_author_tenant_skills(db: AsyncSession, user_id: str) -> bool:
+    """Platform admins may always manage skills; tenants need container entitlement."""
+    from app.middleware.auth import has_global_scope
+
+    user = await db.get(User, user_id)
+    if user is not None and await has_global_scope(user, db):
+        return True
+    return await user_container_entitled(db, user_id)
+
+
+async def user_may_edit_skill_files(db: AsyncSession, user_id: str, skill: Skill) -> bool:
+    """Whether user may write files in this skill directory."""
+    if skill.skill_type == "builtin" or is_server_ops_skill(skill):
+        return False
+    if is_tenant_authored_skill(skill, user_id):
+        return await user_may_author_tenant_skills(db, user_id)
+    from app.middleware.auth import has_global_scope
+
+    user = await db.get(User, user_id)
+    return user is not None and await has_global_scope(user, db)
 
 
 async def user_container_entitled(db: AsyncSession, user_id: str) -> bool:
@@ -46,11 +71,8 @@ async def user_container_entitled(db: AsyncSession, user_id: str) -> bool:
     if user is not None and user.workspace_container_allowed is True:
         return True
 
-    result = await db.execute(
-        select(CustomerConfig.workspace_mode).where(CustomerConfig.user_id == user_id)
-    )
-    for (mode,) in result.all():
-        if (mode or "").strip().lower() == "container":
+    for ch in await active_customer_configs_for_user(db, user_id):
+        if channel_container_entitled(ch):
             return True
 
     plan = await _best_plan_for_user(db, user_id)
@@ -58,6 +80,7 @@ async def user_container_entitled(db: AsyncSession, user_id: str) -> bool:
     return (
         resolve_workspace_mode(
             plan=plan,
+            subscription_active=True,
             user_container_allowed=allowed,
         )
         == WorkspaceMode.CONTAINER

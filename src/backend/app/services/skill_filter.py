@@ -47,3 +47,14 @@ def _strip_server_ops(skills) -> list[str]:
             continue
         allowed.append(skill.id)
     return allowed
+
+
+def tenant_facing_skill_error(skill: Skill) -> str | None:
+    """Block server_ops on widget/portal/channel paths (matches skill_context policy)."""
+    from app.skill.ops_policy import is_notification_skill
+
+    if is_server_ops_skill(skill):
+        return "server_ops skills are not allowed on tenant-facing channels"
+    if is_notification_skill(skill):
+        return "notification skills are not allowed on tenant-facing channels"
+    return None

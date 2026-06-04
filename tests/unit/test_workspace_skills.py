@@ -11,6 +11,7 @@ from app.workspace.skill_sync import (
     directory_content_fingerprint,
     ensure_skill_in_tenant,
     sync_skill_directory_to_tenant,
+    tenant_missing_platform_files,
     tenant_skill_is_current,
 )
 
@@ -116,3 +117,16 @@ def test_directory_fingerprint_detects_content_change(tmp_path):
     (root / "SKILL.md").write_text("v2", encoding="utf-8")
     fp2 = directory_content_fingerprint(root)
     assert fp1 != fp2
+
+
+def test_tenant_missing_platform_files_detects_stale_copy(tmp_path):
+    source = tmp_path / "source"
+    tenant = tmp_path / "tenant"
+    source.mkdir()
+    tenant.mkdir()
+    (source / "SKILL.md").write_text("skill", encoding="utf-8")
+    (source / "charts_fonts.py").write_text("# fonts", encoding="utf-8")
+    (tenant / "SKILL.md").write_text("skill", encoding="utf-8")
+    assert tenant_missing_platform_files(source, tenant)
+    (tenant / "charts_fonts.py").write_text("# fonts", encoding="utf-8")
+    assert not tenant_missing_platform_files(source, tenant)

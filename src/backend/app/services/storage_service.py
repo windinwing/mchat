@@ -150,6 +150,27 @@ class StorageService:
         if path is not None and path.is_file():
             mime, _ = mimetypes.guess_type(str(path))
             return path.read_bytes(), mime or "application/octet-stream"
+
+        return self._fetch_tenant_workflow_bytes(normalized)
+
+    def _fetch_tenant_workflow_bytes(self, key: str) -> tuple[bytes, str] | None:
+        """Legacy workflow reports written under data/tenants/*/uploads/."""
+        if not key.startswith("workflow_reports/"):
+            return None
+        try:
+            from app.workspace.paths import resolve_workspace_root
+        except Exception:
+            return None
+        root = resolve_workspace_root()
+        if not root.is_dir():
+            return None
+        for tenant_dir in root.iterdir():
+            if not tenant_dir.is_dir():
+                continue
+            candidate = tenant_dir / "uploads" / key
+            if candidate.is_file():
+                mime, _ = mimetypes.guess_type(str(candidate))
+                return candidate.read_bytes(), mime or "application/octet-stream"
         return None
 
     def _fetch_s3_bytes(self, key: str) -> bytes | None:

@@ -37,6 +37,8 @@ def _args_to_namespace(args: dict[str, Any]) -> SimpleNamespace:
         field=args.get("field"),
         detail=bool(args.get("detail")),
         trademark_id=args.get("trademark_id") or args.get("trademark-id"),
+        year_from=args.get("year_from") or None,
+        year_to=args.get("year_to") or None,
     )
 
 
@@ -150,6 +152,8 @@ def _args_to_namespace(args):
         field=args.get("field"),
         detail=bool(args.get("detail")),
         trademark_id=args.get("trademark_id") or args.get("trademark-id"),
+        year_from=args.get("year_from") or None,
+        year_to=args.get("year_to") or None,
     )
 
 def _load_module(skill_dir, filename, module_key):

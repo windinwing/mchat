@@ -53,20 +53,85 @@ from app.core.skills_paths import (
     resolve_skills_root,
 )
 from app.core.config import settings
+from app.core.database import async_session_factory
 from app.data.workflow_templates import get_workflow_template, list_workflow_templates
 from app.skill.loader import SkillLoader
 from app.skill.executor import execute_skill
+from app.services.skill_filter import tenant_facing_skill_error
+from app.workspace.automation_context import build_automation_workspace_context
 from app.workspace.context import workspace_execution_scope
-from app.workspace.resolver import build_workspace_context
+from app.utils.datetime_utils import duration_ms as _duration_ms
 
 _TEMPLATE_RE = re.compile(r"\$\{([^}]+)\}")
 logger = logging.getLogger(__name__)
 
 
+def _tenant_facing_from_trigger(trigger_type: str) -> bool:
+    return (trigger_type or "").strip().lower() == "channel"
+
+
+def _log_background_workflow_task(task: asyncio.Task[Any]) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        logger.exception("Background workflow run failed: %s", exc)
+
+
+async def _run_workflow_in_background(
+    *,
+    run_id: str,
+    workflow_id: str,
+    user_id: str,
+    input_payload: dict,
+    trigger_type: str,
+) -> None:
+    async with async_session_factory() as db:
+        svc = WorkflowService(db)
+        try:
+            workflow = await svc._get_workflow(workflow_id=workflow_id, user_id=user_id)
+            run = await svc._get_run(run_id=run_id, user_id=user_id)
+            await svc._execute_existing_run(
+                workflow=workflow,
+                run=run,
+                trigger_type=trigger_type,
+                input_payload=input_payload,
+            )
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            logger.exception(
+                "Workflow background run failed run=%s workflow=%s: %s",
+                run_id,
+                workflow_id,
+                exc,
+            )
+            try:
+                run = await svc._get_run(run_id=run_id, user_id=user_id)
+                run.status = "failed"
+                run.error = str(exc)[:2000]
+                run.finished_at = datetime.now(timezone.utc)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+
+
 async def _execute_skill_for_user(
-    user_id: str, skill: Skill, payload: dict[str, Any], *, timeout_s: int = 0
+    db: AsyncSession,
+    user_id: str,
+    skill: Skill,
+    payload: dict[str, Any],
+    *,
+    timeout_s: int = 0,
+    tenant_facing: bool = False,
 ) -> Any:
-    async with workspace_execution_scope(build_workspace_context(user_id)):
+    if tenant_facing:
+        blocked = tenant_facing_skill_error(skill)
+        if blocked:
+            return {"error": blocked}
+    ctx = await build_automation_workspace_context(db, user_id)
+    async with workspace_execution_scope(ctx):
         if timeout_s > 0:
             return await asyncio.wait_for(execute_skill(skill, payload), timeout=timeout_s)
         return await execute_skill(skill, payload)
@@ -119,8 +184,37 @@ def _ensure_graph_valid(graph_json: dict | None) -> dict | None:
     return graph.model_dump()
 
 
-def _duration_ms(started_at: datetime, finished_at: datetime) -> int:
-    return max(0, int((finished_at - started_at).total_seconds() * 1000))
+def _json_safe(value: Any, *, _seen: set[int] | None = None) -> Any:
+    """Deep copy to JSON-serializable data; break circular references."""
+    if _seen is None:
+        _seen = set()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    oid = id(value)
+    if oid in _seen:
+        return None
+    if isinstance(value, dict):
+        _seen.add(oid)
+        out = {str(k): _json_safe(v, _seen=_seen) for k, v in value.items()}
+        _seen.discard(oid)
+        return out
+    if isinstance(value, (list, tuple)):
+        _seen.add(oid)
+        out = [_json_safe(v, _seen=_seen) for v in value]
+        _seen.discard(oid)
+        return out
+    return str(value)
+
+
+def _snapshot_node_result(result: Any) -> Any:
+    """Isolate merge/end payloads from live ``outputs['nodes']`` dict."""
+    if result is None:
+        return None
+    if isinstance(result, dict):
+        return deepcopy(result)
+    return result
 
 
 def _to_result_dict(result: Any) -> dict:
@@ -142,6 +236,70 @@ def _resolve_path(path: str, context: dict[str, Any]) -> Any:
         else:
             return None
     return current
+
+
+_PATENT_REPORT_COMMANDS = frozenset({"chart", "excel", "word", "ppt", "all"})
+
+
+def _default_report_title(keyword: str, industry: str = "", *, locale: str = "zh") -> str:
+    kw = (keyword or "").strip()
+    if not kw:
+        return ""
+    ind = (industry or "").strip()
+    if locale.startswith("en"):
+        return f"{kw} ({ind}) Patent Analysis Report" if ind else f"{kw} Patent Analysis Report"
+    return f"{kw}（{ind}）专利分析报告" if ind else f"{kw} 专利分析报告"
+
+
+def _run_display_name(input_payload: dict | None, workflow_name: str) -> str:
+    """List label for a run: user run_label, then report_title / keyword, else workflow name."""
+    payload = input_payload or {}
+    label = str(payload.get("run_label") or "").strip()
+    if label:
+        return label
+    rt = str(payload.get("report_title") or "").strip()
+    if rt:
+        return rt
+    kw = str(payload.get("keyword") or "").strip()
+    if kw:
+        return kw
+    return (workflow_name or "").strip() or "Workflow run"
+
+
+def _strip_blank_skill_params(payload: dict[str, Any]) -> dict[str, Any]:
+    out = dict(payload)
+    for key in ("year_from", "year_to"):
+        if key in out and not str(out.get(key) or "").strip():
+            out.pop(key, None)
+    return out
+
+
+def _apply_patent_report_input(
+    payload: dict[str, Any],
+    input_payload: dict[str, Any],
+    *,
+    locale: str = "zh",
+) -> dict[str, Any]:
+    """Honor run-time report_title (rename) for patent-report chart/export nodes."""
+    if not isinstance(payload, dict):
+        return payload
+    cmd = str(payload.get("command") or "").lower()
+    if cmd not in _PATENT_REPORT_COMMANDS and "sections" not in payload:
+        return payload
+    rt = str(input_payload.get("report_title") or "").strip()
+    if not rt:
+        rt = _default_report_title(
+            str(input_payload.get("keyword") or ""),
+            str(input_payload.get("industry") or ""),
+            locale=locale,
+        )
+    if not rt:
+        return payload
+    out = dict(payload)
+    out["title"] = rt
+    if cmd != "chart" or out.get("filename"):
+        out["filename"] = rt
+    return out
 
 
 def _render_template(value: Any, context: dict[str, Any]) -> Any:
@@ -187,7 +345,13 @@ class WorkflowService:
             )
         return workflow
 
-    async def _get_skill(self, *, skill_id: str, user_id: str) -> Skill:
+    async def _get_skill(
+        self,
+        *,
+        skill_id: str,
+        user_id: str,
+        require_enabled: bool = False,
+    ) -> Skill:
         result = await self.db.execute(
             select(Skill).where(Skill.id == skill_id, Skill.user_id == user_id)
         )
@@ -197,13 +361,24 @@ class WorkflowService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Skill not found: {skill_id}",
             )
+        if require_enabled and not skill.enabled:
+            raise RuntimeError(f"skill '{skill.name}' is disabled")
         return skill
 
-    async def _get_skill_by_name(self, *, skill_name: str, user_id: str) -> Skill | None:
+    async def _get_skill_by_name(
+        self,
+        *,
+        skill_name: str,
+        user_id: str,
+        require_enabled: bool = False,
+    ) -> Skill | None:
         result = await self.db.execute(
             select(Skill).where(Skill.name == skill_name, Skill.user_id == user_id)
         )
-        return result.scalar_one_or_none()
+        skill = result.scalar_one_or_none()
+        if skill is not None and require_enabled and not skill.enabled:
+            raise RuntimeError(f"skill '{skill.name}' is disabled")
+        return skill
 
     async def _resolve_graph_skill_ids(self, graph_json: dict, *, user_id: str) -> dict:
         graph = dict(graph_json or {})
@@ -650,6 +825,7 @@ class WorkflowService:
         input_payload: dict,
         resume_state: dict | None = None,
         approved_nodes: set[str] | None = None,
+        tenant_facing: bool = False,
     ) -> tuple[str, str | None, dict]:
         graph_data = _ensure_graph_valid(workflow.graph_json)
         graph = WorkflowGraph.model_validate(graph_data or {})
@@ -663,7 +839,9 @@ class WorkflowService:
         done: set[str] = set(
             [str(x) for x in ((resume_state or {}).get("done_nodes") or []) if str(x) in nodes]
         )
-        outputs: dict[str, Any] = {"input": input_payload, "nodes": {}}
+        clean_input = dict(input_payload or {})
+        run_locale = str(clean_input.pop("_locale", None) or "zh")
+        outputs: dict[str, Any] = {"input": clean_input, "nodes": {}}
         if isinstance((resume_state or {}).get("outputs"), dict):
             outputs["nodes"] = dict((resume_state or {}).get("outputs") or {})
         node_runs: list[dict[str, Any]] = list((resume_state or {}).get("node_runs") or [])
@@ -723,7 +901,7 @@ class WorkflowService:
             cfg = node.config or {}
             try:
                 if node.type == "start":
-                    record["result"] = input_payload
+                    record["result"] = outputs.get("input") or {}
                     record["status"] = "success"
                     return node_id, record
                 if node.type == "condition":
@@ -763,7 +941,9 @@ class WorkflowService:
                     record["status"] = "success"
                     return node_id, record
                 if node.type == "end":
-                    record["result"] = {"output": outputs.get("nodes")}
+                    record["result"] = {
+                        "output": _json_safe(dict(outputs.get("nodes") or {}))
+                    }
                     record["status"] = "success"
                     return node_id, record
                 if node.type == "merge":
@@ -773,7 +953,9 @@ class WorkflowService:
                         label = (src_node.name if src_node and src_node.name else None) or src_id
                         sections[str(label)] = {
                             "node_id": src_id,
-                            "result": outputs.get("nodes", {}).get(src_id),
+                            "result": _snapshot_node_result(
+                                outputs.get("nodes", {}).get(src_id)
+                            ),
                         }
                     record["result"] = {"sections": sections, "merged": True}
                     record["status"] = "success"
@@ -783,12 +965,18 @@ class WorkflowService:
                 skill_id = str((cfg.get("skill_id") or "")).strip()
                 skill: Skill | None = None
                 if skill_id:
-                    skill = await self._get_skill(skill_id=skill_id, user_id=workflow.user_id)
+                    skill = await self._get_skill(
+                        skill_id=skill_id,
+                        user_id=workflow.user_id,
+                        require_enabled=True,
+                    )
                 else:
                     skill_name = str((cfg.get("skill_name") or "")).strip()
                     if skill_name:
                         skill = await self._get_skill_by_name(
-                            skill_name=skill_name, user_id=workflow.user_id
+                            skill_name=skill_name,
+                            user_id=workflow.user_id,
+                            require_enabled=True,
                         )
                 if skill is None:
                     raise RuntimeError(
@@ -798,6 +986,14 @@ class WorkflowService:
                 payload = _render_template(payload_template, outputs)
                 if not isinstance(payload, dict):
                     payload = {"value": payload}
+                else:
+                    payload = _strip_blank_skill_params(payload)
+                if skill.name == "patent-report":
+                    payload = _apply_patent_report_input(
+                        payload,
+                        outputs.get("input") or {},
+                        locale=run_locale,
+                    )
                 retry_count = int(cfg.get("retry_count") or 0)
                 timeout_s = int(cfg.get("timeout_seconds") or 0)
                 last_error: Exception | None = None
@@ -805,11 +1001,20 @@ class WorkflowService:
                     try:
                         if timeout_s > 0:
                             raw = await _execute_skill_for_user(
-                                workflow.user_id, skill, payload, timeout_s=timeout_s
+                                self.db,
+                                workflow.user_id,
+                                skill,
+                                payload,
+                                timeout_s=timeout_s,
+                                tenant_facing=tenant_facing,
                             )
                         else:
                             raw = await _execute_skill_for_user(
-                                workflow.user_id, skill, payload
+                                self.db,
+                                workflow.user_id,
+                                skill,
+                                payload,
+                                tenant_facing=tenant_facing,
                             )
                         result = _to_result_dict(raw)
                         has_error = bool(isinstance(raw, dict) and raw.get("error"))
@@ -871,33 +1076,222 @@ class WorkflowService:
 
         payload = {
             "graph": graph.model_dump(),
-            "node_runs": node_runs,
-            "outputs": outputs.get("nodes"),
+            "node_runs": _json_safe(node_runs),
+            "outputs": _json_safe(outputs.get("nodes")),
             "engine_state": {
                 "done_nodes": sorted(list(done)),
-                "outputs": outputs.get("nodes"),
+                "outputs": _json_safe(outputs.get("nodes")),
                 "ready_nodes": ready,
                 "paused": final_status == "paused",
                 "pause_reason": pause_reason,
             },
         }
-        return final_status, final_error, payload
+        return final_status, final_error, _json_safe(payload)
 
     async def run_once(
         self, *, workflow_id: str, user_id: str, input_payload: dict | None = None
     ) -> WorkflowRunDetailResponse:
+        """Enqueue workflow run; returns immediately while execution continues in background."""
         workflow = await self._get_workflow(workflow_id=workflow_id, user_id=user_id)
         if not workflow.enabled:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Workflow is disabled",
             )
-        run = await self.execute_workflow(
-            workflow=workflow,
+        payload = input_payload or {}
+        started_at = datetime.now(timezone.utc)
+        run = SkillWorkflowRun(
+            workflow_id=workflow.id,
+            user_id=workflow.user_id,
             trigger_type="manual",
-            input_payload=input_payload or {},
+            status="running",
+            input_payload=payload,
+            started_at=started_at,
         )
+        self.db.add(run)
+        await self.db.flush()
+        await self.db.commit()
+
+        task = asyncio.create_task(
+            _run_workflow_in_background(
+                run_id=run.id,
+                workflow_id=workflow.id,
+                user_id=user_id,
+                input_payload=payload,
+                trigger_type="manual",
+            )
+        )
+        task.add_done_callback(_log_background_workflow_task)
+
         return await self.get_run_detail(run_id=run.id, user_id=user_id)
+
+    async def _execute_existing_run(
+        self,
+        *,
+        workflow: SkillWorkflow,
+        run: SkillWorkflowRun,
+        trigger_type: str,
+        input_payload: dict,
+    ) -> SkillWorkflowRun:
+        """Run graph/steps for a row already in status=running."""
+        if workflow.graph_json and isinstance(workflow.graph_json, dict) and workflow.graph_json.get("nodes"):
+            tenant_facing = _tenant_facing_from_trigger(trigger_type)
+            final_status, final_error, output_payload = await self._execute_graph_workflow(
+                workflow=workflow,
+                run=run,
+                input_payload=input_payload,
+                tenant_facing=tenant_facing,
+            )
+            finished_at = datetime.now(timezone.utc)
+            run.status = final_status
+            run.error = final_error
+            run.output_payload = _json_safe(output_payload)
+            run.duration_ms = _duration_ms(run.started_at, finished_at)
+            if final_status in {"success", "failed"}:
+                run.finished_at = finished_at
+            else:
+                run.finished_at = None
+            if final_status == "failed":
+                await self._send_alert(
+                    event="workflow.run.failed",
+                    workflow=workflow,
+                    run=run,
+                    message=final_error or "run failed",
+                    extra={"trigger_type": trigger_type},
+                )
+            return run
+        return await self._execute_step_workflow_for_run(
+            workflow=workflow,
+            run=run,
+            input_payload=input_payload,
+            trigger_type=trigger_type,
+        )
+
+    async def _execute_step_workflow_for_run(
+        self,
+        *,
+        workflow: SkillWorkflow,
+        run: SkillWorkflowRun,
+        input_payload: dict,
+        trigger_type: str,
+    ) -> SkillWorkflowRun:
+        steps = sorted(
+            [s for s in workflow.steps if s.enabled],
+            key=lambda x: (x.order_index, x.created_at),
+        )
+        context: dict[str, Any] = {"input": input_payload, "steps": {}}
+        final_status = "success"
+        final_error: str | None = None
+        tenant_facing = _tenant_facing_from_trigger(trigger_type)
+
+        for step in steps:
+            skill = await self._get_skill(
+                skill_id=step.skill_id,
+                user_id=workflow.user_id,
+                require_enabled=True,
+            )
+            step_started = datetime.now(timezone.utc)
+            payload = _render_template(step.payload_template or {}, context)
+            if not isinstance(payload, dict):
+                payload = {"value": payload}
+
+            step_run = SkillWorkflowStepRun(
+                workflow_run_id=run.id,
+                step_id=step.id,
+                skill_id=step.skill_id,
+                status="running",
+                payload=payload,
+                started_at=step_started,
+            )
+            self.db.add(step_run)
+            await self.db.flush()
+
+            try:
+                raw_result = await _execute_skill_for_user(
+                    self.db,
+                    workflow.user_id,
+                    skill,
+                    payload,
+                    tenant_facing=tenant_facing,
+                )
+                result = _to_result_dict(raw_result)
+                step_finished = datetime.now(timezone.utc)
+                failed = bool(isinstance(raw_result, dict) and raw_result.get("error"))
+                step_run.status = "failed" if failed else "success"
+                step_run.result = result
+                step_run.error = str(result.get("error")) if failed else None
+                step_run.finished_at = step_finished
+                step_run.duration_ms = _duration_ms(step_started, step_finished)
+                context["steps"][step.step_key] = {
+                    "status": step_run.status,
+                    "payload": payload,
+                    "result": result,
+                    "error": step_run.error,
+                }
+                if failed:
+                    final_status = "failed"
+                    final_error = step_run.error
+                    if step.on_error == "stop":
+                        break
+            except Exception as e:
+                step_finished = datetime.now(timezone.utc)
+                step_run.status = "failed"
+                step_run.error = str(e)
+                step_run.finished_at = step_finished
+                step_run.duration_ms = _duration_ms(step_started, step_finished)
+                context["steps"][step.step_key] = {
+                    "status": "failed",
+                    "payload": payload,
+                    "result": None,
+                    "error": step_run.error,
+                }
+                final_status = "failed"
+                final_error = step_run.error
+                if step.on_error == "stop":
+                    break
+
+            await self.db.flush()
+
+        finished_at = datetime.now(timezone.utc)
+        run.status = final_status
+        run.error = final_error
+        run.output_payload = _json_safe({"steps": context.get("steps")})
+        run.finished_at = finished_at
+        run.duration_ms = _duration_ms(run.started_at, finished_at)
+        if final_status != "success":
+            await self._send_alert(
+                event="workflow.run.failed",
+                workflow=workflow,
+                run=run,
+                message=final_error or "run failed",
+                extra={"trigger_type": trigger_type},
+            )
+        return run
+
+    async def execute_workflow(
+        self,
+        *,
+        workflow: SkillWorkflow,
+        trigger_type: str,
+        input_payload: dict,
+    ) -> SkillWorkflowRun:
+        started_at = datetime.now(timezone.utc)
+        run = SkillWorkflowRun(
+            workflow_id=workflow.id,
+            user_id=workflow.user_id,
+            trigger_type=trigger_type,
+            status="running",
+            input_payload=input_payload,
+            started_at=started_at,
+        )
+        self.db.add(run)
+        await self.db.flush()
+        return await self._execute_existing_run(
+            workflow=workflow,
+            run=run,
+            trigger_type=trigger_type,
+            input_payload=input_payload,
+        )
 
     async def list_pending_approvals(
         self, *, user_id: str, workflow_id: str | None = None, limit: int = 100
@@ -1075,12 +1469,13 @@ class WorkflowService:
             input_payload=merged_payload,
             resume_state=resume_state,
             approved_nodes=set(approval_flags.keys()),
+            tenant_facing=_tenant_facing_from_trigger(run.trigger_type or ""),
         )
         now = datetime.now(timezone.utc)
         run.status = final_status
         run.error = final_error
         run.input_payload = merged_payload
-        run.output_payload = output_payload
+        run.output_payload = _json_safe(output_payload)
         if final_status in {"success", "failed"}:
             run.finished_at = now
             run.duration_ms = _duration_ms(run.started_at, now)
@@ -1098,148 +1493,6 @@ class WorkflowService:
             )
         await self.db.flush()
         return await self.get_run_detail(run_id=run.id, user_id=user_id)
-
-    async def execute_workflow(
-        self,
-        *,
-        workflow: SkillWorkflow,
-        trigger_type: str,
-        input_payload: dict,
-    ) -> SkillWorkflowRun:
-        started_at = datetime.now(timezone.utc)
-        run = SkillWorkflowRun(
-            workflow_id=workflow.id,
-            user_id=workflow.user_id,
-            trigger_type=trigger_type,
-            status="running",
-            input_payload=input_payload,
-            started_at=started_at,
-        )
-        self.db.add(run)
-        await self.db.flush()
-
-        if workflow.graph_json and isinstance(workflow.graph_json, dict) and workflow.graph_json.get("nodes"):
-            final_status, final_error, output_payload = await self._execute_graph_workflow(
-                workflow=workflow,
-                run=run,
-                input_payload=input_payload,
-            )
-            finished_at = datetime.now(timezone.utc)
-            run.status = final_status
-            run.error = final_error
-            run.output_payload = output_payload
-            run.duration_ms = _duration_ms(started_at, finished_at)
-            if final_status in {"success", "failed"}:
-                run.finished_at = finished_at
-            else:
-                run.finished_at = None
-            if final_status == "failed":
-                logger.warning(
-                    "workflow graph run failed (alert hook): workflow=%s run=%s error=%s",
-                    workflow.id,
-                    run.id,
-                    final_error,
-                )
-                await self._send_alert(
-                    event="workflow.run.failed",
-                    workflow=workflow,
-                    run=run,
-                    message=final_error or "run failed",
-                    extra={"trigger_type": trigger_type},
-                )
-            await self.db.flush()
-            return run
-
-        steps = sorted(
-            [s for s in workflow.steps if s.enabled],
-            key=lambda x: (x.order_index, x.created_at),
-        )
-        context: dict[str, Any] = {"input": input_payload, "steps": {}}
-        final_status = "success"
-        final_error: str | None = None
-
-        for step in steps:
-            skill = await self._get_skill(skill_id=step.skill_id, user_id=workflow.user_id)
-            step_started = datetime.now(timezone.utc)
-            payload = _render_template(step.payload_template or {}, context)
-            if not isinstance(payload, dict):
-                payload = {"value": payload}
-
-            step_run = SkillWorkflowStepRun(
-                workflow_run_id=run.id,
-                step_id=step.id,
-                skill_id=step.skill_id,
-                status="running",
-                payload=payload,
-                started_at=step_started,
-            )
-            self.db.add(step_run)
-            await self.db.flush()
-
-            try:
-                raw_result = await _execute_skill_for_user(
-                    workflow.user_id, skill, payload
-                )
-                result = _to_result_dict(raw_result)
-                step_finished = datetime.now(timezone.utc)
-                failed = bool(isinstance(raw_result, dict) and raw_result.get("error"))
-                step_run.status = "failed" if failed else "success"
-                step_run.result = result
-                step_run.error = str(result.get("error")) if failed else None
-                step_run.finished_at = step_finished
-                step_run.duration_ms = _duration_ms(step_started, step_finished)
-                context["steps"][step.step_key] = {
-                    "status": step_run.status,
-                    "payload": payload,
-                    "result": result,
-                    "error": step_run.error,
-                }
-                if failed:
-                    final_status = "failed"
-                    final_error = step_run.error
-                    if step.on_error == "stop":
-                        break
-            except Exception as e:
-                step_finished = datetime.now(timezone.utc)
-                step_run.status = "failed"
-                step_run.error = str(e)
-                step_run.finished_at = step_finished
-                step_run.duration_ms = _duration_ms(step_started, step_finished)
-                context["steps"][step.step_key] = {
-                    "status": "failed",
-                    "payload": payload,
-                    "result": None,
-                    "error": step_run.error,
-                }
-                final_status = "failed"
-                final_error = step_run.error
-                if step.on_error == "stop":
-                    break
-
-            await self.db.flush()
-
-        finished_at = datetime.now(timezone.utc)
-        run.status = final_status
-        run.error = final_error
-        run.output_payload = {"steps": context.get("steps")}
-        run.finished_at = finished_at
-        run.duration_ms = _duration_ms(started_at, finished_at)
-        if final_status != "success":
-            logger.warning(
-                "workflow run failed (alert hook): workflow=%s run=%s error=%s",
-                workflow.id,
-                run.id,
-                final_error,
-            )
-            await self._send_alert(
-                event="workflow.run.failed",
-                workflow=workflow,
-                run=run,
-                message=final_error or "run failed",
-                extra={"trigger_type": trigger_type},
-            )
-        await self.db.flush()
-        return run
 
     async def list_runs(
         self, *, user_id: str, workflow_id: str | None = None, limit: int = 50
@@ -1265,6 +1518,10 @@ class WorkflowService:
                 id=r.id,
                 workflow_id=r.workflow_id,
                 workflow_name=(wf_map.get(r.workflow_id).name if wf_map.get(r.workflow_id) else ""),
+                display_name=_run_display_name(
+                    r.input_payload,
+                    wf_map.get(r.workflow_id).name if wf_map.get(r.workflow_id) else "",
+                ),
                 trigger_type=r.trigger_type,
                 status=r.status,
                 input_payload=r.input_payload,
@@ -1357,6 +1614,7 @@ class WorkflowService:
             id=run.id,
             workflow_id=run.workflow_id,
             workflow_name=(workflow.name if workflow else ""),
+            display_name=_run_display_name(run.input_payload, workflow.name if workflow else ""),
             trigger_type=run.trigger_type,
             status=run.status,
             input_payload=run.input_payload,
@@ -1374,3 +1632,41 @@ class WorkflowService:
             pending_approvals=pending_items,
             can_resume=(run.status == "paused" and len(pending_items) == 0),
         )
+
+    async def update_run_label(
+        self, *, run_id: str, user_id: str, run_label: str
+    ) -> WorkflowRunResponse:
+        run = await self._get_run(run_id=run_id, user_id=user_id)
+        wf_result = await self.db.execute(
+            select(SkillWorkflow).where(SkillWorkflow.id == run.workflow_id)
+        )
+        workflow = wf_result.scalar_one_or_none()
+        workflow_name = workflow.name if workflow else ""
+        payload = dict(run.input_payload or {})
+        payload["run_label"] = run_label.strip()
+        run.input_payload = payload
+        await self.db.flush()
+        return WorkflowRunResponse(
+            id=run.id,
+            workflow_id=run.workflow_id,
+            workflow_name=workflow_name,
+            display_name=_run_display_name(run.input_payload, workflow_name),
+            trigger_type=run.trigger_type,
+            status=run.status,
+            input_payload=run.input_payload,
+            output_payload=run.output_payload,
+            error=run.error,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            duration_ms=run.duration_ms,
+        )
+
+    async def delete_run(self, *, run_id: str, user_id: str) -> None:
+        run = await self._get_run(run_id=run_id, user_id=user_id)
+        if run.status == "running":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete a running workflow run; wait until it finishes or fails",
+            )
+        await self.db.delete(run)
+        await self.db.flush()

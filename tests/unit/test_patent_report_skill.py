@@ -41,6 +41,23 @@ def patent_report_dir() -> Path:
     return skill_dir
 
 
+def test_normalize_sections_from_workflow_value(patent_report_dir: Path):
+    sections_mod = _load_module("patent_report_sections_val", "sections.py", patent_report_dir)
+    raw = {
+        "申请人分析": {
+            "node_id": "applicant",
+            "result": {
+                "value": "📈 分布情况:\n 1. 华为: 120件\n 2. 大疆: 80件"
+            },
+        }
+    }
+    out = sections_mod.normalize_sections(raw)
+    assert len(out) == 1
+    assert len(out[0]["rows"]) == 2
+    assert out[0]["rows"][0]["label"] == "华为"
+    assert out[0]["rows"][0]["value"] == 120.0
+
+
 def test_normalize_sections_from_merge_payload(patent_report_dir: Path):
     sections_mod = _load_module("patent_report_sections", "sections.py", patent_report_dir)
     raw = {
