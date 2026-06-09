@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Lock, PlusCircle, XCircle } from 'lucide-react'
+import { Lock, PlusCircle, XCircle, Puzzle } from 'lucide-react'
 import api from '@/lib/api'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -19,6 +19,27 @@ export function RolesPage() {
   const [savingPerms, setSavingPerms] = useState(false)
   const [permsLoaded, setPermsLoaded] = useState(false)
   const [newRoleName, setNewRoleName] = useState('')
+  const [skills, setSkills] = useState<Array<{ id: string; name: string; description: string | null }>>([])
+  const [roleDefaultSkills, setRoleDefaultSkills] = useState<Record<string, string[]>>({})
+  const [savingDefaults, setSavingDefaults] = useState(false)
+
+  const loadRoleDefaultSkills = useCallback(async () => {
+    try {
+      const data = await api.get<{ key: string; value: Record<string, string[]> }>('/settings/key-value/role_default_skills')
+      if (data.value && typeof data.value === 'object') {
+        setRoleDefaultSkills(data.value)
+      }
+    } catch {
+      // 404 = no defaults configured yet, start empty
+    }
+  }, [])
+
+  const loadSkills = useCallback(async () => {
+    try {
+      const data = await api.get<Array<{ id: string; name: string; description: string | null }>>('/skills')
+      setSkills(data)
+    } catch { /* ignore */ }
+  }, [])
 
   const loadRolePerms = useCallback(async () => {
     try {
@@ -35,7 +56,9 @@ export function RolesPage() {
 
   useEffect(() => {
     void loadRolePerms()
-  }, [loadRolePerms])
+    void loadSkills()
+    void loadRoleDefaultSkills()
+  }, [loadRolePerms, loadSkills, loadRoleDefaultSkills])
 
   const startEditPerms = () => {
     setRolePermsDraft(JSON.parse(JSON.stringify(rolePermsData)))
@@ -208,6 +231,90 @@ export function RolesPage() {
               })}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-gray-900 dark:text-gray-100 font-medium">
+              <Puzzle className="w-5 h-5" />
+              {t('users.roleDefaultSkills')}
+            </div>
+            <Button
+              size="sm"
+              isLoading={savingDefaults}
+              onClick={async () => {
+                setSavingDefaults(true)
+                try {
+                  await api.put('/settings/key-value', {
+                    key: 'role_default_skills',
+                    value: roleDefaultSkills,
+                  })
+                  toast(t('users.roleDefaultSkillsSaved'), { type: 'success' })
+                } catch {
+                  toast(t('users.roleDefaultSkillsSaveFailed'), { type: 'error' })
+                } finally {
+                  setSavingDefaults(false)
+                }
+              }}
+            >
+              {t('common.save')}
+            </Button>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{t('users.roleDefaultSkillsHint')}</p>
+        </CardHeader>
+        <CardContent>
+          {Object.keys(rolePermsData).map((role) => {
+            const currentIds = roleDefaultSkills[role] || []
+            return (
+              <div key={role} className="mb-4 last:mb-0">
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant={role === 'admin' ? 'danger' : 'info'} size="sm">{role}</Badge>
+                  <button
+                    type="button"
+                    onClick={() => setRoleDefaultSkills({ ...roleDefaultSkills, [role]: undefined as unknown as string[] })}
+                    className="text-xs text-gray-400 hover:text-red-500"
+                  >
+                    {t('users.unlimited')}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {skills.map((sk) => {
+                    const checked = currentIds === undefined || currentIds.includes(sk.id)
+                    return (
+                      <label
+                        key={sk.id}
+                        className={`flex items-center gap-1.5 text-xs cursor-pointer px-2.5 py-1.5 rounded-full border transition-colors ${
+                          checked
+                            ? 'border-primary-300 bg-primary-50 dark:bg-primary-900/20 text-primary-700'
+                            : 'border-gray-200 dark:border-gray-700 text-gray-500'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            const ids = roleDefaultSkills[role]
+                            if (ids === undefined) {
+                              setRoleDefaultSkills({ ...roleDefaultSkills, [role]: [sk.id] })
+                            } else {
+                              setRoleDefaultSkills({
+                                ...roleDefaultSkills,
+                                [role]: checked ? ids.filter((id) => id !== sk.id) : [...ids, sk.id],
+                              })
+                            }
+                          }}
+                          className="sr-only"
+                        />
+                        {sk.name}
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
         </CardContent>
       </Card>
     </div>

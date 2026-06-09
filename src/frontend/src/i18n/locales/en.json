@@ -109,7 +109,13 @@
     "uploadFailed": "Upload failed",
     "deleteConfirm": "Delete {{name}}?",
     "deleteSuccess": "Deleted",
-    "deleteFailed": "Delete failed"
+    "deleteFailed": "Delete failed",
+    "newDir": "New folder",
+    "dirName": "Folder name",
+    "dirNamePlaceholder": "e.g. images",
+    "dirCreated": "Folder created",
+    "dirCreateFailed": "Failed to create folder",
+    "parentDir": "Parent directory"
   },
   "skillDraft": {
     "commit": "Save skill",
@@ -371,9 +377,11 @@
     "allSkills": "All skills",
     "unlimited": "Unlimited",
     "none": "None",
+    "editSkills": "Skills — {{name}}",
     "roleDefaultSkills": "Role default skills",
     "roleDefaultSkillsHint": "Applied when creating a new user. Changes do not affect existing users.",
     "roleDefaultSkillsSaved": "Role default skills saved",
+    "roleDefaultSkillsSaveFailed": "Failed to save",
     "newRole": "New role",
     "newRolePlaceholder": "e.g. manager",
     "deleteRole": "Delete role",

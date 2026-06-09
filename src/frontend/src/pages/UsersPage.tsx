@@ -47,7 +47,7 @@ export function UsersPage() {
   const [resetPasswordConfirm, setResetPasswordConfirm] = useState('')
   const [resettingPassword, setResettingPassword] = useState(false)
   const [skills, setSkills] = useState<SkillOption[]>([])
-  const [editingSkills, setEditingSkills] = useState<Set<string>>(new Set())
+  const [skillEditUser, setSkillEditUser] = useState<UserRow | null>(null)
   const [form, setForm] = useState({
     username: '',
     password: '',
@@ -401,72 +401,17 @@ export function UsersPage() {
                         {user.role === 'admin' ? (
                           <Badge variant="default" size="sm">{t('users.allSkills')}</Badge>
                         ) : (
-                          <div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const next = new Set(editingSkills)
-                                if (next.has(user.id)) next.delete(user.id)
-                                else next.add(user.id)
-                                setEditingSkills(next)
-                              }}
-                              className="text-xs text-gray-500 hover:text-primary-600"
-                            >
-                              {user.skill_ids === null
-                                ? t('users.unlimited')
-                                : user.skill_ids?.length
-                                  ? `${user.skill_ids.length} skills`
-                                  : t('users.none')}
-                            </button>
-                            {editingSkills.has(user.id) && (
-                              <div className="mt-2 space-y-2 max-h-48 overflow-y-auto border rounded p-2 bg-gray-50 dark:bg-gray-800">
-                                <div className="flex flex-wrap gap-1">
-                                  {skills.map((sk) => {
-                                    const checked = user.skill_ids === null || user.skill_ids?.includes(sk.id)
-                                    return (
-                                      <label
-                                        key={sk.id}
-                                        className="flex items-center gap-1 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded"
-                                      >
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={() => {
-                                            if (user.skill_ids === null) {
-                                              handleSkillChange(user, [sk.id])
-                                            } else {
-                                              const next = checked
-                                                ? user.skill_ids.filter((id) => id !== sk.id)
-                                                : [...user.skill_ids, sk.id]
-                                              handleSkillChange(user, next)
-                                            }
-                                          }}
-                                          className="rounded"
-                                        />
-                                        {sk.name}
-                                      </label>
-                                    )
-                                  })}
-                                </div>
-                                <div className="flex gap-2 pt-1 border-t">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSkillChange(user, null)}
-                                    className="text-xs text-blue-600 hover:underline"
-                                  >
-                                    {t('users.unlimited')}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSkillChange(user, [])}
-                                    className="text-xs text-red-500 hover:underline"
-                                  >
-                                    {t('users.none')}
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setSkillEditUser(user)}
+                            className="text-xs text-primary-600 hover:underline"
+                          >
+                            {user.skill_ids === null
+                              ? t('users.unlimited')
+                              : user.skill_ids?.length
+                                ? `${user.skill_ids.length} skills`
+                                : t('users.none')}
+                          </button>
                         )}
                       </td>
                       <td className="py-3 pr-4 text-gray-500 dark:text-gray-400">
@@ -549,6 +494,68 @@ export function UsersPage() {
             </Button>
           </div>
         </form>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(skillEditUser)}
+        onClose={() => setSkillEditUser(null)}
+        title={t('users.editSkills', { name: skillEditUser?.display_name || skillEditUser?.username || '' })}
+        size="sm"
+      >
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+          <div className="flex flex-wrap gap-2">
+            {skills.map((sk) => {
+              const ids: string[] | null = skillEditUser?.skill_ids ?? null
+              const checked = ids === null || ids.includes(sk.id)
+              return (
+                <label
+                  key={sk.id}
+                  className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 px-3 py-2 rounded border"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      if (!skillEditUser) return
+                      const cur = skillEditUser.skill_ids
+                      if (cur === null) {
+                        handleSkillChange(skillEditUser, [sk.id])
+                      } else if (cur === undefined) {
+                        handleSkillChange(skillEditUser, [sk.id])
+                      } else {
+                        handleSkillChange(
+                          skillEditUser,
+                          checked ? cur.filter((id: string) => id !== sk.id) : [...cur, sk.id]
+                        )
+                      }
+                    }}
+                    className="rounded"
+                  />
+                  <div>
+                    <div className="font-medium">{sk.name}</div>
+                    {sk.description && <div className="text-xs text-gray-400">{sk.description}</div>}
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+          <div className="flex gap-3 pt-3 border-t">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => { if (skillEditUser) handleSkillChange(skillEditUser, null) }}
+            >
+              {t('users.unlimited')}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => { if (skillEditUser) handleSkillChange(skillEditUser, []) }}
+            >
+              {t('users.none')}
+            </Button>
+          </div>
+        </div>
       </Dialog>
     </div>
   )

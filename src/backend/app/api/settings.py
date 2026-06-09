@@ -8,6 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.models.setting import Setting
+
 from app.middleware.auth import (
     DEFAULT_ROLE_PERMISSIONS,
     Permission,
@@ -48,6 +50,44 @@ async def update_settings(
     """Update system settings."""
     service = SettingsService(db)
     return await service.update_settings(request)
+
+
+class SettingKeyValue(BaseModel):
+    key: str
+    value: object
+
+
+@router.get("/key-value/{key}")
+async def get_setting_key(
+    key: str,
+    _admin: User = Depends(require_permission(Permission.SETTINGS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a single setting value by key."""
+    result = await db.execute(select(Setting).where(Setting.key == key))
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Key not found")
+    return {"key": row.key, "value": row.value}
+
+
+@router.put("/key-value")
+async def update_setting_key(
+    request: SettingKeyValue,
+    _admin: User = Depends(require_permission(Permission.SETTINGS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upsert a single setting key with an arbitrary JSON value."""
+    from sqlalchemy import select as sa_select
+    result = await db.execute(sa_select(Setting).where(Setting.key == request.key))
+    row = result.scalar_one_or_none()
+    if row is None:
+        row = Setting(key=request.key, value=request.value)
+        db.add(row)
+    else:
+        row.value = request.value
+    await db.commit()
+    return {"ok": True}
 
 
 class MilvusTestRequest(BaseModel):

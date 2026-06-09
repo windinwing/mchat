@@ -19,13 +19,13 @@ import {
   DollarSign,
   Clock3,
   Workflow,
+  FolderOpen,
   Container,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { Badge } from '@/components/ui/Badge'
 import { useAuthStore } from '@/stores/auth'
-import { isCloudEdition } from '@/lib/edition'
 
 interface SidebarProps {
   onClose?: () => void
@@ -44,6 +44,7 @@ export function Sidebar({ onClose }: SidebarProps) {
     { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
     { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow, badgeKey: 'nav.workflowsBeta' },
     { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
+    { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
     { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
     { path: '/admin/agents', labelKey: 'nav.agents', icon: Bot },
     { path: '/admin/customer-agents', labelKey: 'nav.customerAgents', icon: Headphones },
@@ -51,20 +52,24 @@ export function Sidebar({ onClose }: SidebarProps) {
     { path: '/admin/channels', labelKey: 'nav.channels', icon: Globe },
     { path: '/admin/users', labelKey: 'nav.users', icon: Users },
     { path: '/admin/roles', labelKey: 'nav.roles', icon: Lock },
-    ...(isCloudEdition
-      ? [
-          { path: '/admin/templates', labelKey: 'nav.templates', icon: Store },
-          { path: '/admin/orders', labelKey: 'nav.orders', icon: DollarSign },
-        ]
-      : []),
+    { path: '/admin/templates', labelKey: 'nav.templates', icon: Store },
+    { path: '/admin/orders', labelKey: 'nav.orders', icon: DollarSign },
   ]
 
-  const navItems = (user?.role === 'admin'
-    ? adminNav
-    : [
-        { path: '/admin', labelKey: 'nav.dashboard', icon: LayoutDashboard, exact: true },
-        { path: '/admin/conversations', labelKey: 'nav.conversations', icon: MessageSquare },
-      ])
+  const agentNav = [
+    { path: '/admin', labelKey: 'nav.dashboard', icon: LayoutDashboard, exact: true as const },
+    { path: '/admin/agents', labelKey: 'nav.agents', icon: Bot },
+    { path: '/admin/conversations', labelKey: 'nav.conversations', icon: MessageSquare },
+    { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
+    { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow, badgeKey: 'nav.workflowsBeta' },
+    { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
+    { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
+    { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
+    { path: '/admin/customer-agents', labelKey: 'nav.customerAgents', icon: Headphones },
+    { path: '/admin/knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
+  ]
+
+  const navItems = user?.role === 'admin' ? adminNav : agentNav
 
 
   const isActive = (item: (typeof navItems)[number]) => {

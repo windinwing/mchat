@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +12,10 @@ from app.core.database import get_db
 from app.middleware.auth import get_current_user, has_global_scope
 from app.models.customer import CustomerConfig
 from app.models.user import User
+from app.schemas.tenant_files import (
+    TenantFileListResponse,
+    TenantFileUploadResponse,
+)
 from app.schemas.workspace import (
     ChannelWorkspaceSummary,
     SidecarListItem,
@@ -21,6 +26,7 @@ from app.schemas.workspace import (
     WorkspaceModeUpdate,
     WorkspaceStatusResponse,
 )
+from app.services.tenant_files_service import TenantFilesService
 from app.workspace.admin_service import (
     list_channel_summaries,
     list_sidecar_items,
@@ -69,11 +75,21 @@ async def get_workspace_status(
             )
         channel_id = customer_config.id
 
-    ctx = build_workspace_context(
-        current_user.id,
-        customer_config=customer_config,
-        channel_id=channel_id,
-    )
+    if customer_config is None:
+        from app.workspace.automation_context import build_automation_workspace_context
+
+        ctx = await build_automation_workspace_context(db, current_user.id)
+    else:
+        tenant_user_id = customer_config.user_id
+        owner = await db.get(User, tenant_user_id)
+        ctx = build_workspace_context(
+            tenant_user_id,
+            customer_config=customer_config,
+            channel_id=channel_id,
+            user_container_allowed=(
+                owner.workspace_container_allowed if owner is not None else None
+            ),
+        )
     async with workspace_execution_scope(ctx) as ready:
         assert ready is not None
         provider = get_workspace_provider(ready)
@@ -184,6 +200,73 @@ async def recycle_idle_sidecars_now(
         removed=removed,
         message=f"Recycled {removed} idle sidecar(s)",
     )
+
+
+# ── Tenant file browser (uploads/) ───────────────────────────────
+
+
+@router.get("/files", response_model=TenantFileListResponse)
+async def list_tenant_files(
+    subdir: str = "user",
+    current_user: User = Depends(get_current_user),
+) -> TenantFileListResponse:
+    """List files under tenant uploads/ (default: uploads/user/)."""
+    service = TenantFilesService()
+    items = service.list_files(current_user.id, subdir=subdir)
+    return TenantFileListResponse(subdir=subdir, items=items, total=len(items))
+
+
+@router.post("/files/upload", response_model=TenantFileUploadResponse)
+async def upload_tenant_file(
+    file: UploadFile = File(...),
+    subdir: str = Form("user"),
+    relative_dir: str = Form(""),
+    current_user: User = Depends(get_current_user),
+) -> TenantFileUploadResponse:
+    service = TenantFilesService()
+    return await service.upload_file(
+        current_user.id,
+        file,
+        subdir=subdir,
+        relative_dir=relative_dir,
+    )
+
+
+@router.get("/files/download")
+async def download_tenant_file(
+    path: str,
+    subdir: str = "user",
+    current_user: User = Depends(get_current_user),
+):
+    service = TenantFilesService()
+    target, mime = service.read_file(current_user.id, subdir=subdir, path=path)
+    return FileResponse(target, media_type=mime, filename=target.name)
+
+
+@router.delete("/files", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tenant_file(
+    path: str,
+    subdir: str = "user",
+    current_user: User = Depends(get_current_user),
+):
+    service = TenantFilesService()
+    service.delete_path(current_user.id, subdir=subdir, path=path)
+    return None
+
+
+class MkdirRequest(BaseModel):
+    subdir: str = "user"
+    name: str
+
+
+@router.post("/files/mkdir", status_code=status.HTTP_201_CREATED)
+async def create_tenant_directory(
+    request: MkdirRequest,
+    current_user: User = Depends(get_current_user),
+):
+    service = TenantFilesService()
+    dir_path = service.mkdir(current_user.id, subdir=request.subdir, name=request.name)
+    return {"path": dir_path}
 
 
 @router.get("/users", response_model=list[UserWorkspaceSummary])

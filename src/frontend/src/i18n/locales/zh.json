@@ -109,7 +109,13 @@
     "uploadFailed": "上传失败",
     "deleteConfirm": "确定删除 {{name}}？",
     "deleteSuccess": "已删除",
-    "deleteFailed": "删除失败"
+    "deleteFailed": "删除失败",
+    "newDir": "新建文件夹",
+    "dirName": "文件夹名",
+    "dirNamePlaceholder": "例如：images",
+    "dirCreated": "文件夹已创建",
+    "dirCreateFailed": "创建文件夹失败",
+    "parentDir": "上级目录"
   },
   "skillDraft": {
     "commit": "保存技能",
@@ -371,9 +377,11 @@
     "allSkills": "全部技能",
     "unlimited": "不限",
     "none": "无",
+    "editSkills": "技能配置 — {{name}}",
     "roleDefaultSkills": "角色默认技能",
     "roleDefaultSkillsHint": "创建新用户时应用。修改不影响已有用户。",
     "roleDefaultSkillsSaved": "角色默认技能已保存",
+    "roleDefaultSkillsSaveFailed": "保存失败",
     "newRole": "新角色",
     "newRolePlaceholder": "例如: manager",
     "deleteRole": "删除角色",
