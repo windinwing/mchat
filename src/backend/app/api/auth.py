@@ -17,7 +17,9 @@ from app.schemas.auth import (
     UpdateUserRequest,
     UserResponse,
 )
+from app.schemas.setup import SetupStatusResponse
 from app.services.auth_service import AuthService
+from app.services.setup_status_service import get_setup_status
 
 router = APIRouter()
 
@@ -31,6 +33,15 @@ async def bootstrap_hint() -> BootstrapResponse:
         password=settings.admin_password if show else None,
         show_credentials=show,
     )
+
+
+@router.get("/setup-status", response_model=SetupStatusResponse)
+async def setup_status(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SetupStatusResponse:
+    """First-run hints: AI provider and assistant configured."""
+    return await get_setup_status(db, current_user)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -129,6 +140,7 @@ async def create_user(
         password=request.password,
         role=request.role,
         display_name=request.display_name,
+        skill_ids=request.skill_ids,
     )
 
 
@@ -143,13 +155,18 @@ async def update_user(
     auth_service = AuthService(db)
     fields = request.model_dump(exclude_unset=True)
     set_policy = "workspace_container_allowed" in fields
+    set_skill_ids = "skill_ids" in fields
     if set_policy:
         fields.pop("workspace_container_allowed")
+    if set_skill_ids:
+        fields.pop("skill_ids")
     user = await auth_service.update_user(
         user_id,
         role=fields.get("role"),
         display_name=fields.get("display_name"),
         password=fields.get("password"),
+        skill_ids=request.skill_ids,
+        set_skill_ids=set_skill_ids,
         workspace_container_allowed=request.workspace_container_allowed,
         set_workspace_container_allowed=set_policy,
     )

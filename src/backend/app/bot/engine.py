@@ -248,6 +248,7 @@ async def process_message(
     db_session: AsyncSession,
     customer_config: CustomerConfig | None = None,
     skill_ids_override: list[str] | None = None,
+    end_user = None,
 ) -> AsyncGenerator[str, None]:
     """Process a user message through the bot pipeline."""
     try:
@@ -286,6 +287,7 @@ async def process_message(
             user_id=ai_config.user_id,
             customer_config=customer_config,
             skill_ids_override=skill_ids_override,
+            end_user=end_user,
         )
         skill_section = build_prompt_skill_section(prompt_skills)
         if skill_section:
@@ -296,6 +298,19 @@ async def process_message(
             system_prompt += tool_guidance
 
         studio_ctx = chat_extensions.prepare_studio_context(conversation)
+
+        from app.bot.tool_runtime import clear_bot_tool_context, set_bot_tool_context
+        from app.workspace.resolver import workspace_user_id_for_execution
+
+        ws_user_id = workspace_user_id_for_execution(
+            customer_config=customer_config,
+            fallback_user_id=ai_config.user_id,
+        )
+        set_bot_tool_context(
+            db=db_session,
+            conversation=conversation,
+            user_id=ws_user_id,
+        )
 
         tools = list(build_openai_tools(tool_skills))
         tools.extend(chat_extensions.extra_tools(conversation, studio_ctx))
@@ -618,6 +633,10 @@ async def process_message(
     except BaseException as e:
         logger.error(f"Bot engine error: {e}", exc_info=True)
         yield f"\n\n抱歉，处理消息时出错：{e}"
+    finally:
+        from app.bot.tool_runtime import clear_bot_tool_context
+
+        clear_bot_tool_context()
 
 
 async def _execute_tool(
@@ -631,7 +650,7 @@ async def _execute_tool(
     customer_config: CustomerConfig | None = None,
 ) -> Any:
     """Execute a skill tool function."""
-    extension_result = chat_extensions.execute_extension_tool(
+    extension_result = await chat_extensions.execute_extension_tool_async(
         tool_name, tool_args, studio_ctx
     )
     if extension_result is not None:

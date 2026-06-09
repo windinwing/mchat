@@ -15,11 +15,18 @@ import { ChangePasswordForm } from '@/components/admin/ChangePasswordForm'
 import { formatDate } from '@/lib/utils'
 import { ALL_PERMISSIONS, PERMISSION_LABELS, FALLBACK_ROLE_PERMISSIONS } from '@/lib/permissions'
 
+interface SkillOption {
+  id: string
+  name: string
+  description: string | null
+}
+
 interface UserRow {
   id: string
   username: string
   role: 'admin' | 'agent'
   display_name: string | null
+  skill_ids: string[] | null
   workspace_container_allowed?: boolean | null
   created_at: string
 }
@@ -35,6 +42,12 @@ export function UsersPage() {
   const [rolePermsData, setRolePermsData] = useState<Record<string, string[]>>(FALLBACK_ROLE_PERMISSIONS)
   const [permsLoaded, setPermsLoaded] = useState(false)
   const [showPasswordDialog, setShowPasswordDialog] = useState(false)
+  const [resetPasswordUser, setResetPasswordUser] = useState<UserRow | null>(null)
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetPasswordConfirm, setResetPasswordConfirm] = useState('')
+  const [resettingPassword, setResettingPassword] = useState(false)
+  const [skills, setSkills] = useState<SkillOption[]>([])
+  const [editingSkills, setEditingSkills] = useState<Set<string>>(new Set())
   const [form, setForm] = useState({
     username: '',
     password: '',
@@ -70,6 +83,7 @@ export function UsersPage() {
   useEffect(() => {
     void loadUsers()
     void loadRolePerms()
+    void api.get<SkillOption[]>('/skills').then(setSkills).catch(() => {})
   }, [])
 
   const getRolePerms = (role: string): string[] => {
@@ -116,6 +130,16 @@ export function UsersPage() {
     }
   }
 
+  const handleSkillChange = async (user: UserRow, skillIds: string[] | null) => {
+    try {
+      await api.patch(`/auth/users/${user.id}`, { skill_ids: skillIds })
+      toast(t('users.updated'), { type: 'success' })
+      await loadUsers()
+    } catch (err: unknown) {
+      toast(err instanceof Error ? err.message : t('users.updateFailed'), { type: 'error' })
+    }
+  }
+
   const handleRoleChange = async (user: UserRow, role: string) => {
     try {
       await api.patch(`/auth/users/${user.id}`, { role })
@@ -149,6 +173,45 @@ export function UsersPage() {
     if (allowed === true) return 'allow'
     if (allowed === false) return 'deny'
     return 'auto'
+  }
+
+  const openResetPasswordDialog = (user: UserRow) => {
+    setResetPasswordUser(user)
+    setResetPassword('')
+    setResetPasswordConfirm('')
+  }
+
+  const closeResetPasswordDialog = () => {
+    if (resettingPassword) return
+    setResetPasswordUser(null)
+    setResetPassword('')
+    setResetPasswordConfirm('')
+  }
+
+  const handleResetUserPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!resetPasswordUser) return
+    if (resetPassword !== resetPasswordConfirm) {
+      toast(t('users.passwordMismatch'), { type: 'error' })
+      return
+    }
+    setResettingPassword(true)
+    try {
+      await api.patch(`/auth/users/${resetPasswordUser.id}`, {
+        password: resetPassword,
+      })
+      toast(t('users.userPasswordChanged', { name: resetPasswordUser.username }), {
+        type: 'success',
+      })
+      closeResetPasswordDialog()
+    } catch (err: unknown) {
+      toast(
+        err instanceof Error ? err.message : t('users.userPasswordChangeFailed'),
+        { type: 'error' },
+      )
+    } finally {
+      setResettingPassword(false)
+    }
   }
 
   if (currentUser?.role !== 'admin') {
@@ -260,6 +323,7 @@ export function UsersPage() {
                     <th className="py-2 pr-4">{t('users.role')}</th>
                     <th className="py-2 pr-4">{t('users.workspaceContainer')}</th>
                     <th className="py-2 pr-4">{t('users.permissions')}</th>
+                    <th className="py-2 pr-4">{t('users.skills')}</th>
                     <th className="py-2 pr-4">{t('users.createdAt')}</th>
                     <th className="py-2">{t('users.actions')}</th>
                   </tr>
@@ -333,10 +397,91 @@ export function UsersPage() {
                           </div>
                         )}
                       </td>
+                      <td className="py-3 pr-4">
+                        {user.role === 'admin' ? (
+                          <Badge variant="default" size="sm">{t('users.allSkills')}</Badge>
+                        ) : (
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = new Set(editingSkills)
+                                if (next.has(user.id)) next.delete(user.id)
+                                else next.add(user.id)
+                                setEditingSkills(next)
+                              }}
+                              className="text-xs text-gray-500 hover:text-primary-600"
+                            >
+                              {user.skill_ids === null
+                                ? t('users.unlimited')
+                                : user.skill_ids?.length
+                                  ? `${user.skill_ids.length} skills`
+                                  : t('users.none')}
+                            </button>
+                            {editingSkills.has(user.id) && (
+                              <div className="mt-2 space-y-2 max-h-48 overflow-y-auto border rounded p-2 bg-gray-50 dark:bg-gray-800">
+                                <div className="flex flex-wrap gap-1">
+                                  {skills.map((sk) => {
+                                    const checked = user.skill_ids === null || user.skill_ids?.includes(sk.id)
+                                    return (
+                                      <label
+                                        key={sk.id}
+                                        className="flex items-center gap-1 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => {
+                                            if (user.skill_ids === null) {
+                                              handleSkillChange(user, [sk.id])
+                                            } else {
+                                              const next = checked
+                                                ? user.skill_ids.filter((id) => id !== sk.id)
+                                                : [...user.skill_ids, sk.id]
+                                              handleSkillChange(user, next)
+                                            }
+                                          }}
+                                          className="rounded"
+                                        />
+                                        {sk.name}
+                                      </label>
+                                    )
+                                  })}
+                                </div>
+                                <div className="flex gap-2 pt-1 border-t">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSkillChange(user, null)}
+                                    className="text-xs text-blue-600 hover:underline"
+                                  >
+                                    {t('users.unlimited')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSkillChange(user, [])}
+                                    className="text-xs text-red-500 hover:underline"
+                                  >
+                                    {t('users.none')}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3 pr-4 text-gray-500 dark:text-gray-400">
                         {formatDate(user.created_at)}
                       </td>
                       <td className="py-3">
+                        <button
+                          type="button"
+                          disabled={user.id === currentUser?.id}
+                          onClick={() => openResetPasswordDialog(user)}
+                          className="p-2 rounded-lg text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40"
+                          title={t('users.resetUserPassword')}
+                        >
+                          <KeyRound className="w-4 h-4" />
+                        </button>
                         <button
                           type="button"
                           disabled={user.id === currentUser?.id}
@@ -363,6 +508,47 @@ export function UsersPage() {
         size="sm"
       >
         <ChangePasswordForm />
+      </Dialog>
+
+      <Dialog
+        open={Boolean(resetPasswordUser)}
+        onClose={closeResetPasswordDialog}
+        title={t('users.resetUserPassword')}
+        size="sm"
+      >
+        <form onSubmit={handleResetUserPassword} className="space-y-4">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {t('users.resetUserPasswordHint', {
+              name: resetPasswordUser?.display_name || resetPasswordUser?.username || '',
+            })}
+          </p>
+          <Input
+            label={t('users.newPassword')}
+            type="password"
+            value={resetPassword}
+            onChange={(e) => setResetPassword(e.target.value)}
+            minLength={6}
+            autoComplete="new-password"
+            required
+          />
+          <Input
+            label={t('users.confirmPassword')}
+            type="password"
+            value={resetPasswordConfirm}
+            onChange={(e) => setResetPasswordConfirm(e.target.value)}
+            minLength={6}
+            autoComplete="new-password"
+            required
+          />
+          <div className="flex gap-2 justify-end">
+            <Button type="button" variant="secondary" onClick={closeResetPasswordDialog}>
+              {t('users.cancel')}
+            </Button>
+            <Button type="submit" isLoading={resettingPassword}>
+              {t('users.resetUserPassword')}
+            </Button>
+          </div>
+        </form>
       </Dialog>
     </div>
   )

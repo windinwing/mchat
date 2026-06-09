@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, JSON, String, Text
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +23,10 @@ class User(Base):
     role: Mapped[str] = mapped_column(
         String(50), nullable=False, default="agent"
     )  # admin, agent, or custom roles
+    skill_ids: Mapped[list | None] = mapped_column(
+        JSON, nullable=True
+    )
+    # null = unlimited, [] = no skills, [id1,id2] = only these
     email: Mapped[str | None] = mapped_column(
         String(255), nullable=True, unique=True
     )

@@ -177,6 +177,7 @@ async def on_message_created(
                 ai_config,
                 db,
                 customer_config=customer_config,
+                end_user=user,
             ):
                 full_content += token
                 await ws_manager.send_to_conversation(

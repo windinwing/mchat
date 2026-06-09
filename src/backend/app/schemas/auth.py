@@ -34,6 +34,7 @@ class UserResponse(BaseModel):
     account_status: str = "active"
     avatar_url: str | None = None
     display_name: str | None = None
+    skill_ids: list | None = None
     workspace_container_allowed: bool | None = None
     created_at: datetime
 
@@ -72,6 +73,7 @@ class CreateUserRequest(BaseModel):
     password: str = Field(..., min_length=6, max_length=255)
     role: Literal["admin", "agent", "user"] = "agent"
     display_name: str | None = Field(None, max_length=100)
+    skill_ids: list | None = Field(None, description="Allowed skill IDs; null=unlimited")
 
 
 class UpdateUserRequest(BaseModel):
@@ -79,6 +81,7 @@ class UpdateUserRequest(BaseModel):
 
     role: Literal["admin", "agent", "user"] | None = None
     display_name: str | None = Field(None, max_length=100)
+    skill_ids: list | None = Field(None, description="Allowed skill IDs; null=unlimited")
     password: str | None = Field(None, min_length=6, max_length=255)
     workspace_container_allowed: bool | None = Field(
         None,

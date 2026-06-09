@@ -180,6 +180,7 @@ class AuthService:
         password: str,
         role: str = "agent",
         display_name: str | None = None,
+        skill_ids: list | None = None,
     ) -> User:
         """Create a user (admin)."""
         if role not in ("admin", "agent", "user"):
@@ -200,6 +201,7 @@ class AuthService:
             password_hash=get_password_hash(password),
             role=role,
             display_name=display_name or username,
+            skill_ids=skill_ids,
         )
         self.db.add(user)
         await self.db.flush()
@@ -213,6 +215,8 @@ class AuthService:
         role: str | None = None,
         display_name: str | None = None,
         password: str | None = None,
+        skill_ids: list | None = None,
+        set_skill_ids: bool = False,
         workspace_container_allowed: bool | None | object = None,
         set_workspace_container_allowed: bool = False,
     ) -> User:
@@ -235,6 +239,8 @@ class AuthService:
             user.display_name = display_name
         if password is not None:
             user.password_hash = get_password_hash(password)
+        if set_skill_ids:
+            user.skill_ids = skill_ids  # type: ignore[assignment]
         if set_workspace_container_allowed:
             user.workspace_container_allowed = workspace_container_allowed  # type: ignore[assignment]
         await self.db.flush()

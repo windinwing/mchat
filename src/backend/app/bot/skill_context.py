@@ -85,8 +85,13 @@ async def load_skills_for_chat(
     user_id: str,
     customer_config: CustomerConfig | None = None,
     skill_ids_override: list[str] | None = None,
+    end_user = None,
 ) -> tuple[list[Skill], list[Skill]]:
-    """Return (prompt_skills, executable_tool_skills) for this chat."""
+    """Return (prompt_skills, executable_tool_skills) for this chat.
+
+    If end_user is provided and is not admin, filters skills by
+    end_user.skill_ids. None means unlimited, [] means no skills.
+    """
     result = await db.execute(
         select(Skill).where(
             Skill.user_id == user_id,
@@ -94,6 +99,13 @@ async def load_skills_for_chat(
         )
     )
     all_skills = list(result.scalars().all())
+
+    # Per-user skill allowlist (admin panel chat)
+    if end_user is not None and end_user.role != "admin":
+        allowed = getattr(end_user, "skill_ids", None)
+        if allowed is not None:
+            allowed_set = set(allowed)
+            all_skills = [s for s in all_skills if s.id in allowed_set]
 
     allowed_ids = None
     if skill_ids_override is not None:
@@ -149,8 +161,8 @@ async def load_skills_for_chat(
     return prompt_skills, tool_skills
 
 
-# Keep system prompt lean — full SKILL.md can be 10k+ chars per skill.
-_MAX_PROMPT_SKILL_CHARS = 1500
+# Prompt skills (e.g. wheelchair-advisor) embed product tables; match loader cache (~12k).
+_MAX_PROMPT_SKILL_CHARS = 12000
 
 # Default OpenAI tool schemas for known skills (when SKILL.md has no parameters).
 _DEFAULT_TOOL_PARAMETERS: dict[str, dict[str, Any]] = {
