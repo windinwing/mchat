@@ -9,7 +9,7 @@
 | 位置 | 路径 | 谁写 | 谁读 |
 |------|------|------|------|
 | 服务器源码（Agent 改这里） | `/opt/xiaoxiao/gamecenter/newsrc/<slug>/<嵌套工程>/` | DevBridge Agent | pipeline 拉取 |
-| 服务器试玩（:5099） | 同上项目的 `build/web-mobile/` | pipeline 推送 | GameCenter gunicorn |
+| 服务器试玩（:5099） | 同上项目的 `build/webop-mobile/` | pipeline 推送 | GameCenter gunicorn |
 | 服务器 playables | `/opt/xiaoxiao/gamecenter/playables/<slug>/current` | pipeline / DevBridge publish | 部分 nginx 入口 |
 | 本机工作区 | `~/dev/gamecenter-server/newsrc/<slug>/` | rsync 拉取 | 本机 Cocos 编译 |
 
@@ -258,7 +258,9 @@ flock /tmp/cocos-build.lock \
 
 ---
 
-## 7. Windows 回写（与 Mac 同一套脚本）
+## 7. Windows 编译机
+
+> **完整 Windows 编译 Agent 部署与 Cocos 2.x 适配请参见**：`docs/gamecenter-windows-build-agent.zh.md`
 
 流程与 Mac **完全相同**：拉取 → 编译 → 推送。差别只在运行环境和路径写法。
 
@@ -292,60 +294,21 @@ export LOCAL_GAMECENTER="/c/Users/你的用户名/dev/gamecenter-server"
 export SSH_USER="xiaoxiao"
 ```
 
-在 Cocos Dashboard 里确认实际安装路径；常见为：
-
-```
-C:\Program Files\Cocos\Creator\3.8.8\CocosCreator.exe
-```
-
 ### 7.3 SSH 免密（Windows）
-
-PowerShell 或 Git Bash：
 
 ```bash
 ssh-keygen -t ed25519
 cat ~/.ssh/id_ed25519.pub
 # 把公钥追加到服务器 ~/.ssh/authorized_keys
-
 ssh xiaoxiao@10.98.8.15 'echo ok'
 ```
 
-### 7.4 验证 rsync 可用
+### 7.4 Cocos 2.x 注意事项
 
-Git Bash 里：
-
-```bash
-rsync --version
-ssh xiaoxiao@10.98.8.15 'echo ok'
-```
-
-若 `rsync: command not found`，先 `scoop install rsync`。
-
-### 7.5 Windows 注意事项
-
-1. **路径**：`gamecenter-local.env` 里用 `/c/Users/...`，不要混用反斜杠。
-2. **Cocos 退出码**：Windows 上也可能非 0，只要有 `build/web-mobile/index.html` 脚本会继续（与 Mac 相同）。
-3. **debug=false**：默认已关闭 FPS 面板；无需改 Main.ts。
-4. **不要用 WSL 编 Cocos 又用 Windows 路径**：Cocos Creator 是 Windows GUI 程序，建议在 **Git Bash + Windows 版 Cocos** 一套做完，不要跨 WSL/Windows 混用工程目录。
-5. **Agent 触发 Windows 编译机**：在 Windows 上安装 [OpenSSH Server](https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse)，服务器 DevBridge `build_command` 可写：
-   ```bash
-   ssh -o BatchMode=yes 你的Windows用户@<windows-ip> \
-     'bash /c/Users/你/mchat/ops/scripts/gamecenter-local-pipeline.sh 10.98.8.15 {slug} --force'
-   ```
-   （路径按你机器上 mchat 仓库实际位置改。）
-
-### 7.6 Windows 日常命令（与 Mac 一致）
-
-```bash
-# 一条命令回写试玩
-./ops/scripts/gamecenter-local-pipeline.sh 10.98.8.15 pkg0002-3-x-3-8-3ts --force
-
-# 对比服务器与本机源码
-./ops/scripts/gamecenter-diff-server-local.sh 10.98.8.15 pkg0002-3-x-3-8-3ts
-
-# 看 Agent 是否真写过
-./ops/scripts/gamecenter-list-changes.sh 10.98.8.15 pkg0002-3-x-3-8-3ts
-```
+1. **Cocos 2.x 在 Windows 上需要 `--use-gl=swiftshader`**：build-worker 内部的 WebGL 初始化需要通过 SwiftShader CPU 模拟，否则 `canvas.getContext('webgl')` 返回 null 导致崩溃。脚本已内置（`gamecenter-local-build-project.sh`），通过 `GAMECENTER_2X_SWIFTSHADER=1` 控制（默认启用）。
+2. **Cocos 3.x 不受影响**：3.x 用原生 C++ 处理资源，不依赖 WebGL。
+3. **自动化构建**：推荐使用 HTTP Agent（`docs/gamecenter-windows-build-agent.zh.md`）替代 SSH，Agent 运行在桌面会话中，2.x 走 HTTP，3.x 走 SSH，自动分流。
+4. **不要用 WSL 编 Cocos 又用 Windows 路径**：Cocos Creator 是 Windows GUI 程序，建议一套做完。
 
 ---
 
@@ -438,11 +401,16 @@ GAMECENTER_BUILD_COMMAND=bash /opt/xiaoxiao/mchat/ops/scripts/gamecenter-remote-
 
 构建日志在服务器：`data/devbridge/gamecenter/<slug>/builds/<id>/stdout.log`
 
+队列模式下的状态（`queued` / `running` / `built`）与杀进程操作见 **`docs/gamecenter-build-queue.zh.md`**。
+
 ---
 
 ## 10. 相关文档
 
+- **编译队列配置与运维（启停、杀进程、5 槽池）**：`docs/gamecenter-build-queue.zh.md`
+- **Windows 编译 Agent 与 Cocos 2.x 适配**：`docs/gamecenter-windows-build-agent.zh.md`
 - Agent 接入设计：`docs/gamecenter-agent-integration.zh.md`
 - 远程触发脚本：`ops/scripts/gamecenter-remote-pipeline-build.sh`
+- Worker 服务：`ops/deploy/mchat-build-worker.service`、`ops/scripts/gamecenter-build-worker.py`
 - Mac 环境示例：`ops/scripts/gamecenter-local.env.example`
 - Windows 环境示例：`ops/scripts/gamecenter-local.env.windows.example`
