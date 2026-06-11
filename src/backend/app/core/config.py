@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     patent9235_sso_channel_id: str = "mchat01"
     patent9235_sso_login_url: str = ""
 
+    # Portal signup on Core edition (phone OTP + 9235 SSO). Auto-on when PATENT9235_JWT_SECRET is set.
+    mchat_signup_enabled: bool = False
+
     # Encrypt skill_bindings secrets at rest (Fernet key or any string — hashed if needed)
     secrets_encryption_key: str = ""
 
@@ -139,6 +142,29 @@ class Settings(BaseSettings):
     patent_workflow_report_skill: str = "patent-report"
     # Optional note for ops/docs (e.g. /path/to/skills/patents)
     patent_skills_source: str = ""
+
+    # GameCenter bridge (read-only MVP)
+    gamecenter_bridge_enabled: bool = False
+    gamecenter_source_root: str = "/Users/xiaoxiao/dev/xcx/src"
+    # Comma-separated extra source roots (e.g. newsrc) scanned after source_root
+    gamecenter_extra_source_roots: str = ""
+    # Comma-separated project folder allowlist; empty = auto-discover all valid projects
+    gamecenter_project_allowlist: str = ""
+    gamecenter_bridge_write_enabled: bool = False
+    gamecenter_bridge_data_root: str = "../../data/devbridge/gamecenter"
+    gamecenter_build_command: str = ""
+    gamecenter_auto_build_after_patch: bool = False
+    gamecenter_build_timeout_seconds: int = 1800
+    gamecenter_release_keep_builds: int = 10
+    gamecenter_publish_enabled: bool = False
+    gamecenter_playables_root: str = ""
+    gamecenter_sync_extracted_root: str = ""
+    gamecenter_playable_base_url: str = ""
+    gamecenter_playable_base_urls: str = ""
+    devbridge_admin_settings_path: str = ""
+    gamecenter_release_keep: int = 20
+    gamecenter_bridge_group_scope_only: bool = True
+    gamecenter_cocos_creator_bin: str = ""
 
     # Tenant workspace (Plan A local volume + Plan B container sidecar)
     workspace_root_dir: str = "../../data/tenants"
@@ -214,6 +240,12 @@ class Settings(BaseSettings):
         from app.core.skills_paths import resolve_skills_root
 
         return resolve_skills_root(self.skills_dir)
+
+    @property
+    def signup_enabled(self) -> bool:
+        if self.mchat_signup_enabled:
+            return True
+        return bool((self.patent9235_jwt_secret or "").strip())
 
 
 settings = Settings()

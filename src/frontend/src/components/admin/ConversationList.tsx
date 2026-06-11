@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Search, MessageSquare, Plus, RotateCw } from 'lucide-react'
+import { Search, MessageSquare, RotateCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/lib/api'
 import { Conversation, Message } from '@/stores/chat'
@@ -186,6 +186,15 @@ export function ConversationList({ onSelect, onStatsChange }: ConversationListPr
     return t('conversations.typeChat')
   }
 
+  const scopeLabel = (conv: Conversation) => {
+    if (conv.scope_type === 'group') {
+      return conv.scope_name
+        ? t('conversations.scopeGroupNamed', { name: conv.scope_name })
+        : t('conversations.scopeGroup')
+    }
+    return t('conversations.scopePersonal')
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -238,9 +247,6 @@ export function ConversationList({ onSelect, onStatsChange }: ConversationListPr
         >
           {t('common.refresh')}
         </Button>
-        <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setShowCreate(true)}>
-          {t('conversations.createConversation')}
-        </Button>
       </div>
 
       {filtered.length === 0 ? (
@@ -275,6 +281,9 @@ export function ConversationList({ onSelect, onStatsChange }: ConversationListPr
                       <div className="flex items-center gap-2">
                         <Badge variant="default" size="sm">
                           {typeLabel(conv.conversation_type)}
+                        </Badge>
+                        <Badge variant={conv.scope_type === 'group' ? 'warning' : 'info'} size="sm">
+                          {scopeLabel(conv)}
                         </Badge>
                         <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                           {conv.title || conv.visitor_id || t('conversations.untitled')}

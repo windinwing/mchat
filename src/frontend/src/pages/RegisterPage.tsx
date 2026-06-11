@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { MessageCircle } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
+import { isCloudEdition } from '@/lib/edition'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
@@ -56,7 +57,10 @@ export function RegisterPage() {
     }
     try {
       await signupByPhone(phone.trim(), code.trim())
-      navigate('/portal/dashboard', { replace: true })
+      const user = useAuthStore.getState().user
+      const dest =
+        isCloudEdition && user?.role === 'user' ? '/portal/dashboard' : '/chat'
+      navigate(dest, { replace: true })
     } catch {
       /* store */
     }
@@ -171,13 +175,12 @@ export function RegisterPage() {
           </form>
           <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
             {t('auth.haveAccount')}{' '}
-            <button
-              type="button"
+            <Link
+              to="/admin/login"
               className="text-primary-600 hover:text-primary-700 dark:text-primary-400 font-medium"
-              onClick={handle9235Login}
             >
-              {t('auth.loginWith9235')}
-            </button>
+              {t('auth.submit')}
+            </Link>
           </p>
         </div>
       </div>

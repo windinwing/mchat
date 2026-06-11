@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field
 class SkillResponse(BaseModel):
     """Skill response schema."""
     id: str
+    group_id: str | None = None
+    group_name: str | None = None
+    group_member_role: str | None = None
     name: str
     description: str | None = None
     skill_type: str

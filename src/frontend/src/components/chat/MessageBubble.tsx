@@ -2,6 +2,8 @@ import React, { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import { cn, parseDate } from '@/lib/utils'
 import { Message } from '@/stores/chat'
 import { Avatar } from '@/components/ui/Avatar'
@@ -10,6 +12,8 @@ import { useThrottledValue } from '@/hooks/useThrottledValue'
 import { resolveUploadUrl } from '@/lib/mediaUrl'
 import { prepareAssistantMarkdown } from '@/lib/patentMessage'
 import { rewriteMiniProgramLinksInMarkdown } from '@/lib/wechatMiniProgram'
+
+import { SkillDraftCard, SkillDraftExtra } from './SkillDraftCard'
 
 interface MessageBubbleProps {
   message: Message
@@ -21,6 +25,7 @@ interface MessageBubbleProps {
   compact?: boolean
   /** Full-width studio layout (portal / admin chat) */
   variant?: 'default' | 'studio'
+  customerId?: string
 }
 
 export function MessageBubble({
@@ -30,6 +35,7 @@ export function MessageBubble({
   accentColor,
   compact = false,
   variant = 'default',
+  customerId,
 }: MessageBubbleProps) {
   const studio = variant === 'studio'
   const { t, i18n } = useTranslation()
@@ -93,6 +99,12 @@ export function MessageBubble({
     }))
   const knowledgeHits = ((message.extra_data?.knowledge_hits as Array<Record<string, any>> | undefined) ?? [])
   const autoReplyRuleHits = ((message.extra_data?.auto_reply_rule_hits as Array<Record<string, any>> | undefined) ?? [])
+  const skillDraft = message.extra_data?.skill_draft as SkillDraftExtra | undefined
+  const devbridgeModifiedFiles = (message.extra_data?.devbridge_modified_files as string[] | undefined) ?? []
+  const markdownSanitizeSchema = {
+    ...defaultSchema,
+    tagNames: [...(defaultSchema.tagNames || []), 'details', 'summary'],
+  }
   const knowledgeHitLabels = useMemo(() => {
     const seen = new Set<string>()
     const labels: string[] = []
@@ -255,10 +267,21 @@ export function MessageBubble({
             ) : (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema]]}
               components={markdownComponents}
             >
               {assistantText}
             </ReactMarkdown>
+            )}
+            {devbridgeModifiedFiles.length > 0 && (
+              <div className="mt-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+                <div className="font-semibold mb-1">{t('chat.modifiedFilesTitle')}</div>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  {devbridgeModifiedFiles.map((file) => (
+                    <li key={file}><code>{file}</code></li>
+                  ))}
+                </ul>
+              </div>
             )}
             {(imageAttachments.length > 0 || imageAssets.length > 0 || videoAttachments.length > 0 || videoAssets.length > 0 || fileAttachments.length > 0 || fileAndLinkAssets.length > 0) && (
               <div className="mt-3 space-y-2">
@@ -361,6 +384,9 @@ export function MessageBubble({
                   ))}
                 </div>
               </div>
+            )}
+            {skillDraft?.draft_id && (
+              <SkillDraftCard draft={skillDraft} customerId={customerId} />
             )}
             {isStreaming && (
               <span className="cursor-blink inline-block w-[2px] h-4 bg-current ml-0.5 align-middle" />

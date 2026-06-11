@@ -59,6 +59,17 @@ async def _check_subscribe_permission(
                 return True, ""
             if conv.user_id == user.id:
                 return True, ""
+            if conv.scope_type == "group" and conv.scope_id:
+                from app.models.group import GroupMember
+
+                member_result = await db.execute(
+                    select(GroupMember).where(
+                        GroupMember.group_id == conv.scope_id,
+                        GroupMember.user_id == user.id,
+                    )
+                )
+                if member_result.scalar_one_or_none() is not None:
+                    return True, ""
             return False, "ACCESS_DENIED"
 
         if conv.visitor_id and visitor_token and conv.visitor_id == visitor_token:

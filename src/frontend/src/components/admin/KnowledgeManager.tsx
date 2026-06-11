@@ -36,6 +36,12 @@ import { Switch } from '@/components/ui/Switch'
 import { toast } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
 import { formatDate } from '@/lib/utils'
+import { Select } from '@/components/ui/Select'
+
+interface GroupOption {
+  id: string
+  name: string
+}
 
 /** Shared form styles for RAG settings (dark-mode safe + compact). */
 const ragLabel = 'block text-xs font-medium text-gray-600 dark:text-gray-300 mb-0.5'
@@ -85,6 +91,8 @@ export function KnowledgeManager() {
   const [jsonText, setJsonText] = useState('')
   const [jsonError, setJsonError] = useState('')
   const [embeddingModels, setEmbeddingModels] = useState<UploadedEmbeddingModel[]>([])
+  const [groups, setGroups] = useState<GroupOption[]>([])
+  const [scopeValue, setScopeValue] = useState('personal')
   const [modelUploading, setModelUploading] = useState(false)
   const embeddingModelInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -113,7 +121,23 @@ export function KnowledgeManager() {
     loadKnowledgeBases()
     loadPlatformKnowledgeSettings()
     loadEmbeddingModels()
+    api.get<GroupOption[]>('/groups/mine').then(setGroups).catch(() => setGroups([]))
   }, [])
+
+  useEffect(() => {
+    setSelectedKB(null)
+    setDocuments([])
+    void loadKnowledgeBases()
+  }, [scopeValue])
+
+  const selectedGroupId = scopeValue.startsWith('group:')
+    ? scopeValue.slice('group:'.length)
+    : undefined
+  const createKbPayload = {
+    name: kbName,
+    description: kbDesc,
+    ...(selectedGroupId ? { group_id: selectedGroupId } : {}),
+  }
 
   const loadEmbeddingModels = async () => {
     try {
@@ -286,7 +310,7 @@ export function KnowledgeManager() {
 
   const loadKnowledgeBases = async () => {
     try {
-      const data = await api.get<Record<string, unknown>[]>('/knowledge/bases')
+      const data = await api.get<Record<string, unknown>[]>('/knowledge/bases', selectedGroupId ? { group_id: selectedGroupId } : undefined)
       setKnowledgeBases(data.map(mapKnowledgeBase))
     } catch (err) {
       console.error('Failed to load knowledge bases:', err)
@@ -310,10 +334,7 @@ export function KnowledgeManager() {
   const handleCreate = async () => {
     if (!kbName.trim()) return
     try {
-      const kb = await api.post<Record<string, unknown>>('/knowledge/bases', {
-        name: kbName,
-        description: kbDesc,
-      })
+      const kb = await api.post<Record<string, unknown>>('/knowledge/bases', createKbPayload)
       setKnowledgeBases((prev) => [...prev, mapKnowledgeBase(kb)])
       toast(t('knowledge.toastKbCreated'), { type: 'success' })
       setCreateOpen(false)
@@ -489,6 +510,8 @@ export function KnowledgeManager() {
               type="file"
               accept=".zip"
               className="hidden"
+              aria-label={t('knowledge.uploadModelZip')}
+              title={t('knowledge.uploadModelZip')}
               onChange={handleUploadEmbeddingModel}
             />
           </div>
@@ -546,6 +569,7 @@ export function KnowledgeManager() {
               <select
                 className={ragSelect}
                 value={globalEmbedProvider}
+                title={t('knowledge.embeddingProvider')}
                 onChange={(e) => setGlobalEmbedProvider(e.target.value)}
               >
                 <option value="ollama">Ollama</option>
@@ -559,6 +583,8 @@ export function KnowledgeManager() {
               <input
                 className={`w-full ${milvusInput}`}
                 value={globalEmbedModel}
+                aria-label={t('knowledge.embeddingModel')}
+                title={t('knowledge.embeddingModel')}
                 onChange={(e) => setGlobalEmbedModel(e.target.value)}
                 placeholder={
                   globalEmbedProvider === 'ollama' ? 'nomic-embed-text' : 'text-embedding-3-small'
@@ -570,6 +596,8 @@ export function KnowledgeManager() {
               <input
                 className={`w-full ${milvusInput}`}
                 value={globalEmbedApiBase}
+                aria-label={t('knowledge.embeddingApiBase')}
+                title={t('knowledge.embeddingApiBase')}
                 onChange={(e) => setGlobalEmbedApiBase(e.target.value)}
                 placeholder={
                   globalEmbedProvider === 'ollama'
@@ -584,6 +612,8 @@ export function KnowledgeManager() {
                 type="number"
                 className={`w-full ${milvusInput}`}
                 value={globalEmbedDimension}
+                aria-label={t('knowledge.embeddingDimension')}
+                title={t('knowledge.embeddingDimension')}
                 onChange={(e) => setGlobalEmbedDimension(e.target.value.replace(/[^\d]/g, ''))}
               />
             </div>
@@ -652,6 +682,18 @@ export function KnowledgeManager() {
       <div className="flex gap-6 flex-1 min-h-0">
       {/* Knowledge Base List */}
       <div className="w-72 shrink-0 space-y-3">
+        <Select
+          label={t('knowledge.scopeLabel', '知识库作用域')}
+          value={scopeValue}
+          options={[
+            { value: 'personal', label: t('knowledge.scopePersonal', '个人知识库') },
+            ...groups.map((group) => ({
+              value: `group:${group.id}`,
+              label: `${t('knowledge.scopeGroup', '群组')}: ${group.name}`,
+            })),
+          ]}
+          onChange={(e) => setScopeValue(e.target.value)}
+        />
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('knowledge.kbListTitle')}</h3>
           <Button size="sm" variant="ghost" onClick={() => setCreateOpen(true)}>
@@ -891,6 +933,7 @@ export function KnowledgeManager() {
             <select
               className={ragSelect}
               value={ragSettings.chunkStrategy}
+              title={t('knowledge.chunkStrategy')}
               onChange={(e) =>
                 setRagSettings((s) => ({
                   ...s,
@@ -990,6 +1033,7 @@ export function KnowledgeManager() {
               <select
                 className={ragSelect}
                 value={embeddingProvider}
+                title={t('knowledge.embeddingProvider')}
                 onChange={(e) => {
                   const v = e.target.value
                   setRagSettings((s) => ({
@@ -1013,6 +1057,7 @@ export function KnowledgeManager() {
                 <select
                   className={ragSelect}
                   value={ragSettings.embeddingModel ?? ''}
+                  title={t('knowledge.localModelSelect')}
                   onChange={(e) => handleSelectLocalModel(e.target.value)}
                 >
                   <option value="">{t('knowledge.pickLocalModel')}</option>
@@ -1078,6 +1123,7 @@ export function KnowledgeManager() {
             <select
               className={ragSelect}
               value={ragSettings.retrievalMode}
+              title={t('knowledge.retrievalSection')}
               onChange={(e) =>
                 setRagSettings((s) => ({
                   ...s,
@@ -1142,6 +1188,8 @@ export function KnowledgeManager() {
                     type="number"
                     min={1}
                     max={20}
+                    aria-label={t('knowledge.rerankEnabled')}
+                    title={t('knowledge.rerankEnabled')}
                     className="w-12 h-6 rounded border border-gray-300 bg-white px-1 text-center text-xs text-gray-900
                       focus:outline-none focus:ring-1 focus:ring-primary-500
                       dark:border-gray-500 dark:bg-gray-800 dark:text-gray-100"
@@ -1164,6 +1212,7 @@ export function KnowledgeManager() {
             <select
               className={ragSelect}
               value={ragSettings.rerankProvider}
+              title={t('knowledge.rerankProvider')}
               onChange={(e) =>
                 setRagSettings((s) => ({
                   ...s,
@@ -1335,6 +1384,8 @@ export function KnowledgeManager() {
                   text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500
                   dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 resize-none"
                 value={jsonText}
+                aria-label={t('knowledge.ragSettingsTabJson')}
+                title={t('knowledge.ragSettingsTabJson')}
                 onChange={(e) => {
                   setJsonText(e.target.value)
                   setJsonError('')

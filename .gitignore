@@ -25,6 +25,7 @@ out/
 !**/.env.example
 ops/docker/.env
 ops/deploy/.env.production.generated
+ops/scripts/gamecenter-local.env
 # Per-host / per-domain nginx vhosts (real domains, IPs); copy from mchat-vhost.example.conf locally
 ops/deploy/mchat.*.conf
 

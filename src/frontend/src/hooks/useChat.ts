@@ -109,12 +109,6 @@ export function useChat(conversationId?: string) {
     if (!conversationId) return
 
     subscribedRef.current = false
-    useChatStore.setState({
-      messages: [],
-      isStreaming: false,
-      streamingContent: '',
-      currentConversation: null,
-    })
     fetchMessages(conversationId)
 
     const ws = getWsClient()
@@ -144,6 +138,17 @@ export function useChat(conversationId?: string) {
       unsubscribe()
     }
   }, [conversationId, fetchMessages, handleMessage])
+
+  useEffect(() => {
+    if (!conversationId) return
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void syncMessagesFromServer(conversationId)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [conversationId, syncMessagesFromServer])
 
   // Fallback when stream:end is missed — poll lightly to avoid hammering the API
   useEffect(() => {

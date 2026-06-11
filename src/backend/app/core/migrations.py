@@ -135,6 +135,22 @@ def apply_schema_patches(conn: Connection) -> list[str]:
                 )
             )
             applied.append("conversations.customer_id")
+        if "scope_type" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE conversations "
+                    "ADD COLUMN scope_type VARCHAR(20) NOT NULL DEFAULT 'personal'"
+                )
+            )
+            applied.append("conversations.scope_type")
+        if "scope_id" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE conversations "
+                    "ADD COLUMN scope_id VARCHAR(36) NULL"
+                )
+            )
+            applied.append("conversations.scope_id")
         # Create index separately (MySQL does not support IF NOT EXISTS)
         try:
             conn.execute(
@@ -149,6 +165,7 @@ def apply_schema_patches(conn: Connection) -> list[str]:
     if "knowledge_bases" in inspect(conn).get_table_names():
         cols = _column_names(conn, "knowledge_bases")
         kb_patches = [
+            ("group_id", "VARCHAR(36) NULL"),
             ("chunk_strategy", "VARCHAR(20) NOT NULL DEFAULT 'fixed'"),
             ("chunk_size", "INTEGER NOT NULL DEFAULT 500"),
             ("chunk_overlap", "INTEGER NOT NULL DEFAULT 50"),
@@ -265,6 +282,12 @@ def apply_schema_patches(conn: Connection) -> list[str]:
                     text(f"ALTER TABLE messages ADD COLUMN {col_name} {col_def}")
                 )
                 applied.append(f"messages.{col_name}")
+
+    if "skills" in inspect(conn).get_table_names():
+        cols = _column_names(conn, "skills")
+        if "group_id" not in cols:
+            conn.execute(text("ALTER TABLE skills ADD COLUMN group_id VARCHAR(36) NULL"))
+            applied.append("skills.group_id")
 
     # ---- channel_templates: new columns ----
     if "channel_templates" in inspect(conn).get_table_names():
@@ -459,6 +482,41 @@ def apply_schema_patches(conn: Connection) -> list[str]:
                     )
                 )
                 applied.append(f"skill_workflow_approvals.{col_name}")
+
+    if "groups" in inspect(conn).get_table_names():
+        cols = _column_names(conn, "groups")
+        if "gamecenter_project_allowlist" not in cols:
+            if dialect == "mysql":
+                conn.execute(
+                    text(
+                        "ALTER TABLE groups "
+                        "ADD COLUMN gamecenter_project_allowlist JSON NULL"
+                    )
+                )
+            else:
+                conn.execute(
+                    text(
+                        "ALTER TABLE groups "
+                        "ADD COLUMN gamecenter_project_allowlist TEXT NULL"
+                    )
+                )
+            applied.append("groups.gamecenter_project_allowlist")
+        if "devbridge_project_allowlists" not in cols:
+            if dialect == "mysql":
+                conn.execute(
+                    text(
+                        "ALTER TABLE groups "
+                        "ADD COLUMN devbridge_project_allowlists JSON NULL"
+                    )
+                )
+            else:
+                conn.execute(
+                    text(
+                        "ALTER TABLE groups "
+                        "ADD COLUMN devbridge_project_allowlists TEXT NULL"
+                    )
+                )
+            applied.append("groups.devbridge_project_allowlists")
 
     # Ensure any new tables from models exist
     Base.metadata.create_all(conn)

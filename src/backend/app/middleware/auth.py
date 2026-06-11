@@ -57,6 +57,12 @@ class Permission:
     SPEECH_READ = "speech:read"
     SPEECH_WRITE = "speech:write"
 
+    # DevBridge (project browse vs config are separate)
+    DEVBRIDGE_READ = "devbridge:read"
+    DEVBRIDGE_WRITE = "devbridge:write"
+    DEVBRIDGE_SETTINGS_READ = "devbridge:settings:read"
+    DEVBRIDGE_SETTINGS_WRITE = "devbridge:settings:write"
+
     @classmethod
     def all(cls) -> list[str]:
         return [v for k, v in vars(cls).items() if isinstance(v, str) and v.count(":") == 1]
@@ -71,18 +77,34 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str]] = {
         Permission.CONVERSATIONS_WRITE,
         Permission.KNOWLEDGE_READ,
         Permission.SKILLS_READ,
+        Permission.SKILLS_WRITE,
         Permission.AGENTS_READ,
+        Permission.AGENTS_WRITE,
         Permission.DASHBOARD_READ,
         Permission.SPEECH_READ,
         Permission.SPEECH_WRITE,
         Permission.CHANNELS_READ,
+        Permission.DEVBRIDGE_READ,
     ],
     "user": [
         Permission.CONVERSATIONS_READ,
         Permission.CONVERSATIONS_WRITE,
+        Permission.KNOWLEDGE_READ,
+        Permission.KNOWLEDGE_WRITE,
+        Permission.SKILLS_READ,
+        Permission.SKILLS_WRITE,
+        Permission.AGENTS_READ,
+        Permission.AGENTS_WRITE,
         Permission.DASHBOARD_READ,
+        Permission.SPEECH_READ,
+        Permission.SPEECH_WRITE,
     ],
 }
+
+# Portal tenant accounts always need these (even if role_permissions in DB is stale).
+_PORTAL_TENANT_MIN_PERMISSIONS: frozenset[str] = frozenset(
+    DEFAULT_ROLE_PERMISSIONS["user"]
+)
 
 
 async def load_role_permissions(db: AsyncSession) -> dict[str, list[str]]:
@@ -110,7 +132,12 @@ async def get_user_permissions(user: User, db: AsyncSession | None = None) -> se
         role_perms = await load_role_permissions(db)
     else:
         role_perms = {k: list(v) for k, v in DEFAULT_ROLE_PERMISSIONS.items()}
-    return set(role_perms.get(user.role, []))
+    perms = set(role_perms.get(user.role, []))
+    if user.role == "admin":
+        perms.update(Permission.all())
+    if user.role == "user":
+        perms.update(_PORTAL_TENANT_MIN_PERMISSIONS)
+    return perms
 
 
 async def user_has_permission(user: User, permission: str, db: AsyncSession | None = None) -> bool:

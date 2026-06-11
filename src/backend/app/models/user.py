@@ -82,6 +82,16 @@ class User(Base):
     knowledge_bases = relationship(
         "KnowledgeBase", back_populates="user", lazy="selectin"
     )
+    owned_groups = relationship(
+        "Group",
+        foreign_keys="Group.owner_user_id",
+        lazy="selectin",
+    )
+    group_memberships = relationship(
+        "GroupMember",
+        foreign_keys="GroupMember.user_id",
+        lazy="selectin",
+    )
     embedding_models = relationship(
         "EmbeddingModel", back_populates="user", lazy="selectin"
     )

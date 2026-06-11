@@ -16,10 +16,10 @@ MChat Workflow 用于将多个 Skill 编排为可复用流程，统一支撑**�
 |------|------|
 | **Skill** | 最小执行单元（工具、函数、Webhook） |
 | **Workflow** | 由 Skill 组成的流程；支持线性步骤或 `graph_json` DAG |
-| **Channel** | 流量入口（Web / 微信 / Telegram 等）；决定「谁在触发」 |
+| **Workspace** | 行业工作空间（Web / 微信 / Telegram 等）；决定「谁在触发」 |
 | **Schedule** | 时间调度；决定「何时触发」，可绑定 Workflow |
 
-**关系**：Channel 是场景，Workflow 是流程，Schedule 是时机。
+**关系**：Workspace 是场景，Workflow 是流程，Schedule 是时机。
 
 ---
 
@@ -41,9 +41,9 @@ MChat Workflow 用于将多个 Skill 编排为可复用流程，统一支撑**�
 - 审批节点：运行暂停（`paused`），人工批准/拒绝后可续跑
 - 失败/拒绝告警 Webhook（见配置）
 
-### 2.3 频道触发规则（Phase 2.x）
+### 2.3 工作空间触发规则（Phase 2.x）
 
-- 频道绑定多个 Workflow，按优先级与匹配规则触发
+- 工作空间绑定多个 Workflow，按优先级与匹配规则触发
 - `match_type`：`all` / `contains` / `regex`
 - `workflow_dispatch_mode`：`all` / `first_match`
 - 规则预览、命中原因解释、片段高亮

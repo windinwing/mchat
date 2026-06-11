@@ -135,6 +135,8 @@ export function UsersPage() {
       await api.patch(`/auth/users/${user.id}`, { skill_ids: skillIds })
       toast(t('users.updated'), { type: 'success' })
       await loadUsers()
+      // Update the open dialog user so checkboxes reflect the change immediately
+      setSkillEditUser((prev) => (prev && prev.id === user.id ? { ...prev, skill_ids: skillIds } : prev))
     } catch (err: unknown) {
       toast(err instanceof Error ? err.message : t('users.updateFailed'), { type: 'error' })
     }
@@ -510,7 +512,7 @@ export function UsersPage() {
               return (
                 <label
                   key={sk.id}
-                  className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 px-3 py-2 rounded border"
+                  className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 px-3 py-2 rounded border border-gray-200 dark:border-gray-600 min-w-[220px] flex-1"
                 >
                   <input
                     type="checkbox"
@@ -518,10 +520,10 @@ export function UsersPage() {
                     onChange={() => {
                       if (!skillEditUser) return
                       const cur = skillEditUser.skill_ids
-                      if (cur === null) {
-                        handleSkillChange(skillEditUser, [sk.id])
-                      } else if (cur === undefined) {
-                        handleSkillChange(skillEditUser, [sk.id])
+                      if (cur === null || cur === undefined) {
+                        // Coming from unlimited: start with all skills then toggle this one off/on
+                        const allIds = skills.map((s) => s.id)
+                        handleSkillChange(skillEditUser, checked ? allIds.filter((id: string) => id !== sk.id) : allIds)
                       } else {
                         handleSkillChange(
                           skillEditUser,
@@ -531,9 +533,9 @@ export function UsersPage() {
                     }}
                     className="rounded"
                   />
-                  <div>
-                    <div className="font-medium">{sk.name}</div>
-                    {sk.description && <div className="text-xs text-gray-400">{sk.description}</div>}
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{sk.name}</div>
+                    {sk.description && <div className="text-xs text-gray-400 truncate">{sk.description}</div>}
                   </div>
                 </label>
               )

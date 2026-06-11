@@ -108,14 +108,56 @@ export const api = {
   patch: <T = any>(endpoint: string, data?: any) =>
     request<T>(endpoint, { method: 'PATCH', body: JSON.stringify(data) }),
 
-  delete: <T = any>(endpoint: string) =>
-    request<T>(endpoint, { method: 'DELETE' }),
+  delete: <T = any>(endpoint: string, params?: Record<string, string>) =>
+    request<T>(endpoint, { method: 'DELETE', params }),
 
   upload: <T = any>(endpoint: string, formData: FormData) =>
     request<T>(endpoint, {
       method: 'POST',
       body: formData,
     }),
+
+  /** Download a file with Bearer auth (plain anchor href cannot send JWT). */
+  download: async (endpoint: string, params?: Record<string, string>, filename?: string) => {
+    let url = `${API_BASE}${endpoint}`
+    if (params) {
+      url += `?${new URLSearchParams(params).toString()}`
+    }
+    const headers: Record<string, string> = {}
+    const token = getToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+    const response = await fetch(url, { headers })
+    if (!response.ok) {
+      let errorData: unknown
+      try {
+        errorData = await response.json()
+      } catch {
+        errorData = { message: response.statusText }
+      }
+      const detail =
+        (errorData as { detail?: string })?.detail ??
+        (errorData as { message?: string })?.message ??
+        'Download failed'
+      throw new ApiError(String(detail), response.status, errorData)
+    }
+    const blob = await response.blob()
+    const name =
+      filename ||
+      (() => {
+        try {
+          const last = new URL(url, window.location.origin).pathname.split('/').pop()
+          return last || 'download'
+        } catch {
+          return 'download'
+        }
+      })()
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = name
+    anchor.click()
+    URL.revokeObjectURL(objectUrl)
+  },
 }
 
 export { setToken, removeToken, getToken, ApiError }

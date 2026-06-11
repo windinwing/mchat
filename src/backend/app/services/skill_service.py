@@ -88,6 +88,80 @@ class SkillService:
         root.mkdir(parents=True, exist_ok=True)
         return root
 
+    @staticmethod
+    def _skill_response(skill: Skill, *, group_member_role: str | None = None) -> SkillResponse:
+        return SkillResponse.model_validate(
+            {
+                "id": skill.id,
+                "group_id": skill.group_id,
+                "group_name": skill.group.name if getattr(skill, "group", None) else None,
+                "group_member_role": group_member_role,
+                "name": skill.name,
+                "description": skill.description,
+                "skill_type": skill.skill_type,
+                "path": skill.path,
+                "config": skill.config,
+                "enabled": skill.enabled,
+                "created_at": skill.created_at,
+                "updated_at": skill.updated_at,
+            }
+        )
+
+    async def _resolve_group_member_role(self, skill: Skill, user_id: str) -> str | None:
+        if not skill.group_id:
+            return None
+        from app.models.group import GroupMember
+
+        result = await self.db.execute(
+            select(GroupMember.role).where(
+                GroupMember.group_id == skill.group_id,
+                GroupMember.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def _skill_response_for_user(self, skill: Skill, user_id: str) -> SkillResponse:
+        role = await self._resolve_group_member_role(skill, user_id)
+        return self._skill_response(skill, group_member_role=role)
+
+    async def _skill_with_access(
+        self,
+        skill_id: str,
+        user_id: str,
+        *,
+        write: bool = False,
+    ) -> Skill | None:
+        from app.models.group import GroupMember
+        from app.models.user import User
+
+        result = await self.db.execute(select(Skill).where(Skill.id == skill_id))
+        skill = result.scalar_one_or_none()
+        if skill is None:
+            return None
+
+        if skill.group_id:
+            membership_result = await self.db.execute(
+                select(GroupMember.role).where(
+                    GroupMember.group_id == skill.group_id,
+                    GroupMember.user_id == user_id,
+                )
+            )
+            role = membership_result.scalar_one_or_none()
+            if role is None:
+                return None
+            if write and role not in {"owner", "editor"}:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="group_skill_write_forbidden",
+                )
+            return skill
+
+        if skill.user_id != user_id:
+            user = await self.db.get(User, user_id)
+            if user is None or (user.role or "").strip().lower() != "admin":
+                return None
+        return skill
+
     _PLAN_RANK = {"free": 0, "free_trial": 1, "pro": 2, "enterprise": 3}
 
     async def _best_plan_for_user(self, user_id: str) -> str:
@@ -354,17 +428,51 @@ class SkillService:
             )
 
         await self._refresh_storage_usage(user_id)
-        return SkillResponse.model_validate(skill)
+        return await self._skill_response_for_user(skill, user_id)
 
     async def list_skills(self, user_id: str) -> list[SkillResponse]:
-        """List all skills for a user."""
-        result = await self.db.execute(
+        """List all skills for a user (server_ops hidden from non-admin)."""
+        from app.models.group import GroupMember
+        from app.models.user import User
+
+        result = await self.db.execute(select(Skill).where(Skill.user_id == user_id))
+        personal_skills = list(result.scalars().all())
+
+        group_result = await self.db.execute(
             select(Skill)
-            .where(Skill.user_id == user_id)
+            .join(GroupMember, GroupMember.group_id == Skill.group_id)
+            .where(GroupMember.user_id == user_id)
             .order_by(Skill.created_at.desc())
         )
-        skills = result.scalars().all()
-        return [SkillResponse.model_validate(s) for s in skills]
+        group_skills = list(group_result.scalars().all())
+
+        dedup: dict[str, Skill] = {skill.id: skill for skill in personal_skills}
+        for skill in group_skills:
+            dedup.setdefault(skill.id, skill)
+        skills = list(dedup.values())
+
+        user = await self.db.get(User, user_id)
+        role = (user.role or "").strip().lower() if user else ""
+        if role != "admin":
+            skills = [s for s in skills if not is_server_ops_skill(s)]
+        skills.sort(key=lambda skill: skill.created_at, reverse=True)
+        group_ids = {skill.group_id for skill in skills if skill.group_id}
+        role_map: dict[str, str] = {}
+        if group_ids:
+            role_result = await self.db.execute(
+                select(GroupMember.group_id, GroupMember.role).where(
+                    GroupMember.user_id == user_id,
+                    GroupMember.group_id.in_(group_ids),
+                )
+            )
+            role_map = {gid: role for gid, role in role_result.all()}
+        return [
+            self._skill_response(
+                skill,
+                group_member_role=role_map.get(skill.group_id) if skill.group_id else None,
+            )
+            for skill in skills
+        ]
 
     @staticmethod
     def _disk_body_and_mtime(path: str | None) -> tuple[str, datetime | None]:
@@ -457,10 +565,7 @@ class SkillService:
         self, skill_id: str, user_id: str
     ) -> SkillResponse:
         """Reload one skill row from disk (path + prompt_body cache)."""
-        result = await self.db.execute(
-            select(Skill).where(Skill.id == skill_id, Skill.user_id == user_id)
-        )
-        skill = result.scalar_one_or_none()
+        skill = await self._skill_with_access(skill_id, user_id, write=True)
         if skill is None:
             raise HTTPException(status_code=404, detail="Skill not found")
         loader = SkillLoader(user_id=user_id)
@@ -478,7 +583,7 @@ class SkillService:
         self._apply_disk_skill_row(skill, skill_data)
         await self.db.flush()
         await self.db.refresh(skill)
-        return SkillResponse.model_validate(skill)
+        return await self._skill_response_for_user(skill, user_id)
 
     async def refresh_stale_caches(self, user_id: str) -> SkillCacheRefreshResponse:
         """Refresh all skills whose DB cache differs from disk."""
@@ -504,14 +609,19 @@ class SkillService:
         self, skill_id: str, user_id: str, data: SkillUpdate
     ) -> SkillResponse | None:
         """Update a skill (enable/disable or config changes)."""
-        result = await self.db.execute(
-            select(Skill).where(
-                Skill.id == skill_id, Skill.user_id == user_id
-            )
-        )
-        skill = result.scalar_one_or_none()
+        skill = await self._skill_with_access(skill_id, user_id, write=True)
         if skill is None:
             return None
+
+        if is_server_ops_skill(skill):
+            from app.models.user import User
+
+            user = await self.db.get(User, user_id)
+            if user is None or (user.role or "").strip().lower() != "admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="server_ops_admin_only",
+                )
 
         update_data = data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
@@ -519,18 +629,13 @@ class SkillService:
 
         await self.db.flush()
         await self.db.refresh(skill)
-        return SkillResponse.model_validate(skill)
+        return await self._skill_response_for_user(skill, user_id)
 
     async def delete_skill(
         self, skill_id: str, user_id: str
     ) -> bool:
         """Delete a skill from DB and remove its directory under skills/."""
-        result = await self.db.execute(
-            select(Skill).where(
-                Skill.id == skill_id, Skill.user_id == user_id
-            )
-        )
-        skill = result.scalar_one_or_none()
+        skill = await self._skill_with_access(skill_id, user_id, write=True)
         if skill is None:
             return False
         if skill.skill_type == "builtin":
@@ -920,10 +1025,7 @@ class SkillService:
 
     async def list_skill_files(self, skill_id: str, user_id: str) -> list[dict]:
         """List all files in a skill directory."""
-        result = await self.db.execute(
-            select(Skill).where(Skill.id == skill_id, Skill.user_id == user_id)
-        )
-        skill = result.scalar_one_or_none()
+        skill = await self._skill_with_access(skill_id, user_id)
         if skill is None or not skill.path:
             raise HTTPException(status_code=404, detail="Skill not found")
 
@@ -946,10 +1048,7 @@ class SkillService:
 
     async def read_skill_file(self, skill_id: str, user_id: str, file_path: str) -> dict:
         """Read a text file from a skill directory."""
-        result = await self.db.execute(
-            select(Skill).where(Skill.id == skill_id, Skill.user_id == user_id)
-        )
-        skill = result.scalar_one_or_none()
+        skill = await self._skill_with_access(skill_id, user_id)
         if skill is None or not skill.path:
             raise HTTPException(status_code=404, detail="Skill not found")
 
@@ -979,10 +1078,7 @@ class SkillService:
 
     async def upload_skill_file(self, skill_id: str, user_id: str, file: UploadFile, relative_path: str = "") -> dict:
         """Upload a file into a skill directory."""
-        result = await self.db.execute(
-            select(Skill).where(Skill.id == skill_id, Skill.user_id == user_id)
-        )
-        skill = result.scalar_one_or_none()
+        skill = await self._skill_with_access(skill_id, user_id, write=True)
         if skill is None or not skill.path:
             raise HTTPException(status_code=404, detail="Skill not found")
         if skill.skill_type == "builtin":
@@ -1009,10 +1105,7 @@ class SkillService:
 
     async def write_skill_file(self, skill_id: str, user_id: str, file_path: str, content: str) -> dict:
         """Write a text file in a skill directory."""
-        result = await self.db.execute(
-            select(Skill).where(Skill.id == skill_id, Skill.user_id == user_id)
-        )
-        skill = result.scalar_one_or_none()
+        skill = await self._skill_with_access(skill_id, user_id, write=True)
         if skill is None or not skill.path:
             raise HTTPException(status_code=404, detail="Skill not found")
         if skill.skill_type == "builtin":
@@ -1078,7 +1171,7 @@ class SkillService:
                 detail="Skill created on disk but not registered. Check SKILL.md metadata.",
             )
         await self._refresh_storage_usage(user_id)
-        return SkillResponse.model_validate(skill)
+        return await self._skill_response_for_user(skill, user_id)
 
     async def upload_skill(
         self, user_id: str, file: UploadFile

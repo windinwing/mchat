@@ -44,6 +44,9 @@ class ConversationResponse(BaseModel):
     client_ip: str | None = None
     contact_info: str | None = None
     customer_id: str | None = None
+    scope_type: str = "personal"
+    scope_id: str | None = None
+    scope_name: str | None = None
     created_at: datetime
     updated_at: datetime
     last_seen_at: datetime
@@ -86,3 +89,14 @@ class CreateConversationRequest(BaseModel):
         None,
         description="Channel (CustomerConfig) id — binds AI config, skills, and knowledge",
     )
+    scope_type: str = Field("personal", pattern=r"^(personal|group|channel_public)$")
+    scope_id: str | None = None
+
+
+class ResumeConversationRequest(BaseModel):
+    """Resume the latest active thread for a channel, or start a new one."""
+    customer_id: str = Field(..., min_length=1, description="Channel (CustomerConfig) id")
+    title: str | None = Field(None, max_length=200)
+    force_new: bool = False
+    scope_type: str = Field("personal", pattern=r"^(personal|group|channel_public)$")
+    scope_id: str | None = None

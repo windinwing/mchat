@@ -30,6 +30,7 @@ interface ChatWindowProps {
   /** Kimi/DeepSeek-style centered thread (portal chat) */
   variant?: 'default' | 'studio'
   modelCapabilities?: ModelCapabilities | null
+  customerId?: string
 }
 
 export function ChatWindow({
@@ -52,6 +53,7 @@ export function ChatWindow({
   defaultSendRole = 'user',
   variant = 'default',
   modelCapabilities = null,
+  customerId,
 }: ChatWindowProps) {
   const studio = variant === 'studio'
   const embed = embedded && !studio
@@ -63,10 +65,13 @@ export function ChatWindow({
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    const container = containerRef.current
+    if (!container || !messagesEndRef.current) return
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    if (distanceFromBottom < 160) {
+      messagesEndRef.current.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth' })
     }
-  }, [messages, streamingContent])
+  }, [messages, streamingContent, isStreaming])
 
   return (
     <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-900">
@@ -127,6 +132,7 @@ export function ChatWindow({
                 accentColor={accentColor}
                 compact={embedded}
                 variant={studio ? 'studio' : 'default'}
+                customerId={customerId}
               />
             ))}
             {isStreaming && (
@@ -144,6 +150,7 @@ export function ChatWindow({
                 accentColor={accentColor}
                 compact={embedded}
                 variant={studio ? 'studio' : 'default'}
+                customerId={customerId}
               />
             )}
           </>

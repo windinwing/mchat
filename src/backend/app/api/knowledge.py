@@ -94,12 +94,13 @@ async def create_knowledge_base(
 
 @router.get("/bases", response_model=list[KnowledgeBaseResponse])
 async def list_knowledge_bases(
+    group_id: str | None = None,
     admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     """List all knowledge bases for current user."""
     service = KnowledgeService(db)
-    return await service.list_knowledge_bases(user_id=admin.id)
+    return await service.list_knowledge_bases(user_id=admin.id, group_id=group_id)
 
 
 @router.get("/bases/{kb_id}", response_model=KnowledgeBaseResponse)

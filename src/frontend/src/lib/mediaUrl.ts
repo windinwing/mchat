@@ -7,6 +7,7 @@ const UPLOAD_KEY_PREFIXES = [
   'disclosure/',
   'embedding_models/',
   'workflow_reports/',
+  'tenants/',
 ]
 
 function isUploadStorageKey(key: string): boolean {

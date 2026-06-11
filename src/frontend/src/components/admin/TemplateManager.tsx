@@ -65,7 +65,7 @@ export function TemplateManager() {
   const [activeTab, setActiveTab] = useState('basic')
 
   const defaultKbSpec = {
-    name: '通道知识库',
+    name: '工作空间知识库',
     description: '租用模板时自动创建',
     chunk_strategy: 'fixed',
     chunk_size: 1000,
@@ -254,7 +254,7 @@ export function TemplateManager() {
               <IconComp className="w-5 h-5 text-gray-400 shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm truncate">{tmpl.name}</span>
+                  <span className="font-medium text-sm truncate text-gray-900 dark:text-gray-100">{tmpl.name}</span>
                   <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">{tmpl.category}</span>
                   {tmpl.is_published ? <Eye className="w-3.5 h-3.5 text-green-500" /> : <EyeOff className="w-3.5 h-3.5 text-gray-400" />}
                 </div>
@@ -276,7 +276,7 @@ export function TemplateManager() {
         <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center pt-10 px-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto">
             <div className="sticky top-0 bg-white dark:bg-gray-800 z-10 px-6 pt-6 pb-2 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-semibold">{creating ? 'New Template' : `Edit: ${editing?.name}`}</h3>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{creating ? 'New Template' : `Edit: ${editing?.name}`}</h3>
             </div>
             <div className="px-6 py-4">
               <Tabs tabs={formTabs} activeTab={activeTab} onChange={setActiveTab} />
@@ -314,7 +314,7 @@ export function TemplateManager() {
                     <Input label="Trial (天, 0=无试用)" type="number" value={String(form.trial_days)} onChange={e => set('trial_days', Number(e.target.value))} />
                     <Input label="Sort order" type="number" value={String(form.sort_order)} onChange={e => set('sort_order', Number(e.target.value))} />
                   </div>
-                  <label className="flex items-center gap-2 text-sm">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                     <input type="checkbox" checked={form.is_published} onChange={e => set('is_published', e.target.checked)} />
                     Published (在模板市场显示)
                   </label>
@@ -338,7 +338,7 @@ export function TemplateManager() {
               <TabPanel id="skills" activeTab={activeTab}>
                 <div className="space-y-3">
                   <p className="text-xs text-gray-500">
-                    租用模板时默认绑定的 Skill（如 patent-search）。用户可在通道详情页继续管理知识库与文档。
+                    租用模板时默认绑定的 Skill（如 patent-search）。用户可在工作空间详情页继续管理知识库与文档。
                   </p>
                   <div className="max-h-56 overflow-y-auto space-y-2 border border-gray-200 dark:border-gray-700 rounded-lg p-2">
                     {skills.length === 0 && (
@@ -369,7 +369,7 @@ export function TemplateManager() {
               <TabPanel id="knowledge" activeTab={activeTab}>
                 <div className="space-y-4">
                   <p className="text-xs text-gray-500">
-                    租用模板时绑定到通道的知识库。可引用已有库，或按表单自动新建空库（用户再在「我的通道 → 知识库」上传文档）。
+                    租用模板时绑定到工作空间的知识库。可引用已有库，或按表单自动新建空库（用户再在「我的工作空间 → 知识库」上传文档）。
                   </p>
                   <div className="flex flex-wrap gap-4 text-sm">
                     {([
@@ -377,7 +377,7 @@ export function TemplateManager() {
                       ['existing', '引用已有知识库'],
                       ['auto', '租用时自动新建'],
                     ] as const).map(([value, label]) => (
-                      <label key={value} className="flex items-center gap-2 cursor-pointer">
+                      <label key={value} className="flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-300">
                         <input
                           type="radio"
                           name="kb_mode"

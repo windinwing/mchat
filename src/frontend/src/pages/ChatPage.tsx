@@ -1,8 +1,8 @@
 import React, { useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Plus } from 'lucide-react'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
+import { AppModeSwitch } from '@/components/common/AppModeSwitch'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { AssistantChatSidebar } from '@/components/portal/AssistantChatSidebar'
 import { useChat } from '@/hooks/useChat'
@@ -10,8 +10,23 @@ import { ChatSendOptions } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 import { portalApi } from '@/lib/portalApi'
 import { Button } from '@/components/ui/Button'
+import { Select } from '@/components/ui/Select'
+import { ToastContainer } from '@/components/ui/Toast'
+import api from '@/lib/api'
+import { isCloudEdition } from '@/lib/edition'
+import {
+  readStoredChannelId,
+  getPreferredStaffMode,
+  readStoredChatScope,
+  setPreferredStaffMode,
+  writeStoredChannelId,
+  writeStoredChatScope,
+} from '@/lib/appPreferences'
 
-const PORTAL_CHANNEL_KEY = 'mchat_portal_channel_id'
+interface GroupOption {
+  id: string
+  name: string
+}
 
 function readChannelIdFromUrl(): string | undefined {
   if (typeof window === 'undefined') return undefined
@@ -23,32 +38,67 @@ export function ChatPage() {
   const { conversationId } = useParams<{ conversationId: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { user } = useAuthStore()
+  const { user, isAuthenticated } = useAuthStore()
   const chat = useChat(conversationId)
   const [startingNewChat, setStartingNewChat] = useState(false)
+  const [groupOptions, setGroupOptions] = useState<GroupOption[]>([])
 
   const channelFromUrl =
     searchParams.get('channel') || readChannelIdFromUrl() || undefined
   const channelFromStore =
-    typeof window !== 'undefined'
-      ? sessionStorage.getItem(PORTAL_CHANNEL_KEY) || undefined
-      : undefined
+    typeof window !== 'undefined' ? readStoredChannelId(user?.role) : undefined
   const channelId =
     channelFromUrl ||
     chat.currentConversation?.customer_id ||
     channelFromStore ||
     undefined
+  const scopeFromUrl = searchParams.get('scope') || undefined
+  const groupFromUrl = searchParams.get('group') || undefined
+  const storedScope = readStoredChatScope(user?.role)
+  const scopeType =
+    scopeFromUrl === 'group'
+      ? 'group'
+      : chat.currentConversation?.scope_type === 'group'
+        ? 'group'
+        : storedScope.type
+  const scopeId =
+    groupFromUrl ||
+    chat.currentConversation?.scope_id ||
+    storedScope.groupId ||
+    undefined
 
-  if (channelId && typeof window !== 'undefined') {
-    sessionStorage.setItem(PORTAL_CHANNEL_KEY, channelId)
-  }
+  if (channelId) writeStoredChannelId(user?.role, channelId)
 
-  const isPortalChat = Boolean(channelId)
-  const isPortalStudio = user?.role === 'user' && isPortalChat
+  const isPortalUser = user?.role === 'user'
+  const hasChannel = Boolean(channelId)
+  const isGroupChat = scopeType === 'group' && Boolean(scopeId)
+  const showStudioChat = hasChannel || isGroupChat
+  const groupName =
+    isGroupChat && scopeId
+      ? groupOptions.find((group) => group.id === scopeId)?.name
+      : undefined
   const title =
-    chat.currentConversation?.title || t('chat.defaultTitle')
+    groupName || chat.currentConversation?.title || t('chat.defaultTitle')
   const messageCount =
     chat.currentConversation?.total_message_count ?? chat.messages.length
+  const showModeSwitch =
+    user?.role === 'agent' ||
+    user?.role === 'admin' ||
+    (isPortalUser && isCloudEdition) ||
+    (isAuthenticated && !user && getPreferredStaffMode() === 'chat')
+
+  React.useEffect(() => {
+    if (user?.role === 'agent' || user?.role === 'admin') {
+      setPreferredStaffMode('chat')
+    }
+  }, [user?.role])
+
+  React.useEffect(() => {
+    api
+      .get<Array<{ id: string; name: string }>>('/groups/mine')
+      .then((rows) => setGroupOptions(rows || []))
+      .catch(() => setGroupOptions([]))
+  }, [])
 
   const handleSend = (content: string, options?: ChatSendOptions) => {
     if (conversationId) {
@@ -56,16 +106,46 @@ export function ChatPage() {
     }
   }
 
+  const buildChatUrl = (convId: string) => {
+    const params = new URLSearchParams()
+    if (channelId) params.set('channel', channelId)
+    if (isGroupChat && scopeId) {
+      params.set('scope', 'group')
+      params.set('group', scopeId)
+    }
+    const query = params.toString()
+    return query ? `/chat/${convId}?${query}` : `/chat/${convId}`
+  }
+
   const handleNewChat = async () => {
-    if (!channelId) return
+    if (!showStudioChat) return
     setStartingNewChat(true)
     chat.setError(null)
     try {
-      const conv = await portalApi.resumeChannelChat(channelId, {
-        title: t('portal.newChatTitle', 'New chat'),
-        forceNew: true,
-      })
-      navigate(`/chat/${conv.id}?channel=${channelId}`)
+      let conv: { id: string }
+      if (isGroupChat && scopeId) {
+        conv = await api.post<{ id: string }>(`/groups/${scopeId}/chat/resume`, {
+          title: t('portal.newChatTitle', 'New chat'),
+          force_new: true,
+        })
+      } else if (channelId) {
+        conv =
+          isPortalUser && isCloudEdition
+            ? await portalApi.resumeChannelChat(channelId, {
+                title: t('portal.newChatTitle', 'New chat'),
+                forceNew: true,
+              })
+            : await api.post<{ id: string }>('/chat/conversations/resume', {
+                customer_id: channelId,
+                title: t('portal.newChatTitle', 'New chat'),
+                force_new: true,
+                scope_type: scopeType,
+                scope_id: scopeType === 'group' ? scopeId || null : null,
+              })
+      } else {
+        return
+      }
+      navigate(buildChatUrl(conv.id))
     } catch (e: any) {
       chat.setError(e.message || t('portal.rentFailed'))
     } finally {
@@ -73,40 +153,45 @@ export function ChatPage() {
     }
   }
 
-  const backPath = isPortalChat
-    ? '/portal/channels'
-    : user?.role === 'user'
-      ? '/portal/channels'
-      : '/admin/conversations'
+  const handleScopeChange = (value: string) => {
+    if (value === 'personal') {
+      writeStoredChatScope(user?.role, { type: 'personal' })
+      navigate('/chat')
+      return
+    }
+    const [, groupId] = value.split(':')
+    writeStoredChatScope(user?.role, { type: 'group', groupId })
+    navigate('/chat')
+  }
 
   return (
     <div className="h-screen flex bg-gray-50 dark:bg-gray-900">
-      {isPortalChat && channelId && (
+      {showStudioChat && (
         <AssistantChatSidebar
           channelId={channelId}
           activeConversationId={conversationId}
           channelName={title}
+          chatBasePath="/chat"
+          scopeType={scopeType}
+          scopeId={scopeId}
         />
       )}
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <header className="shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center gap-3">
-          <button
-            onClick={() => navigate(backPath)}
-            className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            title={
-              isPortalChat
-                ? t('portal.backToAssistants', 'Back to my assistants')
-                : t('chat.backToConversations')
-            }
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
+          {showModeSwitch && (
+            <div className="shrink-0">
+              <AppModeSwitch
+                variant={isPortalUser ? 'portal' : 'agent'}
+                active="chat"
+              />
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
               {title}
             </h1>
-            {isPortalChat && (
+            {showStudioChat && (
               <p className="text-xs text-gray-500 truncate">
                 {t('portal.chatSubtitle', {
                   count: messageCount,
@@ -115,18 +200,17 @@ export function ChatPage() {
               </p>
             )}
           </div>
-          {isPortalStudio && channelId && (
-            <Button
-              onClick={handleNewChat}
-              isLoading={startingNewChat}
-              size="sm"
-              variant="outline"
-              className="gap-1 shrink-0"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              {t('portal.newChat', 'New')}
-            </Button>
-          )}
+          <div className="w-52 hidden sm:block">
+            <Select
+              value={scopeType === 'group' && scopeId ? `group:${scopeId}` : 'personal'}
+              options={[
+                { value: 'personal', label: t('chat.scopePersonal', '个人空间') },
+                ...groupOptions.map((group) => ({ value: `group:${group.id}`, label: `${t('chat.scopeGroup', '群组')}: ${group.name}` })),
+              ]}
+              onChange={(event) => handleScopeChange(event.target.value)}
+              aria-label={t('chat.scopeLabel', '聊天作用域')}
+            />
+          </div>
           <LanguageSwitcher variant="ghost" />
         </header>
 
@@ -151,7 +235,7 @@ export function ChatPage() {
             disabled={chat.isStreaming}
             loading={chat.isLoading}
             emptyMessage={
-              isPortalChat
+              showStudioChat
                 ? t(
                     'portal.chatEmpty',
                     'Ask anything — your history is saved for this assistant.',
@@ -160,15 +244,17 @@ export function ChatPage() {
             }
             speechConfigUrl="/api/speech/config"
             speechTranscribeUrl="/api/speech/transcribe"
-            allowAssistantMode={!isPortalChat}
-            allowOutboundLinks={!isPortalChat}
+            allowAssistantMode={!showStudioChat}
+            allowOutboundLinks={!showStudioChat}
             defaultSendRole="user"
-            variant={isPortalChat ? 'studio' : 'default'}
-            showGithubLink={!isPortalChat}
+            variant={showStudioChat ? 'studio' : 'default'}
+            showGithubLink={!showStudioChat}
             modelCapabilities={chat.currentConversation?.ai_capabilities ?? null}
+            customerId={channelId}
           />
         </div>
       </div>
+      <ToastContainer />
     </div>
   )
 }

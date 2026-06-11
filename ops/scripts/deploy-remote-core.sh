@@ -10,7 +10,27 @@ PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 echo "==> Build frontend (Core edition)"
 cd "$PROJECT_DIR/src/frontend"
-VITE_MCHAT_EDITION=core npm run build:core
+INDEX_BAK="$(mktemp)"
+cp index.html "$INDEX_BAK"
+trap 'mv -f "$INDEX_BAK" index.html 2>/dev/null || true' EXIT
+cat > index.html <<'HTMLEOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MChat</title>
+  </head>
+  <body class="antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+HTMLEOF
+VITE_MCHAT_EDITION=core VITE_MCHAT_SIGNUP_ENABLED=true npm run build:core
+mv -f "$INDEX_BAK" index.html
+trap - EXIT
 
 echo "==> Rsync to ${REMOTE}:${REMOTE_DIR}"
 rsync -avz --delete \
@@ -67,6 +87,31 @@ EOF
   rsync -avz "$ENV_FILE" "${REMOTE}:${REMOTE_DIR}/.env"
 fi
 
+echo "==> Ensure GameCenter devbridge env hints on server .env"
+ssh "$REMOTE" "ENV_FILE='${REMOTE_DIR}/.env'; if [ -f \"\$ENV_FILE\" ] && ! grep -q 'GAMECENTER_BRIDGE_ENABLED' \"\$ENV_FILE\"; then cat >> \"\$ENV_FILE\" <<GCENV
+
+# GameCenter devbridge (enable after verifying source_root on this host)
+# GameCenter admin UI often runs at http://10.98.8.15:5099
+# GAMECENTER_BRIDGE_ENABLED=true
+# GAMECENTER_SOURCE_ROOT=/opt/xiaoxiao/gamecenter/src
+# GAMECENTER_BRIDGE_WRITE_ENABLED=false
+# GAMECENTER_BRIDGE_DATA_ROOT=${REMOTE_DIR}/data/devbridge/gamecenter
+# GAMECENTER_BUILD_COMMAND=bash /opt/xiaoxiao/mchat/ops/scripts/gamecenter-remote-pipeline-build.sh {slug}
+# GAMECENTER_AUTO_BUILD_AFTER_PATCH=true
+# GAMECENTER_BUILD_SSH_HOST=192.168.x.x
+# GAMECENTER_BUILD_SSH_USER=build
+# GAMECENTER_BUILD_PIPELINE_SCRIPT=/opt/mchat/ops/scripts/gamecenter-local-pipeline.sh
+# GAMECENTER_DEPLOY_HOST=10.98.8.15
+# MCHAT_SIGNUP_ENABLED=true
+# GAMECENTER_BUILD_SSH_HOST=10.98.8.186
+# GAMECENTER_BUILD_SSH_USER=你的Windows用户名
+# GAMECENTER_PUBLISH_ENABLED=true
+# GAMECENTER_PLAYABLES_ROOT=/opt/xiaoxiao/gamecenter/playables
+# GAMECENTER_SYNC_EXTRACTED_ROOT=/opt/xiaoxiao/gamecenter/_extracted
+# GAMECENTER_PLAYABLE_BASE_URL=http://10.98.8.15:5099
+GCENV
+fi"
+
 echo "==> Fix frontend dist permissions on server (nginx in Docker must read static files)"
 ssh "$REMOTE" "chmod -R a+rX ${REMOTE_DIR}/src/frontend/dist ${REMOTE_DIR}/src/frontend/public 2>/dev/null || true"
 
@@ -86,12 +131,14 @@ sync_skill_dir() {
 
 sync_skill_dir mchat-help
 sync_skill_dir mchat-ops
+sync_skill_dir gamecenter-dev-agent
+sync_skill_dir wheelchair-advisor
 for patent_skill in patent-search patent-transaction patent-disclosure patent-report; do
   sync_skill_dir "$patent_skill"
 done
 
 echo "==> Remote setup (Core backend: app.main:app)"
-ssh "$REMOTE" "chmod +x ${REMOTE_DIR}/ops/deploy/remote-setup.sh && bash ${REMOTE_DIR}/ops/deploy/remote-setup.sh"
+ssh "$REMOTE" "chmod +x ${REMOTE_DIR}/ops/scripts/gamecenter-*.sh ${REMOTE_DIR}/ops/scripts/resolve-gamecenter-project.py ${REMOTE_DIR}/ops/deploy/remote-setup.sh && bash ${REMOTE_DIR}/ops/deploy/remote-setup.sh"
 
 echo ""
 echo "Core deployed to http://mchat.chat"

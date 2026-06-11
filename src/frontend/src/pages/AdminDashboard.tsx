@@ -26,6 +26,8 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { formatDate } from '@/lib/utils'
+import { fetchSetupStatus, type SetupStatus } from '@/lib/setupStatus'
+import { SetupGuide } from '@/components/setup/SetupGuide'
 
 interface DashboardStats {
   total_conversations: number
@@ -110,6 +112,7 @@ export function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [period, setPeriod] = useState('30')
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
 
   const loadStats = useCallback(async () => {
     try {
@@ -181,6 +184,7 @@ export function AdminDashboard() {
       loadAgentStats(),
       loadRetrievalStats(period),
       loadActivities(),
+      fetchSetupStatus().then(setSetupStatus).catch(() => setSetupStatus(null)),
     ]).finally(() => setLoading(false))
   }, [])
 
@@ -237,6 +241,9 @@ export function AdminDashboard() {
 
   return (
     <div className="space-y-6">
+      {setupStatus && (!setupStatus.ai_ready || !setupStatus.has_assistant) && (
+        <SetupGuide status={setupStatus} compact />
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">

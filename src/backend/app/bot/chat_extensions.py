@@ -52,6 +52,19 @@ def execute_extension_tool(name: str, args: dict[str, Any], ctx: Any) -> Any | N
     return fn(name, args, ctx)
 
 
+async def execute_extension_tool_async(
+    name: str, args: dict[str, Any], ctx: Any
+) -> Any | None:
+    """Run extension tool handler (supports sync or async handlers)."""
+    import inspect
+
+    fn = _handlers["execute_tool"]
+    result = fn(name, args, ctx)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
 def after_assistant_turn(
     conversation: Conversation,
     ctx: Any,

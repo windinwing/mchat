@@ -189,5 +189,19 @@ export function createMarkdownComponents(
         </td>
       )
     },
+    details({ children }) {
+      return (
+        <details className="my-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 px-3 py-2 text-sm">
+          {children}
+        </details>
+      )
+    },
+    summary({ children }) {
+      return (
+        <summary className="cursor-pointer select-none font-medium text-gray-700 dark:text-gray-300 marker:text-gray-400">
+          {children}
+        </summary>
+      )
+    },
   }
 }

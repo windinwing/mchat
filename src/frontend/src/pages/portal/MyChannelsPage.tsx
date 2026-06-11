@@ -83,8 +83,8 @@ export function MyChannelsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('portal.myChannels')}</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{channels.length} channels</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('portal.myWorkspaces')}</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{channels.length} workspaces</p>
         </div>
         <Button onClick={() => navigate('/portal/templates')} size="sm">
           <ShoppingBag className="w-4 h-4 mr-1" />{t('portal.browseTemplates')}

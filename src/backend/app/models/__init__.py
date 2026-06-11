@@ -6,6 +6,7 @@ from app.models.message import Message
 from app.models.skill import Skill
 from app.models.embedding_model import EmbeddingModel
 from app.models.knowledge import Document, DocumentChunk, KnowledgeBase
+from app.models.group import Group, GroupMember, GroupMemoryEntry, GroupMemoryRevision
 from app.models.customer import CustomerConfig, WebhookConfig
 from app.models.setting import Setting
 from app.models.channel import Channel
@@ -31,6 +32,10 @@ __all__ = [
     "Message",
     "Skill",
     "KnowledgeBase",
+    "Group",
+    "GroupMember",
+    "GroupMemoryEntry",
+    "GroupMemoryRevision",
     "EmbeddingModel",
     "Document",
     "DocumentChunk",

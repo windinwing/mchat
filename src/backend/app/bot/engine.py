@@ -37,6 +37,8 @@ from app.knowledge.rag import RagService
 from app.models.ai_config import AIConfig
 from app.models.conversation import Conversation
 from app.models.customer import CustomerConfig
+from app.models.group import GroupMemoryEntry
+from app.models.knowledge import KnowledgeBase
 from app.models.message import Message
 from app.models.skill import Skill
 from app.utils.outbound_assets import enrich_message_extra_data
@@ -136,6 +138,10 @@ def _tool_result_display_text(result: Any) -> str:
                 )
                 + "\n\n"
             )
+        if result.get("ok") and any(
+            key in result for key in ("project", "listing", "file", "changes", "builds", "releases")
+        ):
+            return ""
         structured = _format_structured_tool_dict(result)
         if structured.strip():
             return structured.strip() + "\n\n"
@@ -171,13 +177,29 @@ async def _append_rag_context(
     query: str,
     user_id: str,
     customer_config: CustomerConfig | None,
+    db_session: AsyncSession,
+    conversation: Conversation,
     chat_fn=None,
     *,
     conversation_id: str | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
-    kb_ids = knowledge_base_ids_for_chat(customer_config)
+    kb_ids = list(knowledge_base_ids_for_chat(customer_config) or [])
+    if conversation.scope_type == "group" and conversation.scope_id:
+        group_kb_result = await db_session.execute(
+            select(KnowledgeBase.id).where(
+                KnowledgeBase.group_id == conversation.scope_id,
+                KnowledgeBase.enabled == True,
+            )
+        )
+        kb_ids.extend(str(row[0]) for row in group_kb_result.all())
+    kb_ids = list(dict.fromkeys(kb_ids))
     if not kb_ids:
-        return system_prompt, []
+        return await _append_group_memory_context(
+            system_prompt,
+            query,
+            db_session,
+            conversation,
+        )
 
     rag = RagService()
     all_results = []
@@ -231,14 +253,84 @@ async def _append_rag_context(
         )
 
     if not context_parts:
-        return system_prompt, []
+        return await _append_group_memory_context(
+            system_prompt,
+            query,
+            db_session,
+            conversation,
+        )
 
-    return (
+    rag_prompt = (
         system_prompt
         + "\n\n## Knowledge Base Context\n"
         "Use the following information to help answer the user's question:\n\n"
         + "\n\n".join(context_parts)
-    ), hit_items
+    )
+    return await _append_group_memory_context(
+        rag_prompt,
+        query,
+        db_session,
+        conversation,
+        knowledge_hits=hit_items,
+    )
+
+
+async def _append_group_memory_context(
+    system_prompt: str,
+    query: str,
+    db_session: AsyncSession,
+    conversation: Conversation,
+    *,
+    knowledge_hits: list[dict[str, Any]] | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    if conversation.scope_type != "group" or not conversation.scope_id:
+        return system_prompt, knowledge_hits or []
+
+    result = await db_session.execute(
+        select(GroupMemoryEntry)
+        .where(
+            GroupMemoryEntry.group_id == conversation.scope_id,
+            GroupMemoryEntry.status.in_(["verified", "draft"]),
+        )
+        .order_by(GroupMemoryEntry.updated_at.desc())
+        .limit(30)
+    )
+    entries = list(result.scalars().all())
+    if not entries:
+        return system_prompt, knowledge_hits or []
+
+    terms = [part.strip().lower() for part in query.split() if part.strip()][:8]
+
+    def _score(entry: GroupMemoryEntry) -> int:
+        haystacks = [
+            (entry.title or "").lower(),
+            (entry.topic or "").lower(),
+            " ".join(str(tag).lower() for tag in (entry.tags or [])),
+            (entry.content or "").lower()[:2000],
+        ]
+        score = 0
+        for term in terms:
+            for hay in haystacks:
+                if term and term in hay:
+                    score += 1
+        return score
+
+    ranked = sorted(entries, key=_score, reverse=True)
+    selected = [entry for entry in ranked if _score(entry) > 0][:3] or ranked[:2]
+    parts: list[str] = []
+    for entry in selected:
+        header = f"[{entry.memory_type}] {entry.title}"
+        parts.append(f"{header}\n{entry.content}")
+    if not parts:
+        return system_prompt, knowledge_hits or []
+
+    return (
+        system_prompt
+        + "\n\n## Group Memory Context\n"
+        "Use the following team memory and shared prompts when they are relevant:\n\n"
+        + "\n\n".join(parts),
+        knowledge_hits or [],
+    )
 
 
 async def process_message(
@@ -288,6 +380,7 @@ async def process_message(
             customer_config=customer_config,
             skill_ids_override=skill_ids_override,
             end_user=end_user,
+            group_id=conversation.scope_id if conversation.scope_type == "group" else None,
         )
         skill_section = build_prompt_skill_section(prompt_skills)
         if skill_section:
@@ -306,15 +399,36 @@ async def process_message(
             customer_config=customer_config,
             fallback_user_id=ai_config.user_id,
         )
+        group_devbridge_allowlists: dict[str, set[str]] | None = None
+        if conversation.scope_type == "group" and conversation.scope_id:
+            from app.models.group import Group
+            from app.services.group_service import resolve_devbridge_project_allowlists
+
+            group_row = await db_session.get(Group, conversation.scope_id)
+            if group_row:
+                raw = resolve_devbridge_project_allowlists(group_row)
+                if raw is not None:
+                    group_devbridge_allowlists = {
+                        provider: {slug for slug in slugs if slug}
+                        for provider, slugs in raw.items()
+                    }
         set_bot_tool_context(
             db=db_session,
             conversation=conversation,
             user_id=ws_user_id,
+            group_devbridge_allowlists=group_devbridge_allowlists,
         )
 
         tools = list(build_openai_tools(tool_skills))
         tools.extend(chat_extensions.extra_tools(conversation, studio_ctx))
         system_prompt = append_patent_tool_hints(system_prompt, tool_skills)
+        from app.bot.skill_context import append_gamecenter_dev_hints
+
+        system_prompt = append_gamecenter_dev_hints(
+            system_prompt,
+            prompt_skills=prompt_skills,
+            scope_type=conversation.scope_type,
+        )
         patent_links = patent_link_settings_from_skills(tool_skills)
 
         def _with_patent_links(text: str) -> str:
@@ -329,6 +443,8 @@ async def process_message(
             message.content,
             ai_config.user_id,
             customer_config,
+            db_session,
+            conversation,
             chat_fn=None,
             conversation_id=conversation.id,
         )
@@ -378,10 +494,13 @@ async def process_message(
 
         provider = create_provider(ai_config)
         full_response = ""
-        reasoning_content = ""
-        tool_calls_map: dict[str, dict[str, Any]] = {}
-        first_pass_content = ""
         usage_info: dict[str, int] = {}
+        tool_turn_assets: list[dict[str, Any]] = []
+        devbridge_modified_files: list[str] = []
+        patent_skill = find_patent_search_skill(tool_skills)
+        max_tool_rounds = 12
+        tools_executed_this_turn = False
+        synthesis_done = False
 
         def _merge_usage(chunk: dict[str, Any]) -> None:
             pt = int(chunk.get("prompt_tokens") or 0)
@@ -393,56 +512,92 @@ async def process_message(
             )
             usage_info["total_tokens"] = usage_info.get("total_tokens", 0) + tt
 
-        async for chunk in provider.stream_chat(
-            messages=messages_list,
-            tools=tools if tools else None,
-            temperature=ai_config.temperature,
-            max_tokens=ai_config.max_tokens,
-        ):
-            if chunk.get("type") == "usage":
-                _merge_usage(chunk)
-            elif chunk.get("type") == "reasoning":
-                reasoning_content += chunk.get("content", "") or ""
-            elif chunk.get("type") == "content":
-                token = chunk.get("content", "")
-                if not token:
-                    continue
-                if token.startswith("Error:"):
-                    full_response += token
-                    yield token
-                else:
-                    first_pass_content += token
-                    yield token
-            elif chunk.get("type") == "tool_call":
-                tc = chunk.get("tool_call", {})
-                tid = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
-                if tid in tool_calls_map:
-                    tool_calls_map[tid] = _merge_tool_call(tool_calls_map[tid], tc)
-                else:
-                    tool_calls_map[tid] = {
-                        "id": tid,
-                        "name": tc.get("name", ""),
-                        "arguments": tc.get("arguments") or {},
-                    }
+        async def _stream_followup(
+            *,
+            with_tools: bool,
+            parts_out: list[str] | None = None,
+        ) -> None:
+            nonlocal full_response
+            async for chunk in provider.stream_chat(
+                messages=messages_list,
+                tools=tools if with_tools and tools else None,
+                temperature=ai_config.temperature,
+                max_tokens=ai_config.max_tokens,
+            ):
+                if chunk.get("type") == "usage":
+                    _merge_usage(chunk)
+                elif chunk.get("type") == "reasoning":
+                    pass
+                elif chunk.get("type") == "content":
+                    token = chunk.get("content", "")
+                    if not token:
+                        continue
+                    if token.startswith("Error:"):
+                        full_response += token
+                        yield token
+                        if parts_out is not None:
+                            parts_out.append(token)
+                    else:
+                        full_response += token
+                        yield token
+                        if parts_out is not None:
+                            parts_out.append(token)
 
-        tool_calls_list = list(tool_calls_map.values())
-        tool_turn_assets: list[dict[str, Any]] = []
+        for _tool_round in range(max_tool_rounds):
+            tool_calls_map: dict[str, dict[str, Any]] = {}
+            first_pass_content = ""
+            round_reasoning = ""
 
-        if not tool_calls_list and first_pass_content:
-            full_response += first_pass_content
+            async for chunk in provider.stream_chat(
+                messages=messages_list,
+                tools=tools if tools else None,
+                temperature=ai_config.temperature,
+                max_tokens=ai_config.max_tokens,
+            ):
+                if chunk.get("type") == "usage":
+                    _merge_usage(chunk)
+                elif chunk.get("type") == "reasoning":
+                    token = chunk.get("content", "") or ""
+                    if token:
+                        round_reasoning += token
+                elif chunk.get("type") == "content":
+                    token = chunk.get("content", "")
+                    if not token:
+                        continue
+                    if token.startswith("Error:"):
+                        full_response += token
+                        yield token
+                    else:
+                        first_pass_content += token
+                        full_response += token
+                        yield token
+                elif chunk.get("type") == "tool_call":
+                    tc = chunk.get("tool_call", {})
+                    tid = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
+                    if tid in tool_calls_map:
+                        tool_calls_map[tid] = _merge_tool_call(tool_calls_map[tid], tc)
+                    else:
+                        tool_calls_map[tid] = {
+                            "id": tid,
+                            "name": tc.get("name", ""),
+                            "arguments": tc.get("arguments") or {},
+                        }
 
-        if tool_calls_list:
+            tool_calls_list = list(tool_calls_map.values())
+            if not tool_calls_list:
+                break
+
             messages_list.append(
                 build_assistant_tool_call_message(
-                    full_response,
+                    first_pass_content,
                     tool_calls_list,
-                    reasoning_content=reasoning_content or None,
+                    reasoning_content=round_reasoning or None,
                 )
             )
 
-            patent_skill = find_patent_search_skill(tool_skills)
             patent_search_for_summary = False
             patent_search_for_presentation = False
+            tools_executed_this_turn = True
             for tc in tool_calls_list:
                 tool_name = tc.get("name", "")
                 tool_args = dict(tc.get("arguments") or {})
@@ -450,6 +605,11 @@ async def process_message(
                     cmd = str(tool_args.get("command") or "search").lower()
                     if cmd == "search" and tool_args.get("details") is None:
                         tool_args["details"] = True
+
+                step_header = f"\n\n**🔧 `{tool_name}`**\n"
+                full_response += step_header
+                yield step_header
+
                 try:
                     from app.workspace.resolver import workspace_user_id_for_execution
 
@@ -475,6 +635,11 @@ async def process_message(
                     build_tool_result_message(tc["id"], tool_result)
                 )
                 tool_turn_assets.extend(_collect_tool_outbound_assets(tool_result))
+                if isinstance(tool_result, dict):
+                    modified = str(tool_result.get("modified_path") or tool_result.get("path") or "").strip()
+                    if modified and tool_name == "patch_gamecenter_project_file" and not tool_result.get("unchanged"):
+                        if modified not in devbridge_modified_files:
+                            devbridge_modified_files.append(modified)
 
                 tool_display = _tool_result_display_text(tool_result)
                 if tool_display:
@@ -499,28 +664,15 @@ async def process_message(
                     }
                 )
                 presentation_parts: list[str] = []
-                async for chunk in provider.stream_chat(
-                    messages=messages_list,
-                    tools=None,
-                    temperature=ai_config.temperature,
-                    max_tokens=ai_config.max_tokens,
-                ):
-                    if chunk.get("type") == "usage":
-                        _merge_usage(chunk)
-                    elif chunk.get("type") == "content":
-                        token = chunk.get("content", "")
-                        if token.startswith("Error:"):
-                            presentation_parts.append(f"\n\n{token}")
-                        elif token:
-                            presentation_parts.append(token)
-                            yield token
+                async for token in _stream_followup(with_tools=False, parts_out=presentation_parts):
+                    yield token
                 if presentation_parts:
-                    presentation_text = _with_patent_links(
-                        "".join(presentation_parts)
-                    )
+                    presentation_text = _with_patent_links("".join(presentation_parts))
                     if not presentation_text.endswith("\n\n"):
                         presentation_text = presentation_text.rstrip() + "\n\n"
                     full_response += presentation_text
+                synthesis_done = True
+                break
 
             if patent_search_for_summary:
                 messages_list.append(
@@ -530,21 +682,8 @@ async def process_message(
                     }
                 )
                 summary_parts: list[str] = []
-                async for chunk in provider.stream_chat(
-                    messages=messages_list,
-                    tools=None,
-                    temperature=ai_config.temperature,
-                    max_tokens=ai_config.max_tokens,
-                ):
-                    if chunk.get("type") == "usage":
-                        _merge_usage(chunk)
-                    elif chunk.get("type") == "content":
-                        token = chunk.get("content", "")
-                        if token.startswith("Error:"):
-                            summary_parts.append(f"\n\n{token}")
-                        elif token:
-                            summary_parts.append(token)
-                            yield token
+                async for token in _stream_followup(with_tools=False, parts_out=summary_parts):
+                    yield token
                 if summary_parts:
                     summary_text = _with_patent_links("".join(summary_parts))
                     if not summary_text.startswith("\n"):
@@ -552,6 +691,32 @@ async def process_message(
                     if not summary_text.endswith("\n\n"):
                         summary_text = summary_text.rstrip() + "\n\n"
                     full_response += summary_text
+                synthesis_done = True
+                break
+
+        if tools_executed_this_turn and not synthesis_done:
+            messages_list.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "请根据以上工具调用结果，用中文向用户说明：已查看或修改了什么、"
+                        "关键结论与建议的下一步。若任务尚未完成，请明确还差什么。"
+                        "不要再次调用工具。"
+                    ),
+                }
+            )
+            synthesis_parts: list[str] = []
+            async for token in _stream_followup(
+                with_tools=False, parts_out=synthesis_parts
+            ):
+                yield token
+            if synthesis_parts:
+                synthesis_text = _with_patent_links("".join(synthesis_parts))
+                if not synthesis_text.startswith("\n"):
+                    synthesis_text = "\n\n" + synthesis_text.lstrip()
+                if not synthesis_text.endswith("\n\n"):
+                    synthesis_text = synthesis_text.rstrip() + "\n\n"
+                full_response += synthesis_text
 
         auto_reply_note = build_auto_reply_note(auto_reply_matches)
         if auto_reply_note:
@@ -568,6 +733,7 @@ async def process_message(
                 {
                     "model": ai_config.model,
                     "provider": ai_config.provider,
+                    "devbridge_modified_files": devbridge_modified_files or None,
                     "knowledge_hits": knowledge_hits,
                     "auto_reply_rule_hits": [
                         {

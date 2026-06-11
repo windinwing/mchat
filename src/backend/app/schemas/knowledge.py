@@ -43,6 +43,7 @@ class KnowledgeBaseCreate(KnowledgeBaseRagFields):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
     enabled: bool = True
+    group_id: str | None = None
 
     @model_validator(mode="after")
     def _default_embedding_from_settings(self) -> "KnowledgeBaseCreate":
@@ -65,6 +66,7 @@ class KnowledgeBaseUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = None
     enabled: bool | None = None
+    group_id: str | None = None
     chunk_strategy: ChunkStrategy | None = None
     chunk_size: int | None = Field(None, ge=100, le=4000)
     chunk_overlap: int | None = Field(None, ge=0, le=500)
@@ -93,6 +95,7 @@ class KnowledgeBaseResponse(KnowledgeBaseRagFields):
     """Knowledge base response schema."""
     id: str
     user_id: str
+    group_id: str | None = None
     name: str
     description: str | None = None
     enabled: bool

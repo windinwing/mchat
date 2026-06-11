@@ -66,6 +66,6 @@ HTMLEOF
 fi
 
 echo "Starting frontend http://0.0.0.0:${FRONTEND_PORT}"
-[[ -n "$lan_ip" ]] && echo "  Open: http://${lan_ip}:${FRONTEND_PORT}/admin  (admin / admin123)"
+[[ -n "$lan_ip" ]] && echo "  Open: http://${lan_ip}:${FRONTEND_PORT}/chat  (admin / admin123, 顶部可切到管理)"
 export VITE_MCHAT_EDITION=core
 exec env -u NODE_ENV npm run dev

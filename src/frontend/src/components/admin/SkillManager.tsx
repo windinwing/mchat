@@ -22,14 +22,19 @@ import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Switch } from '@/components/ui/Switch'
 import { Dialog } from '@/components/ui/Dialog'
+import { Select } from '@/components/ui/Select'
 import { toast } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
 import { formatDate } from '@/lib/utils'
 import { isServerOpsSkill } from '@/lib/skillUtils'
+import { useAuthStore } from '@/stores/auth'
 import { SkillFileBrowser } from '@/components/admin/SkillFileBrowser'
 
 interface Skill {
   id: string
+  group_id?: string | null
+  group_name?: string | null
+  group_member_role?: string | null
   name: string
   description?: string
   version?: string
@@ -53,8 +58,15 @@ interface CatalogItem {
   source?: string
 }
 
+interface GroupOption {
+  id: string
+  name: string
+}
+
 export function SkillManager() {
   const { t } = useTranslation()
+  const user = useAuthStore((s) => s.user)
+  const isAdmin = user?.role === 'admin'
   const [skills, setSkills] = useState<Skill[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -83,27 +95,45 @@ export function SkillManager() {
   const [creating, setCreating] = useState(false)
   const [canAuthorSkills, setCanAuthorSkills] = useState(false)
   const [canEditPlatformSkills, setCanEditPlatformSkills] = useState(false)
+  const [capsLoading, setCapsLoading] = useState(true)
   const [fileBrowserWritable, setFileBrowserWritable] = useState(true)
   const [cacheOpen, setCacheOpen] = useState(false)
   const [cacheStaleCount, setCacheStaleCount] = useState(0)
+  const [groups, setGroups] = useState<GroupOption[]>([])
+  const [scopeValue, setScopeValue] = useState('all')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     loadSkills()
   }, [])
 
-  const loadSkills = async () => {
+  const loadCapabilities = async () => {
+    setCapsLoading(true)
     try {
-      const [data, caps] = await Promise.all([
-        api.get<Skill[]>('/skills'),
-        api.get<{
-          tenant_skill_authoring: boolean
-          platform_skill_editing?: boolean
-        }>('/skills/capabilities'),
-      ])
-      setSkills(data)
+      const caps = await api.get<{
+        tenant_skill_authoring: boolean
+        platform_skill_editing?: boolean
+      }>('/skills/capabilities')
       setCanAuthorSkills(Boolean(caps.tenant_skill_authoring))
       setCanEditPlatformSkills(Boolean(caps.platform_skill_editing))
+    } catch (err) {
+      console.error('Failed to load skill capabilities:', err)
+      setCanAuthorSkills(false)
+      setCanEditPlatformSkills(false)
+    } finally {
+      setCapsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadCapabilities()
+    api.get<GroupOption[]>('/groups/mine').then(setGroups).catch(() => setGroups([]))
+  }, [])
+
+  const loadSkills = async () => {
+    try {
+      const data = await api.get<Skill[]>('/skills')
+      setSkills(data)
       try {
         const cache = await api.get<{ stale_count: number }>('/skills/cache-status')
         setCacheStaleCount(cache.stale_count ?? 0)
@@ -253,6 +283,7 @@ export function SkillManager() {
       setCreateType('tool')
       toast(t('skills.toastCreated'), { type: 'success' })
       await loadSkills()
+      await loadCapabilities()
     } catch (err: any) {
       toast(err.message || t('skills.toastOperationFailed'), { type: 'error' })
     } finally {
@@ -260,28 +291,54 @@ export function SkillManager() {
     }
   }
 
-  const filtered = skills.filter(
-    (s) =>
-      !search ||
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.description?.toLowerCase().includes(search.toLowerCase()),
-  )
+  const scopeOptions = [
+    { value: 'all', label: t('skills.scopeAll') },
+    { value: 'personal', label: t('skills.scopePersonal') },
+    ...groups.map((group) => ({
+      value: `group:${group.id}`,
+      label: t('skills.scopeGroup', { name: group.name }),
+    })),
+  ]
+
+  const filtered = skills.filter((s) => {
+    if (!isAdmin && isServerOpsSkill(s)) return false
+    const needle = search.trim().toLowerCase()
+    const matchesSearch =
+      !needle ||
+      s.name.toLowerCase().includes(needle) ||
+      s.description?.toLowerCase().includes(needle) ||
+      s.group_name?.toLowerCase().includes(needle)
+    if (!matchesSearch) return false
+    if (scopeValue === 'personal') return !s.group_id
+    if (scopeValue.startsWith('group:')) return s.group_id === scopeValue.slice('group:'.length)
+    return true
+  })
+
+  const canToggleSkill = (skill: Skill) => isAdmin || !isServerOpsSkill(skill)
 
   const typeLabel = (skillType: string) =>
     skillType === 'builtin' ? t('skills.builtin') : t('skills.custom')
+
+  const isGroupSharedSkill = (skill: Skill) => Boolean(skill.group_id || skill.config?.group_shared)
 
   const isTenantOriginSkill = (skill: Skill) =>
     skill.config?.origin === 'tenant' || skill.config?.origin !== 'platform'
 
   const canBrowseSkillFiles = (skill: Skill) => {
     if (skill.skill_type === 'builtin' || isServerOpsSkill(skill)) return false
+    if (isGroupSharedSkill(skill)) return true
     if (canEditPlatformSkills) return true
     return canAuthorSkills && isTenantOriginSkill(skill)
   }
 
-  const canWriteSkillFiles = (skill: Skill) => canBrowseSkillFiles(skill)
+  const canWriteSkillFiles = (skill: Skill) => {
+    if (isGroupSharedSkill(skill)) {
+      return skill.group_member_role === 'owner' || skill.group_member_role === 'editor'
+    }
+    return canBrowseSkillFiles(skill)
+  }
 
-  if (loading) {
+  if (loading || capsLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Spinner size="md" />
@@ -297,14 +354,18 @@ export function SkillManager() {
         </div>
       )}
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="w-72">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex gap-3 flex-1 min-w-[280px] flex-wrap">
           <Input
             placeholder={t('skills.searchPlaceholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             leftIcon={<Search className="w-4 h-4" />}
+            className="min-w-[240px]"
           />
+          <div className="w-[220px] max-w-full">
+            <Select value={scopeValue} onChange={(e) => setScopeValue(e.target.value)} options={scopeOptions} />
+          </div>
         </div>
         <div className="flex gap-2">
           {canAuthorSkills && (
@@ -412,6 +473,11 @@ export function SkillManager() {
                         {t('skills.scopeServerOps')}
                       </Badge>
                     )}
+                    {isGroupSharedSkill(skill) && (
+                      <Badge variant="info" size="sm">
+                        {skill.group_name ? `${t('skills.groupShared')} · ${skill.group_name}` : t('skills.groupShared')}
+                      </Badge>
+                    )}
                     <Badge
                       variant={skill.skill_type === 'builtin' ? 'info' : 'default'}
                       size="sm"
@@ -431,6 +497,7 @@ export function SkillManager() {
                   <div className="flex items-center gap-2">
                     <Switch
                       checked={skill.enabled}
+                      disabled={!canToggleSkill(skill)}
                       onChange={(checked) => toggleSkill(skill.id, checked)}
                     />
                     <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -487,6 +554,11 @@ export function SkillManager() {
               <Badge variant={selectedSkill.enabled ? 'success' : 'default'}>
                 {selectedSkill.enabled ? t('common.enabled') : t('common.disabled')}
               </Badge>
+              {isGroupSharedSkill(selectedSkill) && (
+                <Badge variant="info">
+                  {selectedSkill.group_name ? `${t('skills.groupShared')} · ${selectedSkill.group_name}` : t('skills.groupShared')}
+                </Badge>
+              )}
             </div>
             {selectedSkill.skill_type !== 'builtin' && (
               <div className="space-y-1">

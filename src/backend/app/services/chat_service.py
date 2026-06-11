@@ -8,7 +8,9 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.event_bus import event_bus
+from app.models.ai_config import AIConfig
 from app.models.conversation import Conversation
+from app.models.group import Group, GroupMember
 from app.models.message import Message
 from app.models.user import User
 from app.schemas.chat import (
@@ -16,6 +18,7 @@ from app.schemas.chat import (
     MessageResponse,
     ModelCapabilitiesResponse,
 )
+from app.services.llm_credentials import is_usable_api_key, resolve_api_key
 from app.services.model_capabilities import model_capabilities
 from app.utils.outbound_assets import enrich_message_extra_data
 
@@ -25,6 +28,39 @@ class ChatService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    async def _is_group_member(self, user_id: str, group_id: str) -> bool:
+        result = await self.db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == group_id,
+                GroupMember.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def _actor_can_access_conversation(
+        self,
+        actor_user_id: str,
+        conversation: Conversation,
+    ) -> bool:
+        if conversation.scope_type == "group" and conversation.scope_id:
+            return await self._is_group_member(actor_user_id, conversation.scope_id)
+        return conversation.user_id == actor_user_id
+
+    async def _resolve_platform_ai_config(self) -> AIConfig | None:
+        default_result = await self.db.execute(
+            select(AIConfig).where(AIConfig.is_default == True)
+        )
+        cfg = default_result.scalar_one_or_none()
+        if cfg is not None and is_usable_api_key(
+            resolve_api_key(cfg.provider, cfg.api_key)
+        ):
+            return cfg
+        all_result = await self.db.execute(select(AIConfig))
+        for candidate in all_result.scalars().all():
+            if is_usable_api_key(resolve_api_key(candidate.provider, candidate.api_key)):
+                return candidate
+        return None
 
     async def init_visitor_conversation(
         self,
@@ -64,6 +100,21 @@ class ChatService:
     ) -> MessageResponse:
         """Send a message and trigger AI response processing."""
         normalized_extra_data = enrich_message_extra_data(content, extra_data)
+
+        # Chat-driven skill authoring: slash command or natural-language intent.
+        if role == "user" and user is not None and conversation_id:
+            from app.middleware.auth import has_global_scope
+            from app.services.skill_draft_service import SkillDraftService
+
+            hint = SkillDraftService.parse_create_intent(content)
+            if hint is not None:
+                return await self._handle_skill_create_slash(
+                    conversation_id=conversation_id,
+                    content=content,
+                    hint=hint,
+                    user=user,
+                    is_admin=await has_global_scope(user, self.db),
+                )
 
         # Find or create conversation
         if conversation_id:
@@ -153,6 +204,72 @@ class ChatService:
 
         return MessageResponse.model_validate(message)
 
+    async def _handle_skill_create_slash(
+        self,
+        *,
+        conversation_id: str,
+        content: str,
+        hint: str | None,
+        user: User,
+        is_admin: bool,
+    ) -> MessageResponse:
+        """Handle `/skill create` without invoking the bot engine."""
+        from app.services.skill_draft_service import SkillDraftService
+
+        result = await self.db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.status == "active",
+            )
+        )
+        conversation = result.scalar_one_or_none()
+        if conversation is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Active conversation not found",
+            )
+
+        draft_service = SkillDraftService(self.db)
+        if not await draft_service._conversation_accessible(
+            conversation, user.id, is_admin=is_admin
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not allowed",
+            )
+
+        draft = await draft_service.create_from_chat(
+            user_id=user.id,
+            conversation_id=conversation_id,
+            hint=hint,
+            is_admin=is_admin,
+        )
+        draft_extra = draft_service.draft_extra_data(draft)
+
+        user_msg = Message(
+            conversation_id=conversation.id,
+            user_id=user.id,
+            role="user",
+            content=content,
+            extra_data=None,
+        )
+        self.db.add(user_msg)
+
+        assistant_msg = Message(
+            conversation_id=conversation.id,
+            user_id=user.id,
+            role="assistant",
+            content=(
+                f"已从对话生成技能草稿 **{draft.name}**，确认后保存到技能库。"
+            ),
+            extra_data={"skill_draft": draft_extra},
+        )
+        self.db.add(assistant_msg)
+        conversation.updated_at = datetime.now(timezone.utc)
+        conversation.last_seen_at = datetime.now(timezone.utc)
+        await self.db.commit()
+        return MessageResponse.model_validate(user_msg)
+
     async def list_conversations(
         self,
         user_id: str | None = None,
@@ -161,6 +278,8 @@ class ChatService:
         status: str | None = None,
         search: str | None = None,
         customer_id: str | None = None,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
     ) -> tuple[list[ConversationResponse], int]:
         """List conversations (optionally filtered by user)."""
         query = select(Conversation)
@@ -173,6 +292,13 @@ class ChatService:
         if customer_id:
             query = query.where(Conversation.customer_id == customer_id)
             count_query = count_query.where(Conversation.customer_id == customer_id)
+
+        if scope_type:
+            query = query.where(Conversation.scope_type == scope_type)
+            count_query = count_query.where(Conversation.scope_type == scope_type)
+        if scope_id is not None:
+            query = query.where(Conversation.scope_id == scope_id)
+            count_query = count_query.where(Conversation.scope_id == scope_id)
 
         if status:
             query = query.where(Conversation.status == status)
@@ -213,11 +339,19 @@ class ChatService:
             )
             usernames = {row[0]: row[1] for row in user_result.all()}
 
+        group_ids = list({c.scope_id for c in conversations if c.scope_type == "group" and c.scope_id})
+        group_names: dict[str, str] = {}
+        if group_ids:
+            group_result = await self.db.execute(
+                select(Group.id, Group.name).where(Group.id.in_(group_ids))
+            )
+            group_names = {row[0]: row[1] for row in group_result.all()}
+
         items: list[ConversationResponse] = []
         for conversation in conversations:
             items.append(
                 await self._conversation_response_with_counts(
-                    conversation, counts, previews, usernames
+                    conversation, counts, previews, usernames, group_names
                 )
             )
         return items, total
@@ -290,21 +424,27 @@ class ChatService:
         user_id: str | None = None,
     ) -> ConversationResponse | None:
         """Get a conversation with its messages."""
-        query = select(Conversation).where(
-            Conversation.id == conversation_id
+        result = await self.db.execute(
+            select(Conversation).where(Conversation.id == conversation_id)
         )
-        if user_id:
-            query = query.where(Conversation.user_id == user_id)
-
-        result = await self.db.execute(query)
         conversation = result.scalar_one_or_none()
 
         if conversation is None:
             return None
+        if user_id and not await self._actor_can_access_conversation(
+            user_id, conversation
+        ):
+            return None
         counts = await self._message_counts_by_conversation([conversation.id])
         previews = await self._first_user_message_previews([conversation.id])
+        group_names: dict[str, str] | None = None
+        if conversation.scope_type == "group" and conversation.scope_id:
+            group_result = await self.db.execute(
+                select(Group.id, Group.name).where(Group.id == conversation.scope_id)
+            )
+            group_names = {row[0]: row[1] for row in group_result.all()}
         response = await self._conversation_response_with_counts(
-            conversation, counts, previews
+            conversation, counts, previews, None, group_names
         )
         msg_result = await self.db.execute(
             select(Message)
@@ -389,6 +529,7 @@ class ChatService:
         counts: dict[str, dict[str, int]],
         previews: dict[str, str],
         usernames: dict[str, str] | None = None,
+        group_names: dict[str, str] | None = None,
     ) -> ConversationResponse:
         payload = ConversationResponse.model_validate(conversation).model_dump()
         metrics = counts.get(conversation.id, {"user": 0, "ai": 0, "total": 0})
@@ -403,6 +544,8 @@ class ChatService:
                 payload["username"] = usernames.get(conversation.user_id)
         if getattr(conversation, 'customer_id', None):
             payload["customer_id"] = getattr(conversation, 'customer_id', None)
+        if conversation.scope_type == "group" and conversation.scope_id:
+            payload["scope_name"] = (group_names or {}).get(conversation.scope_id)
         payload["ai_capabilities"] = await self._ai_capabilities_for_conversation(
             conversation
         )
@@ -467,10 +610,13 @@ class ChatService:
         ai_config_id: str | None = None,
         visitor_id: str | None = None,
         customer_id: str | None = None,
+        scope_type: str = "personal",
+        scope_id: str | None = None,
     ) -> ConversationResponse:
         """Create a new conversation for an authenticated user."""
         import uuid
         from app.models.customer import CustomerConfig
+        from app.models.group import GroupMember
 
         resolved_customer_id = customer_id
         resolved_ai_config_id = ai_config_id
@@ -494,6 +640,23 @@ class ChatService:
 
             ensure_channel_subscription_active(channel)
             resolved_ai_config_id = channel.ai_config_id or ai_config_id
+        if scope_type == "group":
+            if not scope_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="scope_id required for group scope",
+                )
+            membership_result = await self.db.execute(
+                select(GroupMember).where(
+                    GroupMember.group_id == scope_id,
+                    GroupMember.user_id == user_id,
+                )
+            )
+            if membership_result.scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Group access denied",
+                )
 
         conversation = Conversation(
             id=str(uuid.uuid4()),
@@ -503,6 +666,165 @@ class ChatService:
             visitor_id=visitor_id,
             title=title or "New Chat",
             status="active",
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        self.db.add(conversation)
+        await self.db.flush()
+        await self.db.refresh(conversation)
+        return ConversationResponse.model_validate(conversation)
+
+    async def get_or_resume_channel_conversation(
+        self,
+        *,
+        user_id: str,
+        customer_id: str,
+        title: str | None = None,
+        force_new: bool = False,
+        is_admin: bool = False,
+        scope_type: str = "personal",
+        scope_id: str | None = None,
+    ) -> ConversationResponse:
+        """Latest active conversation for a channel, or create one (studio chat home)."""
+        from app.models.customer import CustomerConfig
+
+        ch_query = select(CustomerConfig).where(
+            CustomerConfig.id == customer_id,
+            CustomerConfig.enabled == True,
+        )
+        if not is_admin:
+            ch_query = ch_query.where(CustomerConfig.user_id == user_id)
+        ch_result = await self.db.execute(ch_query)
+        channel = ch_result.scalar_one_or_none()
+        if channel is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Channel not found",
+            )
+
+        owner_id = channel.user_id
+        resolved_title = title or channel.name or "New Chat"
+
+        if force_new:
+            active_result = await self.db.execute(
+                select(Conversation).where(
+                    Conversation.user_id == owner_id,
+                    Conversation.customer_id == customer_id,
+                    Conversation.scope_type == scope_type,
+                    Conversation.scope_id == scope_id,
+                    Conversation.status == "active",
+                )
+            )
+            for conv in active_result.scalars().all():
+                conv.status = "closed"
+                conv.updated_at = datetime.now(timezone.utc)
+            await self.db.flush()
+            from app.bot import chat_extensions
+
+            chat_extensions.on_force_new_conversation(owner_id, customer_id)
+        else:
+            result = await self.db.execute(
+                select(Conversation)
+                .where(
+                    Conversation.user_id == owner_id,
+                    Conversation.customer_id == customer_id,
+                    Conversation.scope_type == scope_type,
+                    Conversation.scope_id == scope_id,
+                    Conversation.status == "active",
+                )
+                .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+                .limit(1)
+            )
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                loaded = await self.get_conversation(
+                    existing.id,
+                    user_id=None if is_admin else owner_id,
+                )
+                if loaded is not None:
+                    return loaded
+
+        return await self.create_conversation(
+            user_id=owner_id,
+            title=resolved_title,
+            customer_id=customer_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+
+    async def get_or_resume_group_conversation(
+        self,
+        *,
+        user_id: str,
+        group_id: str,
+        title: str | None = None,
+        force_new: bool = False,
+    ) -> ConversationResponse:
+        """Resume a group-scoped chat for a member (no personal assistant required)."""
+        import uuid
+
+        if not await self._is_group_member(user_id, group_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Group access denied",
+            )
+
+        group_result = await self.db.execute(select(Group).where(Group.id == group_id))
+        group = group_result.scalar_one_or_none()
+        if group is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Group not found",
+            )
+
+        ai_config = await self._resolve_platform_ai_config()
+        if ai_config is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No platform AI configuration available",
+            )
+
+        resolved_title = title or group.name or "Group Chat"
+
+        if force_new:
+            active_result = await self.db.execute(
+                select(Conversation).where(
+                    Conversation.user_id == user_id,
+                    Conversation.scope_type == "group",
+                    Conversation.scope_id == group_id,
+                    Conversation.status == "active",
+                )
+            )
+            for conv in active_result.scalars().all():
+                conv.status = "closed"
+                conv.updated_at = datetime.now(timezone.utc)
+            await self.db.flush()
+        else:
+            result = await self.db.execute(
+                select(Conversation)
+                .where(
+                    Conversation.user_id == user_id,
+                    Conversation.scope_type == "group",
+                    Conversation.scope_id == group_id,
+                    Conversation.status == "active",
+                )
+                .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+                .limit(1)
+            )
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                loaded = await self.get_conversation(existing.id, user_id=user_id)
+                if loaded is not None:
+                    return loaded
+
+        conversation = Conversation(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            ai_config_id=ai_config.id,
+            title=resolved_title,
+            status="active",
+            scope_type="group",
+            scope_id=group_id,
         )
         self.db.add(conversation)
         await self.db.flush()
@@ -515,16 +837,16 @@ class ChatService:
         user_id: str | None = None,
     ) -> bool:
         """Close a conversation."""
-        query = select(Conversation).where(
-            Conversation.id == conversation_id
+        result = await self.db.execute(
+            select(Conversation).where(Conversation.id == conversation_id)
         )
-        if user_id:
-            query = query.where(Conversation.user_id == user_id)
-
-        result = await self.db.execute(query)
         conversation = result.scalar_one_or_none()
 
         if conversation is None:
+            return False
+        if user_id and not await self._actor_can_access_conversation(
+            user_id, conversation
+        ):
             return False
 
         conversation.status = "closed"

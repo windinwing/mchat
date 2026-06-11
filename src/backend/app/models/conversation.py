@@ -35,6 +35,12 @@ class Conversation(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active"
     )  # active, closed
+    scope_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="personal"
+    )
+    scope_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
     contact_info: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

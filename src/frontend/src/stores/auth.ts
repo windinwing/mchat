@@ -24,8 +24,10 @@ interface AuthState {
   signup: (username: string, password: string, email?: string, displayName?: string) => Promise<void>
   sendSmsCode: (phone: string) => Promise<void>
   signupByPhone: (phone: string, code: string) => Promise<void>
+  loginByPhone: (phone: string, code: string) => Promise<void>
   start9235Login: () => Promise<void>
   complete9235Sso: (xtk: string) => Promise<void>
+  updateProfile: (payload: { display_name?: string | null; avatar_url?: string | null }) => Promise<User>
   logout: () => void
   checkAuth: () => Promise<void>
   clearError: () => void
@@ -109,6 +111,21 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
+  loginByPhone: async (phone: string, code: string) => {
+    set({ isLoading: true, error: null })
+    try {
+      const res = await api.post<{ access_token: string; token_type: string; user: User }>(
+        '/auth/login/phone',
+        { phone, code },
+      )
+      setToken(res.access_token)
+      set({ user: res.user, isAuthenticated: true, isLoading: false })
+    } catch (err: any) {
+      set({ isLoading: false, error: err.message || '登录失败' })
+      throw err
+    }
+  },
+
   start9235Login: async () => {
     set({ isLoading: true, error: null })
     try {
@@ -131,6 +148,18 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user: res.user, isAuthenticated: true, isLoading: false })
     } catch (err: any) {
       set({ isLoading: false, error: err.message || '9235 登录失败' })
+      throw err
+    }
+  },
+
+  updateProfile: async (payload) => {
+    set({ isLoading: true, error: null })
+    try {
+      const user = await api.patch<User>('/auth/me', payload)
+      set({ user, isAuthenticated: true, isLoading: false })
+      return user
+    } catch (err: any) {
+      set({ isLoading: false, error: err.message || '更新资料失败' })
       throw err
     }
   },

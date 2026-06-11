@@ -9,15 +9,38 @@ import { Spinner } from '@/components/ui/Spinner'
 import { cn } from '@/lib/utils'
 
 interface AssistantChatSidebarProps {
-  channelId: string
+  channelId?: string
   activeConversationId?: string
   channelName?: string
+  chatBasePath?: string
+  scopeType?: 'personal' | 'group'
+  scopeId?: string
+}
+
+function buildChatUrl(
+  chatBasePath: string,
+  conversationId: string,
+  channelId?: string,
+  scopeType?: 'personal' | 'group',
+  scopeId?: string,
+): string {
+  const params = new URLSearchParams()
+  if (channelId) params.set('channel', channelId)
+  if (scopeType === 'group' && scopeId) {
+    params.set('scope', 'group')
+    params.set('group', scopeId)
+  }
+  const query = params.toString()
+  return query ? `${chatBasePath}/${conversationId}?${query}` : `${chatBasePath}/${conversationId}`
 }
 
 export function AssistantChatSidebar({
   channelId,
   activeConversationId,
   channelName,
+  chatBasePath = '/chat',
+  scopeType = 'personal',
+  scopeId,
 }: AssistantChatSidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -31,8 +54,10 @@ export function AssistantChatSidebar({
       const data = await api.get<{ items: Conversation[]; total: number }>(
         '/chat/conversations',
         {
-          customer_id: channelId,
           limit: '50',
+          scope_type: scopeType,
+          ...(scopeId ? { scope_id: scopeId } : {}),
+          ...(channelId ? { customer_id: channelId } : {}),
         },
       )
       setItems(data.items || [])
@@ -41,7 +66,7 @@ export function AssistantChatSidebar({
     } finally {
       setLoading(false)
     }
-  }, [channelId])
+  }, [channelId, scopeType, scopeId])
 
   useEffect(() => {
     load()
@@ -50,12 +75,22 @@ export function AssistantChatSidebar({
   const handleNewChat = async () => {
     setCreating(true)
     try {
-      const conv = await api.post<Conversation>('/chat/conversations', {
-        title: t('portal.newChatTitle', 'New chat'),
-        customer_id: channelId,
-      })
+      let conv: Conversation
+      if (scopeType === 'group' && scopeId) {
+        conv = await api.post<Conversation>(`/groups/${scopeId}/chat/resume`, {
+          title: t('portal.newChatTitle', 'New chat'),
+          force_new: true,
+        })
+      } else {
+        conv = await api.post<Conversation>('/chat/conversations', {
+          title: t('portal.newChatTitle', 'New chat'),
+          customer_id: channelId,
+          scope_type: scopeType,
+          scope_id: scopeType === 'group' ? scopeId : null,
+        })
+      }
       await load()
-      navigate(`/chat/${conv.id}?channel=${channelId}`)
+      navigate(buildChatUrl(chatBasePath, conv.id, channelId, scopeType, scopeId))
     } finally {
       setCreating(false)
     }
@@ -105,7 +140,9 @@ export function AssistantChatSidebar({
             <button
               key={conv.id}
               type="button"
-              onClick={() => navigate(`/chat/${conv.id}?channel=${channelId}`)}
+              onClick={() =>
+                navigate(buildChatUrl(chatBasePath, conv.id, channelId, scopeType, scopeId))
+              }
               className={cn(
                 'w-full text-left rounded-lg px-3 py-2.5 text-sm transition-colors flex gap-2 items-start',
                 active

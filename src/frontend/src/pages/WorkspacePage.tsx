@@ -145,7 +145,7 @@ export function WorkspacePage() {
         ),
       )
     } catch (e) {
-      toast.error(String(e))
+      toast(String(e), { type: 'error' })
     } finally {
       setLoading(false)
     }
@@ -165,9 +165,9 @@ export function WorkspacePage() {
       setChannels((rows) =>
         rows.map((r) => (r.customer_id === customerId ? updated : r)),
       )
-      toast.success(t('workspace.modeUpdated'))
+      toast(t('workspace.modeUpdated'), { type: 'success' })
     } catch (e) {
-      toast.error(String(e))
+      toast(String(e), { type: 'error' })
     } finally {
       setSavingId(null)
     }
@@ -176,10 +176,10 @@ export function WorkspacePage() {
   const recycleUser = async (userId: string) => {
     try {
       const res = await api.post<{ message: string }>(`/workspace/sidecars/${userId}/recycle`, {})
-      toast.success(res.message || t('workspace.recycled'))
+      toast(res.message || t('workspace.recycled'), { type: 'success' })
       await load()
     } catch (e) {
-      toast.error(String(e))
+      toast(String(e), { type: 'error' })
     }
   }
 
@@ -189,10 +189,10 @@ export function WorkspacePage() {
         '/workspace/sidecars/recycle-idle',
         {},
       )
-      toast.success(res.message)
+      toast(res.message, { type: 'success' })
       await load()
     } catch (e) {
-      toast.error(String(e))
+      toast(String(e), { type: 'error' })
     }
   }
 
@@ -207,10 +207,10 @@ export function WorkspacePage() {
         workspace_sidecar_memory: draft.memory.trim() || '',
         workspace_sidecar_cpus: draft.cpus.trim() || '',
       })
-      toast.success(t('workspace.userUpdated'))
+      toast(t('workspace.userUpdated'), { type: 'success' })
       await load()
     } catch (e) {
-      toast.error(String(e))
+      toast(String(e), { type: 'error' })
     } finally {
       setSavingUserId(null)
     }
@@ -287,7 +287,7 @@ export function WorkspacePage() {
           <CardContent className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
-                <tr className="text-left border-b border-gray-200 dark:border-gray-700">
+                <tr className="text-left border-b border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
                   <th className="py-2 pr-4">{t('workspace.colUser')}</th>
                   <th className="py-2 pr-4">{t('workspace.colUserPolicy')}</th>
                   <th className="py-2 pr-4">{t('workspace.colSkillAuthor')}</th>
@@ -304,7 +304,7 @@ export function WorkspacePage() {
                   return (
                     <tr key={u.user_id} className="border-b border-gray-100 dark:border-gray-800">
                       <td className="py-3 pr-4">
-                        <div className="font-medium">{u.username}</div>
+                        <div className="font-medium text-gray-900 dark:text-gray-100">{u.username}</div>
                         <div className="text-xs text-gray-400 font-mono">{u.user_id.slice(0, 8)}…</div>
                       </td>
                       <td className="py-3 pr-4">
@@ -334,12 +334,12 @@ export function WorkspacePage() {
                         {u.sidecar?.running ? (
                           <Badge variant="success">{t('workspace.running')}</Badge>
                         ) : u.container_name ? (
-                          <span className="text-xs text-gray-500">{t('workspace.stopped')}</span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">{t('workspace.stopped')}</span>
                         ) : (
-                          '—'
+                          <span className="text-gray-900 dark:text-gray-100">—</span>
                         )}
                         {u.memory_limit_bytes != null && (
-                          <div className="text-xs text-gray-400 mt-1">
+                          <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                             {formatMemoryLimit(u.memory_limit_bytes)}
                             {u.running_cpus != null ? ` · ${u.running_cpus} CPU` : ''}
                           </div>
@@ -369,7 +369,7 @@ export function WorkspacePage() {
                           }
                         />
                       </td>
-                      <td className="py-3 pr-4">{formatBytes(u.disk_usage_bytes?.total)}</td>
+                      <td className="py-3 pr-4 text-gray-900 dark:text-gray-100">{formatBytes(u.disk_usage_bytes?.total)}</td>
                       <td className="py-3">
                         <div className="flex gap-2">
                           <Button
@@ -401,7 +401,7 @@ export function WorkspacePage() {
         <CardContent className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="text-left border-b border-gray-200 dark:border-gray-700">
+              <tr className="text-left border-b border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
                 <th className="py-2 pr-4">{t('workspace.colAgent')}</th>
                 <th className="py-2 pr-4">{t('workspace.colPlan')}</th>
                 <th className="py-2 pr-4">{t('workspace.colAssign')}</th>
@@ -416,8 +416,8 @@ export function WorkspacePage() {
             <tbody>
               {channels.map((row) => (
                 <tr key={row.customer_id} className="border-b border-gray-100 dark:border-gray-800">
-                  <td className="py-3 pr-4 font-medium">{row.customer_name}</td>
-                  <td className="py-3 pr-4">{row.plan}</td>
+                  <td className="py-3 pr-4 font-medium text-gray-900 dark:text-gray-100">{row.customer_name}</td>
+                  <td className="py-3 pr-4 text-gray-900 dark:text-gray-100">{row.plan}</td>
                   <td className="py-3 pr-4">
                     <Select
                       value={row.workspace_mode || 'auto'}
@@ -446,9 +446,9 @@ export function WorkspacePage() {
                   </td>
                   <td className="py-3 pr-4">
                     {row.container_name ? (
-                      <span className="font-mono text-xs">{row.container_name}</span>
+                      <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{row.container_name}</span>
                     ) : (
-                      '—'
+                      <span className="text-gray-900 dark:text-gray-100">—</span>
                     )}
                     {row.sidecar?.running && (
                       <Badge variant="success" className="ml-2">
@@ -456,8 +456,8 @@ export function WorkspacePage() {
                       </Badge>
                     )}
                   </td>
-                  <td className="py-3 pr-4">{formatBytes(row.disk_usage_bytes?.total)}</td>
-                  <td className="py-3 pr-4">
+                  <td className="py-3 pr-4 text-gray-900 dark:text-gray-100">{formatBytes(row.disk_usage_bytes?.total)}</td>
+                  <td className="py-3 pr-4 text-gray-900 dark:text-gray-100">
                     {row.idle_minutes != null ? `${row.idle_minutes}m` : '—'}
                   </td>
                   <td className="py-3">
@@ -489,7 +489,7 @@ export function WorkspacePage() {
         <CardContent className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="text-left border-b border-gray-200 dark:border-gray-700">
+              <tr className="text-left border-b border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
                 <th className="py-2 pr-4">{t('workspace.colContainer')}</th>
                 <th className="py-2 pr-4">{t('workspace.colUser')}</th>
                 <th className="py-2 pr-4">{t('workspace.colStatus')}</th>
@@ -502,23 +502,23 @@ export function WorkspacePage() {
             <tbody>
               {sidecars.map((s) => (
                 <tr key={s.container_name} className="border-b border-gray-100 dark:border-gray-800">
-                  <td className="py-3 pr-4 font-mono text-xs">{s.container_name}</td>
-                  <td className="py-3 pr-4 font-mono text-xs">{s.user_id || '—'}</td>
-                  <td className="py-3 pr-4">{s.status}</td>
+                  <td className="py-3 pr-4 font-mono text-xs text-gray-900 dark:text-gray-100">{s.container_name}</td>
+                  <td className="py-3 pr-4 font-mono text-xs text-gray-900 dark:text-gray-100">{s.user_id || '—'}</td>
+                  <td className="py-3 pr-4 text-gray-900 dark:text-gray-100">{s.status}</td>
                   <td className="py-3 pr-4">
-                    <span className={s.image_matches ? '' : 'text-amber-600'}>{s.image}</span>
+                    <span className={`text-gray-900 dark:text-gray-100 ${s.image_matches ? '' : 'text-amber-600 dark:text-amber-500'}`}>{s.image}</span>
                     {!s.image_matches && (
                       <Badge variant="warning" className="ml-2">
                         {t('workspace.imageMismatch')}
                       </Badge>
                     )}
                   </td>
-                  <td className="py-3 pr-4 text-xs">
+                  <td className="py-3 pr-4 text-xs text-gray-900 dark:text-gray-100">
                     {s.configured_memory || '—'}
                     {s.memory_limit_bytes ? ` (${formatMemoryLimit(s.memory_limit_bytes)})` : ''}
                     {s.configured_cpus ? ` · ${s.configured_cpus} CPU` : ''}
                   </td>
-                  <td className="py-3 pr-4">
+                  <td className="py-3 pr-4 text-gray-900 dark:text-gray-100">
                     {s.idle_minutes != null ? `${s.idle_minutes}m` : '—'}
                   </td>
                   <td className="py-3">

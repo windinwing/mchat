@@ -1,6 +1,7 @@
 /** Cloud-only portal routes (imported by AppPortal / main-portal only). */
 import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
+import { isCloudEdition } from '@/lib/edition'
 import { UserLayout } from './components/layout/UserLayout'
 import { Spinner } from './components/ui/Spinner'
 
@@ -24,6 +25,10 @@ const PortalMyChannels = lazyNamed(() => import('./pages/portal/MyChannelsPage')
 const PortalChannelDetail = lazyNamed(
   () => import('./pages/portal/ChannelDetailPage'),
   'ChannelDetailPage',
+)
+const PortalGroupsPage = lazyNamed(
+  () => import('./pages/portal/PortalGroupsPage'),
+  'PortalGroupsPage',
 )
 const PortalChannelKnowledge = lazyNamed(
   () => import('./pages/portal/ChannelKnowledgePage'),
@@ -55,6 +60,10 @@ function PageSuspense({ children }: { children: React.ReactNode }) {
 }
 
 export function PortalRoutes() {
+  // Core edition: /register and /auth/9235 live in CoreRoutes only (avoid double RegisterPage).
+  if (!isCloudEdition) {
+    return null
+  }
   return (
     <Routes>
       <Route path="/register" element={<PageSuspense><RegisterPage /></PageSuspense>} />
@@ -87,6 +96,10 @@ export function PortalRoutes() {
       <Route
         path="/portal/channels"
         element={<UserLayout><PageSuspense><PortalMyChannels /></PageSuspense></UserLayout>}
+      />
+      <Route
+        path="/portal/groups"
+        element={<UserLayout><PageSuspense><PortalGroupsPage /></PageSuspense></UserLayout>}
       />
       <Route
         path="/portal/account"

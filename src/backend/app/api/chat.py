@@ -16,6 +16,7 @@ from app.schemas.chat import (
     InitConversationRequest,
     MessageCreate,
     MessageResponse,
+    ResumeConversationRequest,
 )
 from app.services.chat_service import ChatService
 from app.utils.chat_upload import save_chat_attachment
@@ -56,7 +57,11 @@ async def upload_chat_attachment(
                 detail="extraData must be a JSON object",
             )
 
-    attachment = await save_chat_attachment(file)
+    attachment = await save_chat_attachment(
+        file,
+        user_id=current_user.id,
+        conversation_id=conversation_id,
+    )
     display = (content or "").strip() or attachment["name"]
     chat_service = ChatService(db)
     extra_data = dict(parsed_extra_data or {})
@@ -114,6 +119,8 @@ async def list_conversations(
     status_filter: str | None = None,
     search: str | None = None,
     customer_id: str | None = None,
+    scope_type: str | None = None,
+    scope_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -127,6 +134,8 @@ async def list_conversations(
         status=status_filter,
         search=search,
         customer_id=customer_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
     )
     return ConversationList(items=conversations, total=total)
 
@@ -157,8 +166,30 @@ async def create_conversation(
         ai_config_id=request.ai_config_id,
         visitor_id=request.visitor_id,
         customer_id=request.customer_id,
+        scope_type=request.scope_type,
+        scope_id=request.scope_id,
     )
     return conversation
+
+
+@router.post("/conversations/resume", response_model=ConversationResponse)
+async def resume_channel_conversation(
+    request: ResumeConversationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resume persistent channel chat (history + memory when Cloud studio is enabled)."""
+    chat_service = ChatService(db)
+    is_admin = await has_global_scope(current_user, db)
+    return await chat_service.get_or_resume_channel_conversation(
+        user_id=current_user.id,
+        customer_id=request.customer_id,
+        title=request.title,
+        force_new=request.force_new,
+        is_admin=is_admin,
+        scope_type=request.scope_type,
+        scope_id=request.scope_id,
+    )
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)

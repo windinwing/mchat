@@ -19,6 +19,9 @@ class Skill(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
+    group_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("groups.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(
         String(100), nullable=False, index=True
     )
@@ -43,6 +46,7 @@ class Skill(Base):
 
     # Relationships
     user = relationship("User", back_populates="skills")
+    group = relationship("Group", lazy="selectin")
     schedules = relationship(
         "SkillSchedule",
         back_populates="skill",

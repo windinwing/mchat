@@ -733,7 +733,7 @@ export function CustomerConfig() {
               </div>
               <div>
                 <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-4 h-4 text-primary-600" />
+                  <Sparkles className="w-4 h-4 text-primary-600 dark:text-primary-400" />
                   <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100">{t('customerAgents.showcaseSkillsSection')}</h4>
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">

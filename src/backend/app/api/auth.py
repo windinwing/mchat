@@ -5,7 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.middleware.auth import get_current_user, require_permission, Permission
+from app.middleware.auth import (
+    get_current_user,
+    get_user_permissions,
+    require_permission,
+    Permission,
+)
 from app.models.user import User
 from app.schemas.auth import (
     BootstrapResponse,
@@ -14,11 +19,12 @@ from app.schemas.auth import (
     LoginRequest,
     RegisterRequest,
     TokenResponse,
+    UpdateProfileRequest,
     UpdateUserRequest,
     UserResponse,
 )
 from app.schemas.setup import SetupStatusResponse
-from app.services.auth_service import AuthService
+from app.services.auth_service import AuthService, _UNSET
 from app.services.setup_status_service import get_setup_status
 
 router = APIRouter()
@@ -42,6 +48,16 @@ async def setup_status(
 ) -> SetupStatusResponse:
     """First-run hints: AI provider and assistant configured."""
     return await get_setup_status(db, current_user)
+
+
+@router.get("/permissions")
+async def my_permissions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, list[str]]:
+    """Current user's effective permission codes (for UI gating)."""
+    perms = await get_user_permissions(current_user, db)
+    return {"permissions": sorted(perms)}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -100,6 +116,22 @@ async def get_me(
 ) -> User:
     """Get current authenticated user info."""
     return current_user
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    request: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Update current authenticated user profile."""
+    auth_service = AuthService(db)
+    fields = request.model_dump(exclude_unset=True)
+    return await auth_service.update_profile(
+        current_user,
+        display_name=fields.get("display_name", _UNSET),
+        avatar_url=fields.get("avatar_url", _UNSET),
+    )
 
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)

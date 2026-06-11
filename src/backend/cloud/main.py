@@ -18,6 +18,10 @@ from cloud.bot.studio_memory import register_cloud_chat_extensions
 
 register_cloud_chat_extensions()
 
+from app.bot.skill_draft_extensions import register_skill_draft_extensions
+
+register_skill_draft_extensions()
+
 
 def create_app() -> FastAPI:
     """Create the Cloud FastAPI application (Core + Cloud routes)."""

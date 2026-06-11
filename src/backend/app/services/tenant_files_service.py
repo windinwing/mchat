@@ -15,6 +15,24 @@ from app.schemas.tenant_files import TenantFileEntry, TenantFileUploadResponse
 from app.utils.chat_upload import validate_chat_attachment
 from app.workspace.paths import ensure_execution_layout, tenant_uploads_dir
 
+_storage_svc = None
+
+
+def _get_storage():
+    global _storage_svc
+    backend = (settings.storage_backend or "local").strip().lower()
+    if backend not in ("s3", "minio"):
+        return None
+    if _storage_svc is None:
+        from app.services.storage_service import storage_service
+        _storage_svc = storage_service
+    return _storage_svc
+
+
+def _s3_key(user_id: str, subdir: str, relative: str) -> str:
+    clean = (relative or "").replace("\\", "/").lstrip("/")
+    return f"tenants/{user_id}/{subdir}/{clean}"
+
 _ALLOWED_SUBDIRS = {"user", "chat", "workflow", "exports"}
 
 
@@ -117,6 +135,19 @@ class TenantFilesService:
         else:
             ext = Path(stored_name).suffix
             rel_path = f"{uuid.uuid4().hex}{ext}" if not stored_name else stored_name
+
+        storage = _get_storage()
+        if storage is not None:
+            s3_prefix = f"tenants/{user_id}/{sub}"
+            result = storage.save_bytes(
+                data, filename=stored_name, content_type=file.content_type, prefix=s3_prefix
+            )
+            return TenantFileUploadResponse(
+                path=rel_path.replace("\\", "/"),
+                name=stored_name,
+                size=len(data),
+                url=result.url,
+            )
 
         target = _resolve_path(user_id, sub, rel_path)
         target.parent.mkdir(parents=True, exist_ok=True)

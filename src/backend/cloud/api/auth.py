@@ -75,6 +75,26 @@ async def signup_by_phone(
         ) from e
 
 
+@router.post("/login/phone", response_model=TokenResponse)
+async def login_by_phone(
+    body: PhoneSignupRequest,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    """Sign in with phone + SMS code (portal users)."""
+    phone = otp_service.normalize_phone(body.phone)
+    await otp_service.verify_signup_otp(phone, body.code)
+    auth_service = AuthService(db)
+    try:
+        return await auth_service.login_by_phone(phone)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Login failed: {e}",
+        ) from e
+
+
 @router.get("/sso/9235/url", response_model=SsoLoginUrlResponse)
 async def sso_9235_url(request: Request) -> SsoLoginUrlResponse:
     """URL to start 9235.net login (product SSO)."""

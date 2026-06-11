@@ -15,6 +15,7 @@ from app.knowledge.embedding_align import align_kb_embedding_to_milvus
 from app.knowledge.rag import RagService
 from app.knowledge.rag_config import rag_settings_from_kb
 from app.core.config import settings as app_settings
+from app.models.group import GroupMember
 from app.models.knowledge import Document, KnowledgeBase
 from app.services.storage_service import storage_service
 from app.schemas.knowledge import (
@@ -35,6 +36,7 @@ def _kb_to_response(kb: KnowledgeBase) -> KnowledgeBaseResponse:
     return KnowledgeBaseResponse(
         id=kb.id,
         user_id=kb.user_id,
+        group_id=kb.group_id,
         name=kb.name,
         description=kb.description,
         enabled=kb.enabled,
@@ -120,20 +122,57 @@ class KnowledgeService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def _get_kb_row(self, kb_id: str, user_id: str) -> KnowledgeBase | None:
+    async def _group_role(self, group_id: str, user_id: str) -> str | None:
         result = await self.db.execute(
-            select(KnowledgeBase).where(
-                KnowledgeBase.id == kb_id,
-                KnowledgeBase.user_id == user_id,
+            select(GroupMember.role).where(
+                GroupMember.group_id == group_id,
+                GroupMember.user_id == user_id,
             )
         )
         return result.scalar_one_or_none()
 
+    async def _ensure_group_role(
+        self,
+        group_id: str,
+        user_id: str,
+        *,
+        write: bool = False,
+    ) -> str:
+        role = await self._group_role(group_id, user_id)
+        if role is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Group access denied",
+            )
+        if write and role not in {"owner", "editor"}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Group write access denied",
+            )
+        return role
+
+    async def _get_kb_row(self, kb_id: str, user_id: str, *, write: bool = False) -> KnowledgeBase | None:
+        result = await self.db.execute(
+            select(KnowledgeBase).where(KnowledgeBase.id == kb_id)
+        )
+        kb = result.scalar_one_or_none()
+        if kb is None:
+            return None
+        if kb.group_id:
+            await self._ensure_group_role(kb.group_id, user_id, write=write)
+            return kb
+        if kb.user_id != user_id:
+            return None
+        return kb
+
     async def create_knowledge_base(
         self, user_id: str, data: KnowledgeBaseCreate
     ) -> KnowledgeBaseResponse:
+        if data.group_id:
+            await self._ensure_group_role(data.group_id, user_id, write=True)
         kb = KnowledgeBase(
             user_id=user_id,
+            group_id=data.group_id,
             name=data.name,
             description=data.description,
             enabled=data.enabled,
@@ -153,7 +192,7 @@ class KnowledgeService:
     async def update_knowledge_base(
         self, kb_id: str, user_id: str, data: KnowledgeBaseUpdate
     ) -> KnowledgeBaseResponse | None:
-        kb = await self._get_kb_row(kb_id, user_id)
+        kb = await self._get_kb_row(kb_id, user_id, write=True)
         if kb is None:
             return None
         if data.name is not None:
@@ -162,19 +201,25 @@ class KnowledgeService:
             kb.description = data.description
         if data.enabled is not None:
             kb.enabled = data.enabled
+        if data.group_id is not None:
+            if data.group_id:
+                await self._ensure_group_role(data.group_id, user_id, write=True)
+            kb.group_id = data.group_id
         _apply_rag_fields(kb, data)
         await self.db.flush()
         await self.db.refresh(kb)
         return _kb_to_response(kb)
 
     async def list_knowledge_bases(
-        self, user_id: str
+        self, user_id: str, *, group_id: str | None = None
     ) -> list[KnowledgeBaseResponse]:
-        result = await self.db.execute(
-            select(KnowledgeBase)
-            .where(KnowledgeBase.user_id == user_id)
-            .order_by(KnowledgeBase.created_at.desc())
-        )
+        query = select(KnowledgeBase)
+        if group_id:
+            await self._ensure_group_role(group_id, user_id)
+            query = query.where(KnowledgeBase.group_id == group_id)
+        else:
+            query = query.where(KnowledgeBase.user_id == user_id, KnowledgeBase.group_id.is_(None))
+        result = await self.db.execute(query.order_by(KnowledgeBase.created_at.desc()))
         kbs = result.scalars().all()
         return [_kb_to_response(kb) for kb in kbs]
 
@@ -189,7 +234,7 @@ class KnowledgeService:
     async def delete_knowledge_base(
         self, kb_id: str, user_id: str
     ) -> bool:
-        kb = await self._get_kb_row(kb_id, user_id)
+        kb = await self._get_kb_row(kb_id, user_id, write=True)
         if kb is None:
             return False
         await self.db.delete(kb)
@@ -216,7 +261,7 @@ class KnowledgeService:
     async def create_document(
         self, kb_id: str, user_id: str, data: DocumentCreate
     ) -> DocumentResponse:
-        kb = await self._get_kb_row(kb_id, user_id)
+        kb = await self._get_kb_row(kb_id, user_id, write=True)
         if kb is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -392,11 +437,13 @@ class KnowledgeService:
         result = await self.db.execute(
             select(Document).join(KnowledgeBase).where(
                 Document.id == doc_id,
-                KnowledgeBase.user_id == user_id,
             )
         )
         doc = result.scalar_one_or_none()
         if doc is None:
+            return False
+        kb = await self._get_kb_row(doc.knowledge_base_id, user_id, write=True)
+        if kb is None:
             return False
         if milvus_client._connected:
             await milvus_client.delete_vectors(doc.id)
@@ -428,7 +475,7 @@ class KnowledgeService:
     async def import_file(
         self, kb_id: str, user_id: str, file: UploadFile
     ) -> DocumentListItem:
-        kb = await self._get_kb_row(kb_id, user_id)
+        kb = await self._get_kb_row(kb_id, user_id, write=True)
         if kb is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -484,7 +531,7 @@ class KnowledgeService:
     async def import_url(
         self, kb_id: str, user_id: str, url: str
     ) -> DocumentResponse:
-        kb = await self._get_kb_row(kb_id, user_id)
+        kb = await self._get_kb_row(kb_id, user_id, write=True)
         if kb is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

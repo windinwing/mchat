@@ -26,6 +26,9 @@ class KnowledgeBase(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
+    group_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("groups.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(
@@ -99,6 +102,7 @@ class KnowledgeBase(Base):
 
     # Relationships
     user = relationship("User", back_populates="knowledge_bases")
+    group = relationship("Group", back_populates="knowledge_bases")
     documents = relationship(
         "Document",
         back_populates="knowledge_base",

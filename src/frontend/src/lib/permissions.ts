@@ -8,6 +8,8 @@ export const ALL_PERMISSIONS = [
   'channels:read', 'channels:write',
   'dashboard:read',
   'speech:read', 'speech:write',
+  'devbridge:read', 'devbridge:write',
+  'devbridge:settings:read', 'devbridge:settings:write',
 ] as const
 
 export const PERMISSION_LABELS: Record<string, string> = {
@@ -28,6 +30,10 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'dashboard:read': 'View dashboard',
   'speech:read': 'Use speech',
   'speech:write': 'Manage speech',
+  'devbridge:read': 'Browse DevBridge projects',
+  'devbridge:write': 'Patch/build/publish DevBridge',
+  'devbridge:settings:read': 'View DevBridge config',
+  'devbridge:settings:write': 'Manage DevBridge config',
 }
 
 export const FALLBACK_ROLE_PERMISSIONS: Record<string, string[]> = {
@@ -36,5 +42,13 @@ export const FALLBACK_ROLE_PERMISSIONS: Record<string, string[]> = {
     'conversations:read', 'conversations:write',
     'knowledge:read', 'skills:read', 'agents:read',
     'dashboard:read', 'speech:read', 'speech:write', 'channels:read',
+    'devbridge:read',
+  ],
+  user: [
+    'conversations:read', 'conversations:write',
+    'knowledge:read', 'knowledge:write',
+    'skills:read', 'skills:write',
+    'agents:read', 'agents:write',
+    'dashboard:read', 'speech:read', 'speech:write',
   ],
 }

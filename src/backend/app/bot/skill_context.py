@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import copy
 
 from app.models.customer import CustomerConfig
+from app.models.group import Group
 from app.models.skill import Skill
 from app.services.field_encryption import decrypt_skill_bindings
 from app.core.config import settings
@@ -59,6 +60,7 @@ def _merge_channel_skill_bindings(
         clone = Skill(
             id=skill.id,
             user_id=skill.user_id,
+            group_id=skill.group_id,
             name=skill.name,
             description=skill.description,
             skill_type=skill.skill_type,
@@ -86,6 +88,7 @@ async def load_skills_for_chat(
     customer_config: CustomerConfig | None = None,
     skill_ids_override: list[str] | None = None,
     end_user = None,
+    group_id: str | None = None,
 ) -> tuple[list[Skill], list[Skill]]:
     """Return (prompt_skills, executable_tool_skills) for this chat.
 
@@ -98,7 +101,17 @@ async def load_skills_for_chat(
             Skill.enabled == True,
         )
     )
-    all_skills = list(result.scalars().all())
+    personal_skills = list(result.scalars().all())
+    group_skills: list[Skill] = []
+    if group_id:
+        group_result = await db.execute(
+            select(Skill).where(
+                Skill.group_id == group_id,
+                Skill.enabled == True,
+            )
+        )
+        group_skills = list(group_result.scalars().all())
+    all_skills = list(personal_skills)
 
     # Per-user skill allowlist (admin panel chat)
     if end_user is not None and end_user.role != "admin":
@@ -117,9 +130,34 @@ async def load_skills_for_chat(
 
     if allowed_ids is not None:
         if len(allowed_ids) == 0:
-            return [], []
-        allowed_set = set(allowed_ids)
-        all_skills = [s for s in all_skills if s.id in allowed_set]
+            all_skills = []
+        else:
+            allowed_set = set(allowed_ids)
+            all_skills = [s for s in all_skills if s.id in allowed_set]
+
+    if group_id:
+        group_row = await db.get(Group, group_id)
+        default_ids = _ids_from_config(
+            getattr(group_row, "default_skill_ids", None) if group_row else None
+        )
+        if default_ids:
+            default_result = await db.execute(
+                select(Skill).where(
+                    Skill.id.in_(default_ids),
+                    Skill.enabled == True,
+                )
+            )
+            default_skills = list(default_result.scalars().all())
+            by_id = {skill.id: skill for skill in all_skills}
+            for skill in default_skills:
+                by_id.setdefault(skill.id, skill)
+            all_skills = list(by_id.values())
+
+    if group_skills:
+        by_id = {skill.id: skill for skill in all_skills}
+        for skill in group_skills:
+            by_id.setdefault(skill.id, skill)
+        all_skills = list(by_id.values())
 
     # Never expose server_ops tools on widget / portal / multi-tenant channels.
     allow_server_ops = await server_ops_enabled_for_user(db, user_id)
@@ -218,6 +256,22 @@ _DEFAULT_TOOL_PARAMETERS: dict[str, dict[str, Any]] = {
                 "description": "数据范围：cn、all、us、jp、kr、tw、wo、ep",
             },
             "details": {"type": "boolean", "description": "search 时展示 IPC、摘要等明细列"},
+            "sort": {
+                "type": "string",
+                "enum": [
+                    "relation",
+                    "!applicationDate",
+                    "!documentDate",
+                    "applicationDate",
+                    "documentDate",
+                ],
+                "description": (
+                    "search 排序（必传 s 参数，非 sort 字段名）："
+                    "用户说「最新/最近」→ !documentDate（公开日新→旧）；"
+                    "「最新申请/按申请日」→ !applicationDate；"
+                    "「按相关度」→ relation 或省略"
+                ),
+            },
         },
         "required": ["command"],
     },
@@ -404,6 +458,18 @@ _MCHAT_OPS_HINT = (
 )
 
 
+_GAMECENTER_DEV_HINT = (
+    "\n\n## GameCenter devbridge tools\n"
+    "For GameCenter / Cocos project work, use the gamecenter_* bridge tools only.\n"
+    "Workflow: list projects → list/read files → patch (if needed) → build → user confirms → publish.\n"
+    "File paths must be relative to the Cocos project root (nested inner folder), e.g. "
+    "`assets/scripts/game/Stage.ts` — never prefix with the slug folder name.\n"
+    "Writable roots: assets/, settings/, packages/, src/, extensions/. "
+    "Read the file before patch; new text files may be created only when the parent directory already exists.\n"
+    "Never invent shell commands or paths outside the bridge allowlist."
+)
+
+
 def append_patent_tool_hints(
     system_prompt: str, tool_skills: list[Skill]
 ) -> str:
@@ -411,6 +477,19 @@ def append_patent_tool_hints(
     if any((s.name or "") == "mchat-ops" for s in tool_skills):
         system_prompt += _MCHAT_OPS_HINT
     return system_prompt
+
+
+def append_gamecenter_dev_hints(
+    system_prompt: str,
+    *,
+    prompt_skills: list[Skill],
+    scope_type: str | None = None,
+) -> str:
+    if scope_type != "group":
+        return system_prompt
+    if not any((s.name or "") == "gamecenter-dev-agent" for s in prompt_skills):
+        return system_prompt
+    return system_prompt + _GAMECENTER_DEV_HINT
 
 
 def build_prompt_skill_section(prompt_skills: list[Skill]) -> str:

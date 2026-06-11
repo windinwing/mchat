@@ -89,11 +89,27 @@ def validate_chat_attachment(
             )
 
 
-async def save_chat_attachment(file: UploadFile) -> dict:
-    """Persist upload through configured storage backend; return metadata."""
+async def save_chat_attachment(
+    file: UploadFile,
+    *,
+    user_id: str | None = None,
+    conversation_id: str | None = None,
+) -> dict:
+    """Persist upload; tenant chats go to uploads/chat/{conversation_id}/."""
     raw_name = file.filename or "upload"
     data = await file.read()
     validate_chat_attachment(raw_name, file.content_type, len(data))
+
+    if user_id and conversation_id:
+        from app.services.tenant_files_service import TenantFilesService
+
+        return TenantFilesService.save_chat_bytes(
+            user_id,
+            conversation_id,
+            filename=raw_name,
+            data=data,
+            content_type=file.content_type,
+        )
 
     ext = _guess_ext(raw_name, file.content_type)
     stored_name = f"{uuid.uuid4().hex}{ext}"

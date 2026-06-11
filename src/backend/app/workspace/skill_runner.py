@@ -25,7 +25,9 @@ def _args_to_namespace(args: dict[str, Any]) -> SimpleNamespace:
         command=str(args.get("command") or "search").lower(),
         query=args.get("query"),
         patent_id=args.get("patent_id"),
-        company_name=args.get("company_name"),
+        company_name=args.get("company_name")
+        or args.get("company")
+        or (args.get("query") if str(args.get("command") or "").lower() == "company" else None),
         dimension=args.get("dimension"),
         page=int(args.get("page") or 1),
         page_size=int(args.get("page_size") or args.get("pageSize") or 10),
@@ -140,7 +142,9 @@ def _args_to_namespace(args):
         command=str(args.get("command") or "search").lower(),
         query=args.get("query"),
         patent_id=args.get("patent_id"),
-        company_name=args.get("company_name"),
+        company_name=args.get("company_name")
+        or args.get("company")
+        or (args.get("query") if str(args.get("command") or "").lower() == "company" else None),
         dimension=args.get("dimension"),
         page=int(args.get("page") or 1),
         page_size=int(args.get("page_size") or args.get("pageSize") or 10),

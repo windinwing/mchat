@@ -64,6 +64,13 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=6, max_length=255)
 
 
+class UpdateProfileRequest(BaseModel):
+    """Update the current user's profile."""
+
+    display_name: str | None = Field(None, max_length=100)
+    avatar_url: str | None = Field(None, max_length=500)
+
+
 class CreateUserRequest(BaseModel):
     """Admin: create a new user."""
 

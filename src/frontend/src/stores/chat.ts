@@ -75,7 +75,7 @@ function isConfigOrAssistantError(message: Message): boolean {
   )
 }
 
-function mergeServerMessagesWithLocalErrors(
+function mergeServerMessagesWithLocal(
   serverMsgs: Message[],
   localMsgs: Message[],
 ): Message[] {
@@ -83,15 +83,22 @@ function mergeServerMessagesWithLocalErrors(
   const serverAssistantText = new Set(
     serverMsgs.filter((m) => m.role === 'assistant').map((m) => m.content),
   )
-  const localErrors = localMsgs.filter(
-    (m) =>
-      isConfigOrAssistantError(m) &&
-      !serverIds.has(m.id) &&
-      !serverAssistantText.has(m.content),
+  const latestServerAt = serverMsgs.reduce(
+    (max, m) => Math.max(max, new Date(m.created_at).getTime()),
+    0,
   )
-  if (localErrors.length === 0) return serverMsgs
+  const pendingLocal = localMsgs.filter((m) => {
+    if (m.role !== 'assistant') return false
+    if (serverIds.has(m.id)) return false
+    if (serverAssistantText.has(m.content)) return false
+    if (isConfigOrAssistantError(m)) return true
+    const createdAt = new Date(m.created_at).getTime()
+    if (createdAt >= latestServerAt - 3000) return true
+    return Date.now() - createdAt < 180_000
+  })
+  if (pendingLocal.length === 0) return serverMsgs
   return dedupeMessages(
-    [...serverMsgs, ...localErrors].sort(
+    [...serverMsgs, ...pendingLocal].sort(
       (a, b) =>
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     ),
@@ -125,6 +132,9 @@ export interface Conversation {
   client_ip?: string | null
   contact_info: string | null
   customer_id?: string | null
+  scope_type?: string
+  scope_id?: string | null
+  scope_name?: string | null
   created_at: string
   updated_at: string
   last_seen_at: string
@@ -180,20 +190,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchMessages: async (conversationId: string) => {
+    const localSnapshot = get().messages
+    const sameConversation =
+      get().currentConversation?.id === conversationId ||
+      localSnapshot.some((m) => m.conversation_id === conversationId)
     set({
       isLoading: true,
       isStreaming: false,
       streamingContent: '',
-      messages: [],
-      currentConversation: null,
+      ...(sameConversation
+        ? {}
+        : { messages: [], currentConversation: null }),
     })
     try {
       const resp = await api.get<Conversation & { messages?: Message[] }>(
         `/chat/conversations/${conversationId}`,
       )
+      const serverMsgs = dedupeMessages(
+        (resp.messages || []).map(normalizeMessageMedia),
+      )
       set({
         currentConversation: resp,
-        messages: dedupeMessages((resp.messages || []).map(normalizeMessageMedia)),
+        messages: mergeServerMessagesWithLocal(
+          serverMsgs,
+          sameConversation ? localSnapshot : [],
+        ),
         isLoading: false,
       })
     } catch (err: any) {
@@ -302,11 +323,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
               : undefined,
         })
         const persisted = normalizeMessageMedia(saved)
+        const isSkillSlash = /^\/(?:skill(?:\s+create)?|做技能|保存技能)\b/i.test(
+          content.trim(),
+        )
         set((state) => ({
           messages: state.messages.map((m) => (m.id === tempId ? persisted : m)),
-          // Do not force isStreaming=true here: the bot may finish via WebSocket
-          // before this HTTP response returns, which would leave a stuck "typing" UI.
         }))
+        if (isSkillSlash) {
+          set({ isStreaming: false, streamingContent: '' })
+          await get().syncMessagesFromServer(conversationId)
+          return
+        }
         scheduleStreamSafetyTimeout(conversationId, shouldStream)
         if (shouldStream) {
           window.setTimeout(() => {
@@ -380,7 +407,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       )
       set((state) => {
         if (!state.isStreaming) {
-          return { messages: mergeServerMessagesWithLocalErrors(serverMsgs, state.messages) }
+          return { messages: mergeServerMessagesWithLocal(serverMsgs, state.messages) }
         }
         const localAssistants = state.messages.filter(
           (m) => m.role === 'assistant',
@@ -394,7 +421,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             streamSafetyTimer = null
           }
           return {
-            messages: mergeServerMessagesWithLocalErrors(serverMsgs, state.messages),
+            messages: mergeServerMessagesWithLocal(serverMsgs, state.messages),
             isStreaming: false,
             streamingContent: '',
           }

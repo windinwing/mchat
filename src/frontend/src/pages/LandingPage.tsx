@@ -18,6 +18,7 @@ import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { ThemeToggle } from '@/components/common/ThemeToggle'
 import { useAuthStore } from '@/stores/auth'
 import { landingScreenshot, LANDING_PREVIEW_CARDS } from '@/lib/landingImages'
+import { preferredStaffPath } from '@/lib/appPreferences'
 
 const GITHUB_URL = 'https://github.com/windinwing/mchat'
 
@@ -37,7 +38,7 @@ export function LandingPage() {
   const { isAuthenticated, user } = useAuthStore()
   const adminTarget =
     isAuthenticated
-      ? (user?.role === 'user' ? '/portal/dashboard' : '/admin')
+      ? (user?.role === 'user' ? '/portal/dashboard' : preferredStaffPath())
       : '/admin/login'
 
   return (

@@ -31,6 +31,7 @@ export interface KnowledgeBaseRagSettings {
 
 export interface KnowledgeBase extends KnowledgeBaseRagSettings {
   id: string
+  groupId?: string | null
   name: string
   description?: string
   documentCount: number
@@ -135,6 +136,7 @@ export function ragSettingsToPayload(
 export function mapKnowledgeBase(raw: Record<string, unknown>): KnowledgeBase {
   return {
     id: String(raw.id),
+    groupId: raw.group_id != null ? String(raw.group_id) : null,
     name: String(raw.name),
     description: raw.description != null ? String(raw.description) : undefined,
     documentCount: Number(raw.document_count ?? raw.documentCount ?? 0),

@@ -156,8 +156,8 @@ export function FilesPage() {
             className="max-w-64"
             autoFocus
           />
-          <Button onClick={handleCreateDir} size="sm">{t('common.create')}</Button>
-          <Button variant="secondary" size="sm" onClick={() => setShowNewDir(false)}>{t('common.cancel')}</Button>
+          <Button onClick={handleCreateDir} size="sm" className="w-[135px]">{t('common.create')}</Button>
+          <Button variant="secondary" size="sm" onClick={() => setShowNewDir(false)} className="w-[135px]">{t('common.cancel')}</Button>
         </div>
       )}
 
