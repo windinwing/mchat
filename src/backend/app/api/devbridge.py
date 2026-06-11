@@ -165,3 +165,59 @@ async def rollback_provider_project_release(
         request.release_id,
         actor_user_id=current_user.id,
     )
+
+
+# ── new generic development endpoints ──
+
+
+@router.get("/providers/{provider_key}/projects/{slug}/search")
+async def search_provider_project_files(
+    provider_key: str,
+    slug: str,
+    q: str,
+    path: str = "",
+    current_user: User = Depends(require_permission(Permission.DEVBRIDGE_READ)),
+):
+    provider = get_devbridge_provider(provider_key)
+    return provider.service_factory().search_files(slug, q, path_hint=path)
+
+
+@router.get("/providers/{provider_key}/projects/{slug}/changes/{change_id}/diff")
+async def diff_provider_project_change(
+    provider_key: str,
+    slug: str,
+    change_id: str,
+    current_user: User = Depends(require_permission(Permission.DEVBRIDGE_READ)),
+):
+    provider = get_devbridge_provider(provider_key)
+    return provider.service_factory().diff_change(slug, change_id)
+
+
+@router.post("/providers/{provider_key}/projects/create")
+async def create_provider_project(
+    provider_key: str,
+    request: dict,
+    current_user: User = Depends(require_permission(Permission.DEVBRIDGE_WRITE)),
+):
+    slug = str(request.get("slug") or "").strip()
+    template = str(request.get("template") or "cocos-empty").strip()
+    if not slug:
+        raise HTTPException(status_code=400, detail="slug is required")
+    provider = get_devbridge_provider(provider_key)
+    return provider.service_factory().create_project(slug, template, provider_key=provider_key)
+
+
+@router.post("/providers/{provider_key}/projects/{slug}/upload")
+async def upload_provider_project_asset(
+    provider_key: str,
+    slug: str,
+    request: dict,
+    current_user: User = Depends(require_permission(Permission.DEVBRIDGE_WRITE)),
+):
+    path = str(request.get("path") or "").strip()
+    data_b64 = str(request.get("data") or "")
+    overwrite = bool(request.get("overwrite"))
+    if not path or not data_b64:
+        raise HTTPException(status_code=400, detail="path and data (base64) are required")
+    provider = get_devbridge_provider(provider_key)
+    return provider.service_factory().upload_asset(slug, path, data_b64, overwrite=overwrite)

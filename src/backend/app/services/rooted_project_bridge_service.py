@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import fnmatch
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import uuid
@@ -174,6 +177,10 @@ class RootedProjectBridgeService:
         if not safe_slug or "/" in safe_slug:
             raise HTTPException(status_code=400, detail="Invalid project slug")
         if self.config.project_allowlist is not None and safe_slug not in self.config.project_allowlist:
+            # Fallback for newly created projects: try direct path in source_root
+            direct = (self.config.source_root / safe_slug).resolve()
+            if direct.is_dir():
+                return direct
             raise HTTPException(status_code=403, detail="Project not allowed")
         for root in self._all_source_roots():
             outer = (root / safe_slug).resolve()
@@ -426,7 +433,6 @@ class RootedProjectBridgeService:
         return {"ok": True, **metadata}
 
     def list_changes(self, slug: str) -> list[dict]:
-        self._ensure_write_enabled()
         self._project_dir(slug)
         changes_root = self._project_state_root(slug) / "changes"
         items: list[dict] = []
@@ -457,17 +463,25 @@ class RootedProjectBridgeService:
         meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"ok": True, **metadata}
 
-    def build_project(self, slug: str, *, actor_user_id: str, summary: str | None = None) -> dict:
-        self._ensure_write_enabled()
-        project_dir = self._project_dir(slug)
-        command = (self.config.build_command or "").strip()
-        if not command:
-            raise HTTPException(status_code=503, detail=f"{self.config.provider_key} build command not configured")
-        build_id = uuid.uuid4().hex
-        build_root = self._project_state_root(slug) / "builds" / build_id
+    def _write_build_metadata(self, build_root: Path, metadata: dict) -> None:
         build_root.mkdir(parents=True, exist_ok=True)
-        rendered = command.replace("{project_dir}", str(project_dir)).replace("{slug}", slug).replace("{build_id}", build_id)
+        (build_root / "metadata.json").write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _run_build_subprocess(
+        self,
+        slug: str,
+        *,
+        build_id: str,
+        build_root: Path,
+        project_dir: Path,
+        rendered: str,
+        metadata: dict,
+    ) -> dict:
         env = os.environ.copy()
+        env["GAMECENTER_BUILD_ID"] = build_id
         if self.config.cocos_creator_bin:
             env["GAMECENTER_COCOS_CREATOR_BIN"] = self.config.cocos_creator_bin
         result = subprocess.run(
@@ -496,20 +510,16 @@ class RootedProjectBridgeService:
             for old in siblings[keep:]:
                 if old.is_dir():
                     shutil.rmtree(old, ignore_errors=True)
-        metadata = {
-            "id": build_id,
-            "provider": self.config.provider_key,
-            "project": slug,
-            "status": status_text,
-            "command": rendered,
-            "build_output_dir": str(build_dir) if build_dir.is_dir() else None,
-            "snapshot_dir": snapshot_dir,
-            "summary": (summary or "").strip() or None,
-            "actor_user_id": actor_user_id,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-            "returncode": result.returncode,
-        }
-        (build_root / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        metadata.update(
+            {
+                "status": status_text,
+                "build_output_dir": str(build_dir) if build_dir.is_dir() else None,
+                "snapshot_dir": snapshot_dir,
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+                "returncode": result.returncode,
+            }
+        )
+        self._write_build_metadata(build_root, metadata)
         if result.returncode != 0:
             detail = f"Build failed with exit code {result.returncode}"
             stderr_tail = (result.stderr or "").strip()[-1500:]
@@ -519,8 +529,92 @@ class RootedProjectBridgeService:
         stdout_tail = (result.stdout or "").strip()[-2500:]
         return {"ok": True, "stdout_tail": stdout_tail or None, **metadata}
 
-    def list_builds(self, slug: str) -> list[dict]:
+    def build_project(self, slug: str, *, actor_user_id: str, summary: str | None = None) -> dict:
         self._ensure_write_enabled()
+        project_dir = self._project_dir(slug)
+        command = (self.config.build_command or "").strip()
+        if not command:
+            raise HTTPException(status_code=503, detail=f"{self.config.provider_key} build command not configured")
+        build_id = uuid.uuid4().hex
+        build_root = self._project_state_root(slug) / "builds" / build_id
+        rendered = command.replace("{project_dir}", str(project_dir)).replace("{slug}", slug).replace("{build_id}", build_id)
+        metadata = {
+            "id": build_id,
+            "provider": self.config.provider_key,
+            "project": slug,
+            "status": "queued",
+            "command": rendered,
+            "build_output_dir": None,
+            "snapshot_dir": None,
+            "summary": (summary or "").strip() or None,
+            "actor_user_id": actor_user_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        self._write_build_metadata(build_root, metadata)
+
+        from app.services.build_queue_service import enqueue_build_job, queue_enabled
+
+        if queue_enabled():
+            enqueue_build_job(
+                {
+                    "provider_key": self.config.provider_key,
+                    "slug": slug,
+                    "build_id": build_id,
+                    "build_root": str(build_root),
+                    "project_dir": str(project_dir),
+                    "command": rendered,
+                    "timeout_seconds": self.config.build_timeout_seconds,
+                    "cocos_creator_bin": self.config.cocos_creator_bin or "",
+                    "keep_builds": self.config.keep_builds,
+                }
+            )
+            return {"ok": True, "queued": True, "stdout_tail": None, **metadata}
+
+        metadata["status"] = "running"
+        metadata["started_at"] = datetime.now().isoformat(timespec="seconds")
+        self._write_build_metadata(build_root, metadata)
+        return self._run_build_subprocess(
+            slug,
+            build_id=build_id,
+            build_root=build_root,
+            project_dir=project_dir,
+            rendered=rendered,
+            metadata=metadata,
+        )
+
+    def run_queued_build(self, job: dict) -> dict:
+        """Worker entry: run subprocess for a queued job."""
+        build_root = Path(str(job.get("build_root") or ""))
+        meta_path = build_root / "metadata.json"
+        if not meta_path.is_file():
+            raise HTTPException(status_code=404, detail="Build metadata not found")
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        metadata["status"] = "running"
+        metadata["started_at"] = datetime.now().isoformat(timespec="seconds")
+        self._write_build_metadata(build_root, metadata)
+        slug = str(job.get("slug") or metadata.get("project") or "")
+        project_dir = Path(str(job.get("project_dir") or ""))
+        build_id = str(job.get("build_id") or metadata.get("id") or "")
+        rendered = str(job.get("command") or metadata.get("command") or "")
+        try:
+            return self._run_build_subprocess(
+                slug,
+                build_id=build_id,
+                build_root=build_root,
+                project_dir=project_dir,
+                rendered=rendered,
+                metadata=metadata,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            metadata["status"] = "failed"
+            metadata["finished_at"] = datetime.now().isoformat(timespec="seconds")
+            metadata["error"] = str(exc)
+            self._write_build_metadata(build_root, metadata)
+            raise
+
+    def list_builds(self, slug: str) -> list[dict]:
         self._project_dir(slug)
         builds_root = self._project_state_root(slug) / "builds"
         items: list[dict] = []
@@ -666,4 +760,271 @@ class RootedProjectBridgeService:
             "synced_extracted_dir": synced_extracted,
             "play_url": play_url,
             "play_urls": play_urls,
+        }
+
+    # ── search ──
+
+    def search_files(self, slug: str, pattern: str, *, path_hint: str = "", max_matches: int = 40) -> dict:
+        self._ensure_enabled()
+        project_dir = self._project_dir(slug)
+        compiled = re.compile(re.escape(pattern) if not any(c in pattern for c in ".*+?[](){}|\\") else pattern, re.IGNORECASE)
+        if all(c.isalnum() or c in " _-/" for c in pattern):
+            compiled = re.compile(re.escape(pattern), re.IGNORECASE)
+        hint_path = _safe_relpath(path_hint)
+        walk_root = project_dir
+        if hint_path:
+            hint_full = project_dir / hint_path
+            if hint_full.is_dir():
+                walk_root = hint_full
+            elif hint_full.parent.is_dir():
+                walk_root = hint_full.parent
+
+        results: list[dict] = []
+        scanned = 0
+        for dirpath, _, filenames in os.walk(walk_root):
+            rel_dir = Path(dirpath).relative_to(project_dir)
+            if any(part.startswith(".") or part in {"node_modules", "library", "temp", "build", ".git"} for part in rel_dir.parts):
+                continue
+            restricted = False
+            if self.config.readable_roots:
+                dir_str = str(rel_dir).replace("\\", "/").strip(".")
+                if dir_str and not any(dir_str == r.strip("/") or dir_str.startswith(r.strip("/") + "/") for r in self.config.readable_roots):
+                    restricted = True
+            if restricted and str(rel_dir) != ".":
+                continue
+            for fname in sorted(filenames):
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in self.config.text_extensions and (str(rel_dir) != "." or fname not in self.config.root_files):
+                    continue
+                fpath = Path(dirpath) / fname
+                try:
+                    if fpath.stat().st_size > self.config.max_read_bytes:
+                        continue
+                    text = fpath.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    continue
+                scanned += 1
+                for li, line in enumerate(text.splitlines(), start=1):
+                    if compiled.search(line):
+                        snippet = line[:200]
+                        results.append({
+                            "file": str(Path(rel_dir) / fname).replace("\\", "/"),
+                            "line": li,
+                            "text": snippet.strip(),
+                        })
+                        if len(results) >= max_matches:
+                            break
+                if len(results) >= max_matches:
+                    break
+            if len(results) >= max_matches:
+                break
+        return {
+            "slug": slug,
+            "pattern": pattern,
+            "matches": len(results),
+            "scanned_files": scanned,
+            "results": results,
+            "truncated": len(results) >= max_matches,
+        }
+
+    # ── diff ──
+
+    def diff_change(self, slug: str, change_id: str) -> dict:
+        self._ensure_enabled()
+        self._project_dir(slug)
+        state_root = self._project_state_root(slug)
+        change_dir = state_root / "changes" / change_id
+        if not change_dir.is_dir():
+            raise HTTPException(status_code=404, detail=f"Change not found: {change_id}")
+        meta_path = change_dir / "metadata.json"
+        before_path = change_dir / "before.txt"
+        after_path = change_dir / "after.txt"
+        result: dict = {"id": change_id, "slug": slug}
+        if meta_path.is_file():
+            try:
+                result["metadata"] = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                result["metadata"] = {}
+        if before_path.is_file():
+            result["before"] = before_path.read_text(encoding="utf-8")
+        if after_path.is_file():
+            result["after"] = after_path.read_text(encoding="utf-8")
+        if "before" in result and "after" in result:
+            before_lines = result["before"].splitlines()
+            after_lines = result["after"].splitlines()
+            diff_lines: list[str] = []
+            max_len = max(len(before_lines), len(after_lines))
+            changed = 0
+            for i in range(max_len):
+                bl = before_lines[i] if i < len(before_lines) else ""
+                al = after_lines[i] if i < len(after_lines) else ""
+                if bl != al:
+                    changed += 1
+                    if bl:
+                        diff_lines.append(f"- {bl}")
+                    if al:
+                        diff_lines.append(f"+ {al}")
+                elif changed < 20:
+                    if len(diff_lines) > 0:
+                        diff_lines.append(f"  {bl}")
+            result["diff"] = "\n".join(diff_lines[:80])
+            result["lines_changed"] = changed
+        return result
+
+    # ── create project ──
+
+    _TEMPLATES: dict[str, dict] = {
+        "cocos-simple-game": {
+            "files": {
+                "package.json": '{"name":"game","version":"1.0.0","creator":{"version":"3.8.8"},"description":"Cocos Creator game"}\n',
+                "project.json": '{"engine":"cocos2d-js","version":"3.8.8","modules":["2d","ui","animation","audio"],"hasPreloadScript":true,"useWebGPU":false}\n',
+                "tsconfig.json": '{"compilerOptions":{"target":"ES2015","module":"ES2015","strict":true,"types":["cc"]},"include":["assets/**/*.ts"]}\n',
+                "assets/scripts/Game.ts": 'import { _decorator, Component, Node, director } from \'cc\';\nconst { ccclass, property } = _decorator;\n\n@ccclass(\'Game\')\nexport class Game extends Component {\n  @property(Node) uiRoot: Node | null = null;\n\n  onLoad() {\n    console.log(\'Game started\');\n  }\n\n  start() {\n    // TODO: init game logic\n  }\n\n  update(dt: number) {\n    // TODO: game loop\n  }\n}\n',
+                "assets/scripts/UIController.ts": 'import { _decorator, Component, Label } from \'cc\';\nconst { ccclass, property } = _decorator;\n\n@ccclass(\'UIController\')\nexport class UIController extends Component {\n  @property(Label) scoreLabel: Label | null = null;\n  @property(Label) titleLabel: Label | null = null;\n\n  onLoad() {\n    if (this.titleLabel) this.titleLabel.string = \'My Game\';\n    if (this.scoreLabel) this.scoreLabel.string = \'Score: 0\';\n  }\n\n  setScore(score: number) {\n    if (this.scoreLabel) this.scoreLabel.string = `Score: ${score}`;\n  }\n}\n',
+            },
+            "description": "Cocos Creator simple game with Canvas, Game.ts, UIController.ts",
+        },
+        "cocos-empty": {
+            "files": {
+                "package.json": '{"name":"game","version":"1.0.0","creator":{"version":"3.8.8"}}\n',
+                "project.json": '{"engine":"cocos2d-js","version":"3.8.8","modules":["2d","ui"],"useWebGPU":false}\n',
+                "tsconfig.json": '{"compilerOptions":{"target":"ES2015","module":"ES2015","strict":true,"types":["cc"]},"include":["assets/**/*.ts"]}\n',
+            },
+            "description": "Minimal Cocos Creator project with no scripts or scenes",
+        },
+        "web-frontend": {
+            "files": {
+                "index.html": '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>My App</title>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <div id="app"></div>\n  <script src="main.js"></script>\n</body>\n</html>\n',
+                "style.css": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }\nbody { font-family: system-ui, sans-serif; min-height: 100vh; }\n",
+                "main.js": "'use strict';\n\ndocument.addEventListener(\'DOMContentLoaded\', () => {\n  console.log(\'App ready\');\n});\n",
+            },
+            "description": "Basic HTML/CSS/JS frontend project",
+        },
+        "node-backend": {
+            "files": {
+                "package.json": '{"name":"my-backend","version":"1.0.0","private":true,"scripts":{"dev":"ts-node src/index.ts","build":"tsc"},"dependencies":{},"devDependencies":{"typescript":"^5.0","ts-node":"^10.0","@types/node":"^20.0"}}\n',
+                "tsconfig.json": '{"compilerOptions":{"target":"ES2020","module":"commonjs","strict":true,"esModuleInterop":true,"outDir":"dist","rootDir":"src"},"include":["src/**/*.ts"]}\n',
+                "src/index.ts": 'import http from \'http\';\n\nconst PORT = process.env.PORT || 3000;\n\nconst server = http.createServer((_req, res) => {\n  res.writeHead(200, { \'Content-Type\': \'application/json\' });\n  res.end(JSON.stringify({ ok: true }));\n});\n\nserver.listen(PORT, () => console.log(`Listening on :${PORT}`));\n',
+            },
+            "description": "Node.js TypeScript backend scaffold",
+        },
+    }
+
+    def create_project(self, slug: str, template: str, *, provider_key: str | None = None) -> dict:
+        slug_safe = _safe_relpath(slug)
+        if not slug_safe:
+            raise HTTPException(status_code=400, detail="Invalid project slug")
+        actual_provider = provider_key or self.config.provider_key
+        source_root = self.config.source_root
+        project_dir = source_root / slug_safe
+        if project_dir.exists():
+            raise HTTPException(status_code=409, detail=f"Project already exists: {slug_safe}")
+
+        tmpl_def = self._TEMPLATES.get(template)
+        if tmpl_def is None:
+            names = ", ".join(sorted(self._TEMPLATES.keys()))
+            raise HTTPException(status_code=400, detail=f"Unknown template '{template}'. Available: {names}")
+
+        created: list[str] = []
+        for rel, content in sorted(tmpl_def.get("files", {}).items()):
+            target = project_dir / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if content is not None:
+                target.write_text(content, encoding="utf-8")
+            else:
+                target.touch()
+            created.append(rel)
+
+        if template == "cocos-simple-game":
+            scene_path = project_dir / "assets" / "scenes" / "start.scene"
+            scene_path.parent.mkdir(parents=True, exist_ok=True)
+            scene_path.write_text(
+                json.dumps(
+                    [
+                        {"__type__": "cc.SceneAsset", "_name": "start", "_objFlags": 0, "_native": "", "scene": {"__id__": 1}},
+                        {"__type__": "cc.Scene", "_name": "start", "_objFlags": 0, "_children": [], "_active": True, "autoReleaseAssets": False, "_globals": {"__id__": 2}},
+                        {"__type__": "cc.Node", "_name": "Canvas", "_objFlags": 0, "_parent": {"__id__": 1}, "_children": [], "_active": True, "_components": [{"__id__": 3}, {"__id__": 4}], "_prefab": None, "_lpos": {"__type__": "cc.Vec3", "x": 640, "y": 360, "z": 0}, "_lrot": {"__type__": "cc.Quat", "x": 0, "y": 0, "z": 0, "w": 1}, "_lscale": {"__type__": "cc.Vec3", "x": 1, "y": 1, "z": 1}},
+                        {"__type__": "cc.Canvas", "_name": "", "_objFlags": 0, "node": {"__id__": 2}, "_enabled": True, "__prefab": None, "cameraComponent": {"__id__": 5}, "alignCanvasWithScreen": True},
+                        {"__type__": "cc.UITransform", "_name": "", "_objFlags": 0, "node": {"__id__": 2}, "_enabled": True, "__prefab": None, "contentSize": {"__type__": "cc.Size", "width": 1280, "height": 720}, "anchorPoint": {"__type__": "cc.Vec2", "x": 0.5, "y": 0.5}},
+                        {"__type__": "cc.Camera", "_name": "Camera", "_objFlags": 0, "node": {"__id__": 2}, "_enabled": True, "__prefab": None, "projection": 0, "clearFlags": 7, "backgroundColor": {"__type__": "cc.Color", "r": 0, "g": 0, "b": 0, "a": 255}, "depth": -1, "zoomRatio": 1, "visibility": -1},
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+        self._auto_allowlist_slug(slug_safe, actual_provider)
+
+        return {
+            "ok": True,
+            "provider": actual_provider,
+            "slug": slug_safe,
+            "template": template,
+            "template_description": tmpl_def.get("description", ""),
+            "project_dir": str(project_dir),
+            "created_files": created,
+        }
+
+    @staticmethod
+    def _auto_allowlist_slug(slug: str, provider_key: str) -> bool:
+        """Add slug to the provider's global project allowlist in admin settings.
+        Only appends if a non-empty allowlist already exists (i.e. whitelist mode is active).
+        If the allowlist is empty/none, all projects are allowed so no change is needed."""
+        try:
+            from app.services.devbridge_admin_settings import (
+                load_devbridge_admin_settings,
+                save_devbridge_admin_settings,
+            )
+        except Exception:
+            return False
+        try:
+            settings_obj = load_devbridge_admin_settings()
+            if provider_key == "gamecenter":
+                gc = settings_obj.gamecenter
+                current = (gc.project_allowlist or "").strip()
+                if not current:
+                    return False  # allowlist is empty → all projects allowed, no change needed
+                slugs = [s.strip() for s in current.split(",") if s.strip()]
+                if slug not in slugs:
+                    slugs.append(slug)
+                    gc.project_allowlist = ",".join(slugs)
+                    save_devbridge_admin_settings(settings_obj)
+                return True
+            return False
+        except Exception:
+            return False
+
+    # ── upload asset ──
+
+    _ASSET_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"}
+    _ASSET_AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".aac"}
+    _ASSET_MODEL_EXTS = {".fbx", ".gltf", ".glb", ".obj"}
+    _ASSET_ALLOWED_EXTS = _ASSET_IMAGE_EXTS | _ASSET_AUDIO_EXTS | _ASSET_MODEL_EXTS | {".json", ".atlas", ".plist", ".fnt", ".ttf", ".otf"}
+
+    def upload_asset(self, slug: str, path: str, data_b64: str, *, overwrite: bool = False) -> dict:
+        self._ensure_write_enabled()
+        project_dir = self._project_dir(slug)
+        safe_path = _safe_relpath(path)
+        if not safe_path:
+            raise HTTPException(status_code=400, detail="Invalid asset path")
+        ext = os.path.splitext(safe_path)[1].lower()
+        if ext not in self._ASSET_ALLOWED_EXTS:
+            raise HTTPException(status_code=400, detail=f"Unsupported asset type: {ext}")
+        target = project_dir / safe_path
+        if target.exists() and not overwrite:
+            raise HTTPException(status_code=409, detail=f"Asset already exists, use overwrite=true: {safe_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            raw = base64.b64decode(data_b64)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid base64 data")
+        target.write_bytes(raw)
+        sha = hashlib.sha256(raw).hexdigest()
+        return {
+            "ok": True,
+            "slug": slug,
+            "path": safe_path,
+            "size_bytes": len(raw),
+            "sha256": sha,
+            "overwritten": target.exists() and overwrite,
         }

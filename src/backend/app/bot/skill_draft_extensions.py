@@ -86,8 +86,16 @@ async def _draft_execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | No
         return {"error": str(e)}
 
 
+_SKILL_DRAFT_EXTENSIONS_REGISTERED = False
+
+
 def register_skill_draft_extensions() -> None:
     """Chain skill-draft hooks onto any existing chat extensions (e.g. Cloud studio)."""
+    global _SKILL_DRAFT_EXTENSIONS_REGISTERED
+    if _SKILL_DRAFT_EXTENSIONS_REGISTERED:
+        return
+    _SKILL_DRAFT_EXTENSIONS_REGISTERED = True
+
     prev_extra = chat_extensions._handlers["extra_tools"]
     prev_augment = chat_extensions._handlers["augment_system_prompt"]
     prev_execute = chat_extensions._handlers["execute_tool"]

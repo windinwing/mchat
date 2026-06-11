@@ -454,19 +454,43 @@ _MCHAT_OPS_HINT = (
     "- services: systemd service status\n"
     "- db: MySQL ping\n"
     "- run: allowlisted shell command (shell_id from Settings → Security)\n"
-    "Summarize ops output for the user; do not invent data."
+    "Summarize ops output for the user; do not invent data.\n"
+    "**GameCenter 项目**（列项目/读代码/改版本/编译）请用独立的 gamecenter_* bridge 工具，"
+    "不要用 mchat-ops；list_gamecenter_projects 不是 mchat-ops 的 command。"
 )
 
 
 _GAMECENTER_DEV_HINT = (
     "\n\n## GameCenter devbridge tools\n"
     "For GameCenter / Cocos project work, use the gamecenter_* bridge tools only.\n"
-    "Workflow: list projects → list/read files → patch (if needed) → build → user confirms → publish.\n"
-    "File paths must be relative to the Cocos project root (nested inner folder), e.g. "
-    "`assets/scripts/game/Stage.ts` — never prefix with the slug folder name.\n"
-    "Writable roots: assets/, settings/, packages/, src/, extensions/. "
-    "Read the file before patch; new text files may be created only when the parent directory already exists.\n"
-    "Never invent shell commands or paths outside the bridge allowlist."
+    "Workflow: list projects → read file → patch → (auto build) → get_gamecenter_build_progress to verify.\n"
+    "Code edits: MUST call patch_gamecenter_project_file. Prefer old_text+new_text for small changes "
+    "(e.g. ver:1.2 → ver:1.3). Never tell the user code was changed unless the patch tool returns "
+    "a change id and 已写入服务器. If the tool returns 未写入/unchanged/old_text not found, "
+    "the file was NOT modified — read the file and fix the patch.\n"
+    "When the user asks 编译进度/发布进度/构建状态/试玩是否更新, call get_gamecenter_build_progress(slug) "
+    "and compare 源码版本号 vs 线上试玩包版本号 before claiming success.\n"
+    "File paths: relative to Cocos project root, e.g. `assets/scripts/ui/UIMain.ts` — no slug prefix.\n"
+    "Writable roots: assets/, settings/, packages/, src/, extensions/.\n"
+    "Permissions: group member=read-only; group owner/editor or platform admin/agent may patch/build/publish.\n"
+    "If the user is member-only, explain they need editor role — do not claim the patch succeeded.\n"
+    "Never invent shell commands or paths outside the bridge allowlist.\n"
+    "**Important**: Do NOT echo successful tool calls (no 🔧 prefix). Present results directly to the user. Only mention tool errors briefly."
+)
+
+_DEV_ASSISTANT_HINT = (
+    "\n\n## DevBridge 通用开发工具\n"
+    "你是团队的开发助手，通过 devbridge_* 系列工具操作项目。\n"
+    "标准流程: search → read → patch (old_text+new_text) → diff → build → 核验进度。\n"
+    "代码搜索: search_devbridge_project_files（查变量/函数引用，找模式）。\n"
+    "变更审查: diff_devbridge_project_change（向用户展示 before/after）。\n"
+    "项目创建: create_devbridge_project（先 list_devbridge_templates 让用户选模板）。\n"
+    "资源上传: upload_devbridge_asset（图片/音频/模型 base64）。\n"
+    "改代码必须用 patch，返回 change id 才能声称已修改。\n"
+    "old_text 找不到 = 未写入，先 read 再重试。\n"
+    "路径相对于工程根目录，不要带 slug 前缀。\n"
+    "压缩/截断/安全限制: 不要编造路径或绕过 bridge。\n"
+    "**重要**: 工具调用成功后不要回显工具名/参数（不要写 🔧 xxx），直接向用户展示最终结果。只有工具报错时才简洁说明原因。"
 )
 
 
@@ -483,13 +507,19 @@ def append_gamecenter_dev_hints(
     system_prompt: str,
     *,
     prompt_skills: list[Skill],
-    scope_type: str | None = None,
+    bridge_allowed: bool = False,
 ) -> str:
-    if scope_type != "group":
+    if not bridge_allowed:
         return system_prompt
-    if not any((s.name or "") == "gamecenter-dev-agent" for s in prompt_skills):
-        return system_prompt
-    return system_prompt + _GAMECENTER_DEV_HINT
+    if any((s.name or "") == "gamecenter-dev-agent" for s in prompt_skills):
+        return system_prompt + _GAMECENTER_DEV_HINT
+    if any((s.name or "") == "dev-assistant" for s in prompt_skills):
+        return system_prompt + _DEV_ASSISTANT_HINT
+    return system_prompt + (
+        "\n\n## GameCenter（仅群组会话）\n"
+        "使用 gamecenter_* bridge 工具处理试玩项目（非 mchat-ops）。"
+        "改代码用 patch_gamecenter_project_file（优先 old_text+new_text）。"
+    )
 
 
 def build_prompt_skill_section(prompt_skills: list[Skill]) -> str:

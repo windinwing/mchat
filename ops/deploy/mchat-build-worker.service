@@ -1,0 +1,15 @@
+[Unit]
+Description=mchat DevBridge build worker pool (GameCenter compile queue, default 5 slots)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/xiaoxiao/mchat/src/backend
+EnvironmentFile=/opt/xiaoxiao/mchat/.env
+ExecStart=/opt/xiaoxiao/mchat/src/backend/venv/bin/python /opt/xiaoxiao/mchat/ops/scripts/gamecenter-build-worker.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

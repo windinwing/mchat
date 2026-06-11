@@ -38,8 +38,12 @@ echo "    ${SSH_TARGET}:${REMOTE_PLAYABLES}/${SLUG}/"
 ssh "$SSH_TARGET" "ls -la '${REMOTE_PLAYABLES}/${SLUG}/current' 2>/dev/null || echo '(no playables entry yet — OK if using build/web-mobile only)'"
 
 echo ""
-echo "==> Source ver:1.0 in UILoading.ts"
-ssh "$SSH_TARGET" "grep -n \"ver:1.0\" '${REMOTE_PROJECT}/assets/scripts/ui/UILoading.ts' 2>/dev/null | head -2 || echo 'not found in source'"
+echo "==> Source version labels"
+ssh "$SSH_TARGET" "grep -n 'ver:1\\.' '${REMOTE_PROJECT}/assets/scripts/ui/UIMain.ts' '${REMOTE_PROJECT}/assets/scripts/ui/UILoading.ts' 2>/dev/null | head -6 || echo 'not found in source'"
+
+echo ""
+echo "==> Bundle version labels (what :5099 serves)"
+ssh "$SSH_TARGET" "grep -o 'ver:1\\.[0-9]*' '${REMOTE_BUILD}/assets/main/index.js' 2>/dev/null | sort -u | head -5 || echo 'not found in bundle'"
 
 echo ""
 echo "==> HTTP probe"

@@ -65,7 +65,12 @@ class Permission:
 
     @classmethod
     def all(cls) -> list[str]:
-        return [v for k, v in vars(cls).items() if isinstance(v, str) and v.count(":") == 1]
+        # Include multi-segment keys like devbridge:settings:read (two colons).
+        return [
+            v
+            for k, v in vars(cls).items()
+            if k.isupper() and isinstance(v, str) and ":" in v
+        ]
 
 
 # ── Default Role → Permission mapping (fallback) ─────────────────
@@ -135,6 +140,14 @@ async def get_user_permissions(user: User, db: AsyncSession | None = None) -> se
     perms = set(role_perms.get(user.role, []))
     if user.role == "admin":
         perms.update(Permission.all())
+        perms.update(
+            {
+                Permission.DEVBRIDGE_READ,
+                Permission.DEVBRIDGE_WRITE,
+                Permission.DEVBRIDGE_SETTINGS_READ,
+                Permission.DEVBRIDGE_SETTINGS_WRITE,
+            }
+        )
     if user.role == "user":
         perms.update(_PORTAL_TENANT_MIN_PERMISSIONS)
     return perms

@@ -271,6 +271,13 @@ def create_app() -> FastAPI:
     from app.websocket.route import router as ws_router
     app.include_router(ws_router)
 
+    # Chat extension hooks (once per process; idempotent; Cloud studio hooks register earlier in cloud/main.py)
+    from app.bot.skill_draft_extensions import register_skill_draft_extensions
+    from app.bot.gamecenter_bridge_extensions import register_gamecenter_bridge_extensions
+
+    register_skill_draft_extensions()
+    register_gamecenter_bridge_extensions()
+
     # Initialize bot engine (subscribes to message_created events)
     from app.bot.handler import init_bot_engine
     init_bot_engine()

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # Database (lite MySQL: make setup / make db-mysql-dev → mchat / mchat123 / mchat)
@@ -153,6 +154,8 @@ class Settings(BaseSettings):
     gamecenter_bridge_write_enabled: bool = False
     gamecenter_bridge_data_root: str = "../../data/devbridge/gamecenter"
     gamecenter_build_command: str = ""
+    gamecenter_build_queue_enabled: bool = True
+    gamecenter_build_worker_pool_size: int = 5
     gamecenter_auto_build_after_patch: bool = False
     gamecenter_build_timeout_seconds: int = 1800
     gamecenter_release_keep_builds: int = 10
@@ -165,6 +168,10 @@ class Settings(BaseSettings):
     gamecenter_release_keep: int = 20
     gamecenter_bridge_group_scope_only: bool = True
     gamecenter_cocos_creator_bin: str = ""
+    gamecenter_build_ssh_host: str = ""
+    gamecenter_build_ssh_user: str = ""
+    gamecenter_build_pipeline_script: str = ""
+    gamecenter_deploy_host: str = ""
 
     # Tenant workspace (Plan A local volume + Plan B container sidecar)
     workspace_root_dir: str = "../../data/tenants"

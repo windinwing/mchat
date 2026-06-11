@@ -1,0 +1,10 @@
+{
+  "host": "0.0.0.0",
+  "port": 19280,
+  "token": "CHANGE_ME_TO_A_LONG_RANDOM_SECRET",
+  "deploy_host": "10.98.8.15",
+  "mchat_dir": "C:/Users/Administrator/dev/mchat",
+  "pipeline_script": "C:/Users/Administrator/dev/mchat/ops/scripts/gamecenter-local-pipeline.sh",
+  "bash_exe": "C:/Program Files/Git/bin/bash.exe",
+  "build_timeout_seconds": 1800
+}

@@ -23,12 +23,7 @@ from app.api.gamecenter_bridge import router as gamecenter_bridge_router
 from app.api.devbridge import router as devbridge_router
 from app.api.devbridge_settings import router as devbridge_settings_router
 
-from app.bot.skill_draft_extensions import register_skill_draft_extensions
-from app.bot.gamecenter_bridge_extensions import register_gamecenter_bridge_extensions
 from app.core.config import settings
-
-register_skill_draft_extensions()
-register_gamecenter_bridge_extensions()
 
 api_router = APIRouter(prefix="/api")
 

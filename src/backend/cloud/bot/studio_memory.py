@@ -95,13 +95,71 @@ def history_message_limit(conversation: Conversation) -> int | None:
 
 
 def register_cloud_chat_extensions() -> None:
-    """Wire Cloud Portal studio memory into Core bot pipeline."""
+    """Wire Cloud Portal studio memory into Core bot pipeline (chain, do not replace)."""
+    prev_prepare = chat_extensions._handlers["prepare_context"]
+    prev_augment = chat_extensions._handlers["augment_system_prompt"]
+    prev_extra = chat_extensions._handlers["extra_tools"]
+    prev_execute = chat_extensions._handlers["execute_tool"]
+    prev_after = chat_extensions._handlers["after_assistant_turn"]
+    prev_force_new = chat_extensions._handlers["on_force_new_conversation"]
+    prev_history = chat_extensions._handlers["history_message_limit"]
+
+    def merged_prepare(conversation: Conversation) -> StudioMemoryService | None:
+        ctx = prepare_context(conversation)
+        if ctx is not None:
+            return ctx
+        return prev_prepare(conversation)
+
+    def merged_augment(
+        conversation: Conversation,
+        ctx: StudioMemoryService | None,
+        prompt: str,
+    ) -> str:
+        text = augment_system_prompt(conversation, ctx, prompt)
+        return prev_augment(conversation, ctx, text)
+
+    def merged_extra(
+        conversation: Conversation,
+        ctx: StudioMemoryService | None,
+    ) -> list[dict[str, Any]]:
+        tools = list(extra_tools(conversation, ctx))
+        tools.extend(prev_extra(conversation, ctx))
+        return tools
+
+    async def merged_execute(name: str, args: dict[str, Any], ctx: StudioMemoryService | None) -> Any | None:
+        result = execute_tool(name, args, ctx)
+        if result is not None:
+            return result
+        prev_result = prev_execute(name, args, ctx)
+        if prev_result is not None and hasattr(prev_result, "__await__"):
+            return await prev_result
+        return prev_result
+
+    def merged_after(
+        conversation: Conversation,
+        ctx: StudioMemoryService | None,
+        user_text: str,
+        assistant_text: str,
+    ) -> None:
+        after_assistant_turn(conversation, ctx, user_text, assistant_text)
+        prev_after(conversation, ctx, user_text, assistant_text)
+
+    def merged_force_new(user_id: str, channel_id: str) -> None:
+        on_force_new_conversation(user_id, channel_id)
+        prev_force_new(user_id, channel_id)
+
+    def merged_history(conversation: Conversation) -> int | None:
+        limit = history_message_limit(conversation)
+        if limit is not None:
+            return limit
+        return prev_history(conversation)
+
     chat_extensions.register_chat_extensions(
-        prepare_context=prepare_context,
-        augment_system_prompt=augment_system_prompt,
-        extra_tools=extra_tools,
-        execute_tool=execute_tool,
-        after_assistant_turn=after_assistant_turn,
-        on_force_new_conversation=on_force_new_conversation,
-        history_message_limit=history_message_limit,
+        prepare_context=merged_prepare,
+        augment_system_prompt=merged_augment,
+        extra_tools=merged_extra,
+        execute_tool=merged_execute,
+        after_assistant_turn=merged_after,
+        on_force_new_conversation=merged_force_new,
+        history_message_limit=merged_history,
     )

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
 from typing import Any
 
 
@@ -44,9 +46,12 @@ def _fmt_read_file(data: dict[str, Any]) -> str:
     return f"📄 已读取 `{path}`（{len(text)} 字符 / {lines} 行）"
 
 
-def _fmt_patch_result(data: dict[str, Any]) -> str:
+def _fmt_patch_result(data: dict[str, Any], *, verify_snippet: str = "") -> str:
     if data.get("unchanged"):
-        return f"ℹ️ `{data.get('path')}` 无变化（磁盘内容与提交一致，未写入）"
+        return (
+            f"⛔ `{data.get('path')}` **未写入**（提交内容与磁盘完全一致）\n"
+            "- 请勿向用户声称已修改代码；请 read 文件核对后重试 patch。"
+        )
     summary = (data.get("summary") or "").strip()
     extra = f" — {summary}" if summary else ""
     change_id = (data.get("id") or "").strip()
@@ -54,10 +59,26 @@ def _fmt_patch_result(data: dict[str, Any]) -> str:
     verify = ""
     if change_id:
         verify = (
-            f"\n- 变更记录 id: `{change_id}`（可用 list_gamecenter_project_changes 核对）"
+            f"\n- 变更记录 id: `{change_id}`（list_gamecenter_project_changes 可核对）"
             f"\n- after_sha256: `{after_sha}…`"
         )
-    return f"✏️ 已写入服务器 `{data.get('path')}`{extra}{verify}"
+    if verify_snippet:
+        verify += f"\n- 磁盘回读校验:\n```\n{verify_snippet.rstrip()}\n```"
+    return f"✏️ **已写入服务器** `{data.get('path')}`{extra}{verify}"
+
+
+def _patch_verify_snippet(content: str, *, old_text: str = "", new_text: str = "") -> str:
+    lines = content.splitlines()
+    hits: list[str] = []
+    needles = [t for t in (new_text, old_text) if t and "\n" not in t and len(t) < 120]
+    for line in lines:
+        if any(n in line for n in needles):
+            hits.append(line)
+    if hits:
+        return "\n".join(hits[:6])
+    if len(lines) <= 8:
+        return content
+    return "\n".join(lines[:4] + ["…"] + lines[-4:])
 
 
 def _fmt_changes(changes: list[dict[str, Any]]) -> str:
@@ -75,11 +96,132 @@ def _fmt_changes(changes: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _read_build_log_tail(data_root: Path, slug: str, build_id: str, *, max_chars: int = 2400) -> tuple[str, str]:
+    build_dir = data_root / slug / "builds" / build_id
+    stdout = ""
+    stderr = ""
+    stdout_path = build_dir / "stdout.log"
+    stderr_path = build_dir / "stderr.log"
+    if stdout_path.is_file():
+        stdout = stdout_path.read_text(encoding="utf-8", errors="replace")[-max_chars:]
+    if stderr_path.is_file():
+        stderr = stderr_path.read_text(encoding="utf-8", errors="replace")[-max_chars:]
+    return stdout.strip(), stderr.strip()
+
+
+def _read_version_snapshot(project_path: str) -> tuple[str, str]:
+    """Return (source_versions, bundle_versions) like ver:1.3 from TS sources and built JS."""
+    import re
+    from pathlib import Path
+
+    root = Path(project_path)
+    source_labels: list[str] = []
+    for name in ("UIMain.ts", "UILoading.ts"):
+        path = root / "assets/scripts/ui" / name
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        match = re.search(r"ver:1\.\d+", text)
+        if match:
+            source_labels.append(f"{name}={match.group(0)}")
+    bundle_js = root / "build/web-mobile/assets/main/index.js"
+    bundle_labels: list[str] = []
+    if bundle_js.is_file():
+        try:
+            text = bundle_js.read_text(encoding="utf-8", errors="replace")
+            bundle_labels = sorted(set(re.findall(r"ver:1\.\d+", text)))
+        except OSError:
+            pass
+    return (
+        ", ".join(source_labels) if source_labels else "—",
+        ", ".join(bundle_labels) if bundle_labels else "—",
+    )
+
+
+def _fmt_build_progress(
+    slug: str,
+    *,
+    project: dict[str, Any],
+    builds: list[dict[str, Any]],
+    changes: list[dict[str, Any]],
+    stdout_tail: str = "",
+    stderr_tail: str = "",
+    play_urls: list[str] | None = None,
+) -> str:
+    lines = [f"📊 **编译/发布进度** · `{slug}`"]
+    project_path = str(project.get("path") or "")
+    source_ver, bundle_ver = _read_version_snapshot(project_path) if project_path else ("—", "—")
+    lines.append(
+        f"- 源码更新: {project.get('source_updated_at') or '—'}"
+        f" · 试玩包更新: {project.get('build_updated_at') or '—'}"
+        f" · has_build={project.get('has_build')}"
+    )
+    lines.append(f"- **源码版本号**: {source_ver}")
+    lines.append(f"- **线上试玩包版本号** (build/web-mobile): {bundle_ver}")
+    if source_ver != "—" and bundle_ver != "—" and source_ver != bundle_ver:
+        lines.append(
+            "  - ⚠️ 源码与试玩包版本不一致：改动可能未写入源码，或编译未完成/复用了旧包。"
+        )
+    if not builds:
+        lines.append("- 构建记录: 暂无（尚未触发 build 或 patch 后自动编译）")
+    else:
+        latest = builds[0]
+        status = str(latest.get("status") or "unknown")
+        build_id = str(latest.get("id") or "")
+        created = str(latest.get("created_at") or "")
+        rc = latest.get("returncode")
+        summary = (latest.get("summary") or "").strip()
+        lines.append(f"- **最新构建**: `{build_id}` · **{status}** · {created}" + (f" · exit={rc}" if rc is not None else ""))
+        if summary:
+            lines.append(f"  - 说明: {summary}")
+        if status == "built" and "Reuse existing" in (stdout_tail or ""):
+            lines.append("  - ⚠️ 上次构建**复用了旧 web-mobile 包**，源码改动可能未进试玩；需 Windows 远程 pipeline 真编译。")
+        elif status in {"queued", "running"}:
+            lines.append("  - ⏳ 后台编译中，稍后再查或看 stdout 日志")
+        elif status == "failed":
+            lines.append("  - ❌ 构建失败，见下方日志")
+        elif status == "built":
+            lines.append("  - ✅ 构建完成；:5099 试玩目录应已更新（请强刷浏览器）")
+        lines.append("- 近几次构建:")
+        for item in builds[:5]:
+            bid = str(item.get("id") or "")[:8]
+            lines.append(
+                f"  - `{bid}…` {item.get('status')} @ {item.get('created_at')}"
+                + ((f" — {item.get('summary')}" if item.get("summary") else ""))
+            )
+    if changes:
+        latest_change = changes[0]
+        lines.append(
+            f"- 最近代码变更: `{latest_change.get('path')}` ({latest_change.get('status')})"
+            + (f" — {latest_change.get('summary')}" if latest_change.get("summary") else "")
+        )
+    if play_urls:
+        lines.append("- 试玩链接（强刷 Cmd+Shift+R）：" + " ".join(play_urls))
+    if stdout_tail:
+        preview = stdout_tail[-2000:]
+        lines.append(f"<details><summary>最新构建 stdout</summary>\n\n```text\n{preview}\n```\n\n</details>")
+    if stderr_tail:
+        preview = stderr_tail[-1200:]
+        lines.append(f"<details><summary>最新构建 stderr</summary>\n\n```text\n{preview}\n```\n\n</details>")
+    return "\n".join(lines)
+
+
 def _fmt_build(data: dict[str, Any]) -> str:
     status = str(data.get("status") or "unknown")
+    status_label = {
+        "queued": "已入队（后台编译中）",
+        "running": "编译中",
+        "built": "成功",
+        "failed": "失败",
+    }.get(status, status)
     build_id = str(data.get("id") or "")
     cmd = str(data.get("command") or "")
-    lines = [f"🔨 构建 {status}" + (f" · `{build_id}`" if build_id else "")]
+    lines = [f"🔨 构建 {status_label}" + (f" · `{build_id}`" if build_id else "")]
+    if status in {"queued", "running"}:
+        lines.append("可用 `get_gamecenter_build_progress` 查看进度与日志。")
     if cmd:
         lines.append(f"<details><summary>构建命令</summary>\n\n```bash\n{cmd}\n```\n\n</details>")
     stdout = str(data.get("stdout_tail") or "").strip()
@@ -130,7 +272,13 @@ def _try_auto_build_after_patch(
 from fastapi import HTTPException
 
 from app.bot import chat_extensions
-from app.bot.tool_runtime import get_bot_conversation, get_bot_db, get_bot_user_id
+from app.bot.tool_runtime import (
+    get_bot_conversation,
+    get_bot_db,
+    get_bot_group_member_role,
+    get_bot_platform_user_role,
+    get_bot_user_id,
+)
 from app.core.config import settings
 from app.models.conversation import Conversation
 from app.services.devbridge_admin_settings import resolved_gamecenter_settings
@@ -154,6 +302,46 @@ _READ_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {"slug": {"type": "string", "description": "Project folder name"}},
+                "required": ["slug"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_gamecenter_build_progress",
+            "description": (
+                "Get compile/publish progress for a GameCenter project: latest build status, "
+                "log tail, recent code changes, and playable URLs. "
+                "Use when the user asks about 编译进度/发布进度/构建状态/试玩是否更新."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"slug": {"type": "string", "description": "Project folder name"}},
+                "required": ["slug"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_gamecenter_project_builds",
+            "description": "List recent build records for a GameCenter project (same data as get_gamecenter_build_progress).",
+            "parameters": {
+                "type": "object",
+                "properties": {"slug": {"type": "string"}},
+                "required": ["slug"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_gamecenter_project_changes",
+            "description": "List recent controlled file changes for a GameCenter project.",
+            "parameters": {
+                "type": "object",
+                "properties": {"slug": {"type": "string"}},
                 "required": ["slug"],
             },
         },
@@ -195,16 +383,25 @@ _WRITE_TOOLS = [
         "type": "function",
         "function": {
             "name": "patch_gamecenter_project_file",
-            "description": "Write a controlled UTF-8 text file inside a GameCenter project.",
+            "description": (
+                "Write a controlled UTF-8 text file inside a GameCenter project. "
+                "Prefer old_text+new_text for small edits (server reads file, applies replace, writes). "
+                "Use full content only after read_gamecenter_project_file. "
+                "Success requires a change id in the tool result — never claim edits without it. "
+                "Version labels (ver:1.x): patch BOTH UIMain.ts and UILoading.ts."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "slug": {"type": "string"},
                     "path": {"type": "string"},
-                    "content": {"type": "string"},
+                    "content": {"type": "string", "description": "Full new file text (use with read first)"},
+                    "old_text": {"type": "string", "description": "Exact substring to replace (preferred for small edits)"},
+                    "new_text": {"type": "string", "description": "Replacement for old_text"},
+                    "replace_all": {"type": "boolean", "description": "Replace all occurrences of old_text"},
                     "summary": {"type": "string"},
                 },
-                "required": ["slug", "path", "content"],
+                "required": ["slug", "path"],
             },
         },
     },
@@ -226,18 +423,6 @@ _WRITE_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "list_gamecenter_project_changes",
-            "description": "List recent controlled file changes for a GameCenter project.",
-            "parameters": {
-                "type": "object",
-                "properties": {"slug": {"type": "string"}},
-                "required": ["slug"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "revert_gamecenter_project_change",
             "description": "Revert a previous controlled file change in a GameCenter project.",
             "parameters": {
@@ -247,18 +432,6 @@ _WRITE_TOOLS = [
                     "change_id": {"type": "string"},
                 },
                 "required": ["slug", "change_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_gamecenter_project_builds",
-            "description": "List recent build records for a GameCenter project.",
-            "parameters": {
-                "type": "object",
-                "properties": {"slug": {"type": "string"}},
-                "required": ["slug"],
             },
         },
     },
@@ -310,30 +483,211 @@ _PUBLISH_TOOLS = [
     },
 ]
 
-_ALL_TOOL_NAMES = {
-    tool["function"]["name"]
-    for tool in _READ_TOOLS + _WRITE_TOOLS + _PUBLISH_TOOLS
-}
+# ── generic devbridge tools (provider-agnostic) ──
+
+_NEW_READ_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_devbridge_projects",
+            "description": "List all readable DevBridge projects across all enabled providers. Returns project slugs, paths, and build status. Use this as the first step in any development workflow.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_devbridge_project_files",
+            "description": "Search/grep across readable project files for a pattern. Returns matching lines with file path and line number. Use this to find variable references, function calls, or any code pattern before editing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Project slug/folder name"},
+                    "pattern": {"type": "string", "description": "Search pattern (supports regex). For plain text, simple words work."},
+                    "path": {"type": "string", "description": "Optional subdirectory to limit search scope"},
+                },
+                "required": ["slug", "pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diff_devbridge_project_change",
+            "description": "Show before/after diff of a specific file change. Returns the old content, new content, and a unified diff of changed lines. Use this to present changes to the user for review.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Project slug/folder name"},
+                    "change_id": {"type": "string", "description": "Change ID returned by a previous patch"},
+                },
+                "required": ["slug", "change_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_devbridge_templates",
+            "description": "List available project templates for create_devbridge_project. Always call this before creating a project so the user can choose.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_devbridge_project",
+            "description": "Create a new project from a template. Use after the user confirms the template choice. Available templates: cocos-simple-game (Cocos game with Canvas+Game.ts+UIController.ts), cocos-empty (minimal Cocos project), web-frontend (HTML/CSS/JS), node-backend (Node.js TypeScript service).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "New project slug/folder name, lowercase with hyphens, e.g. my-game"},
+                    "template": {"type": "string", "description": "Template name, e.g. cocos-simple-game"},
+                },
+                "required": ["slug", "template"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_devbridge_project_status",
+            "description": "Get project status: readable roots, build state, source timestamp, nested project path. Use after selecting a slug.",
+            "parameters": {
+                "type": "object",
+                "properties": {"slug": {"type": "string", "description": "Project slug/folder name"}},
+                "required": ["slug"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_devbridge_project_files",
+            "description": "List readable files and directories inside a project subdirectory. Use to browse the project tree before reading or editing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Project slug/folder name"},
+                    "path": {"type": "string", "description": "Relative directory path, e.g. assets/scripts or empty for root"},
+                },
+                "required": ["slug"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_devbridge_project_file",
+            "description": "Read a UTF-8 text file from a project. Use before patching to see the exact file content on disk.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Project slug/folder name"},
+                    "path": {"type": "string", "description": "Relative file path, e.g. assets/scripts/Game.ts"},
+                },
+                "required": ["slug", "path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "upload_devbridge_asset",
+            "description": "Upload a binary asset (image, audio, model, font) to a project as base64 data. Use for game textures, sound effects, 3D models, fonts etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Project slug/folder name"},
+                    "path": {"type": "string", "description": "Relative path inside project, e.g. assets/textures/bg.png"},
+                    "data": {"type": "string", "description": "Base64-encoded binary data"},
+                    "overwrite": {"type": "boolean", "description": "Set true to overwrite if asset already exists"},
+                },
+                "required": ["slug", "path", "data"],
+            },
+        },
+    },
+]
+
+_NEW_WRITE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "patch_devbridge_project_file",
+            "description": "Edit a controlled text file. Prefer old_text+new_text for small changes (e.g. ver:1.2 → ver:1.3). For large rewrites use content. The tool reads the file, applies the replacement, writes, and verifies SHA. Returns a change_id only if the file was actually modified.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Project slug/folder name"},
+                    "path": {"type": "string", "description": "Relative file path, e.g. assets/scripts/Game.ts"},
+                    "old_text": {"type": "string", "description": "Exact substring to find and replace"},
+                    "new_text": {"type": "string", "description": "Replacement text"},
+                    "content": {"type": "string", "description": "Full new file content (use when old_text+new_text is impractical)"},
+                    "replace_all": {"type": "boolean", "description": "Replace every occurrence of old_text (default: first only)"},
+                    "summary": {"type": "string", "description": "Short description of what changed"},
+                },
+                "required": ["slug", "path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_devbridge_project",
+            "description": "Run the configured build command for a project. Use after patching to verify the code compiles.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Project slug/folder name"},
+                    "summary": {"type": "string", "description": "Short build note"},
+                },
+                "required": ["slug"],
+            },
+        },
+    },
+]
+
+_NEW_READ_TOOL_NAMES = {tool["function"]["name"] for tool in _NEW_READ_TOOLS}
+_NEW_WRITE_TOOL_NAMES = {tool["function"]["name"] for tool in _NEW_WRITE_TOOLS}
+_NEW_ALL_TOOL_NAMES = _NEW_READ_TOOL_NAMES | _NEW_WRITE_TOOL_NAMES
+
+_READ_TOOL_NAMES = {tool["function"]["name"] for tool in _READ_TOOLS}
+_WRITE_TOOL_NAMES = {tool["function"]["name"] for tool in _WRITE_TOOLS}
+_PUBLISH_TOOL_NAMES = {tool["function"]["name"] for tool in _PUBLISH_TOOLS}
+_ALL_TOOL_NAMES = _READ_TOOL_NAMES | _WRITE_TOOL_NAMES | _PUBLISH_TOOL_NAMES | _NEW_ALL_TOOL_NAMES
+
+
+_GAMECENTER_TOOL_NAMES = (
+    "list_gamecenter_projects, get_gamecenter_project_status, list_gamecenter_project_files, "
+    "read_gamecenter_project_file, patch_gamecenter_project_file, build_gamecenter_project, "
+    "get_gamecenter_build_progress, publish_gamecenter_project_build"
+)
 
 
 def _hint(prompt: str) -> str:
     extra = (
-        "\n\nWhen the user asks about internal GameCenter projects, code layout, readable files, or build status, "
-        "use the gamecenter bridge tools before answering."
+        "\n\n## GameCenter bridge tools (独立工具，不是 mchat-ops 子命令)\n"
+        f"可用工具: {_GAMECENTER_TOOL_NAMES}.\n"
+        "用户提到 GameCenter / 试玩链接 / Cocos / pkg 项目 / 改版本号时，**必须**调用上述工具；"
+        "**禁止**通过 mchat-ops 执行 list_gamecenter_projects 等（mchat-ops 只有 health/logs/db 等运维命令）。\n"
+        "流程: list_gamecenter_projects → read → patch(old_text+new_text) → get_gamecenter_build_progress 核对版本。\n"
+        "编译/发布进度: get_gamecenter_build_progress(slug)。"
     )
     cfg = resolved_gamecenter_settings()
-    if settings.gamecenter_bridge_write_enabled:
-        extra += " For controlled edits, use patch/build/change tools instead of inventing shell commands."
+    if cfg.get("write_enabled"):
+        extra += (
+            " For code edits you MUST call patch_gamecenter_project_file (prefer old_text+new_text); "
+            "never describe code changes in prose without a successful patch tool result containing a change id. "
+            "If the tool says 未写入/unchanged, the file was NOT modified — read the file and retry."
+        )
         if cfg.get("auto_build_after_patch"):
             extra += (
-                " After a successful patch, the system auto-runs build_command on the configured Mac/Windows builder; "
-                "do not claim build/publish success unless the auto-build result is shown. "
-                ":5099 playable is updated via build/web-mobile push — publish is optional."
+                " After a successful patch (with change id), the system auto-runs build_command; "
+                "do not claim build/publish success unless the auto-build result is shown."
             )
         else:
             extra += (
-                " After patching source files, you MUST call build_gamecenter_project (real remote build), "
-                "then tell the user to hard-refresh the playable URL. Never skip build or fake success."
+                " After patching, call build_gamecenter_project, then tell the user to hard-refresh the playable URL."
             )
     if settings.gamecenter_publish_enabled:
         extra += " Publishing to playables is optional when build_command already pushes build/web-mobile."
@@ -344,33 +698,85 @@ def _gc_settings() -> dict:
     return resolved_gamecenter_settings()
 
 
-async def _staff_allowed(conversation: Conversation | None = None) -> bool:
+async def _bridge_read_allowed(conversation: Conversation | None = None) -> bool:
+    """Group members may query progress; write ops still require staff."""
     db = get_bot_db()
     user_id = get_bot_user_id()
     if db is None or not user_id or not _gc_settings().get("enabled"):
         return False
-    if conversation is not None and not _conversation_allows_bridge(conversation):
+    if conversation is not None and not conversation_allows_bridge(conversation):
         return False
     user = await db.get(User, user_id)
-    return bool(user and user.role in {"admin", "agent"})
+    return user is not None
 
 
-def _conversation_allows_bridge(conversation: Conversation) -> bool:
+def devbridge_write_allowed() -> bool:
+    """Sync check using roles captured in set_bot_tool_context (engine turn setup)."""
+    platform_role = (get_bot_platform_user_role() or "").strip()
+    if platform_role in {"admin", "agent"}:
+        return True
+    group_role = (get_bot_group_member_role() or "").strip()
+    return group_role in {"owner", "editor"}
+
+
+async def _bridge_write_allowed(conversation: Conversation | None = None) -> bool:
+    if not _gc_settings().get("enabled"):
+        return False
+    if conversation is not None and not conversation_allows_bridge(conversation):
+        return False
+    if devbridge_write_allowed():
+        return True
+    # Fallback when context vars were not set (e.g. tests)
+    db = get_bot_db()
+    user_id = get_bot_user_id()
+    if db is None or not user_id:
+        return False
+    user = await db.get(User, user_id)
+    if user and user.role in {"admin", "agent"}:
+        return True
+    if (
+        conversation is not None
+        and conversation.scope_type == "group"
+        and conversation.scope_id
+    ):
+        from sqlalchemy import select
+
+        from app.models.group import GroupMember
+
+        result = await db.execute(
+            select(GroupMember.role).where(
+                GroupMember.group_id == conversation.scope_id,
+                GroupMember.user_id == user_id,
+            )
+        )
+        role = result.scalar_one_or_none()
+        return role in {"owner", "editor"}
+    return False
+
+
+def conversation_allows_bridge(conversation: Conversation) -> bool:
+    """Whether GameCenter bridge tools should be exposed in this chat (group-only by default)."""
     cfg = _gc_settings()
     if not cfg.get("enabled"):
         return False
-    if cfg.get("bridge_group_scope_only", True):
-        return conversation.scope_type == "group"
-    return True
+    if not conversation.user_id:
+        return False
+    if not cfg.get("bridge_group_scope_only", True):
+        return True
+    return conversation.scope_type == "group" and bool(conversation.scope_id)
 
 
 def _extra_tools(conversation: Conversation, _ctx: Any) -> list[dict[str, Any]]:
-    if not conversation.user_id or not _conversation_allows_bridge(conversation):
+    if not conversation_allows_bridge(conversation):
         return []
     tools = list(_READ_TOOLS)
+    tools.extend(_NEW_READ_TOOLS)
+    if not devbridge_write_allowed():
+        return tools
     cfg = _gc_settings()
     if cfg.get("write_enabled"):
         tools.extend(_WRITE_TOOLS)
+        tools.extend(_NEW_WRITE_TOOLS)
     if cfg.get("publish_enabled"):
         tools.extend(_PUBLISH_TOOLS)
     return tools
@@ -379,8 +785,20 @@ def _extra_tools(conversation: Conversation, _ctx: Any) -> list[dict[str, Any]]:
 async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
     if name not in _ALL_TOOL_NAMES:
         return None
-    if not await _staff_allowed(get_bot_conversation()):
-        return {"error": "GameCenter bridge not available for current user"}
+    conversation = get_bot_conversation()
+    if name in _READ_TOOL_NAMES or name in _NEW_READ_TOOL_NAMES:
+        if not await _bridge_read_allowed(conversation):
+            return {"error": "GameCenter bridge not available in this conversation"}
+    elif not await _bridge_write_allowed(conversation):
+        return {
+            "error": "GameCenter bridge write/publish denied",
+            "content": (
+                "❌ 当前账号**没有改代码权限**。\n"
+                "- 群组成员 `member`：只能查看项目/进度，不能 patch/build/publish。\n"
+                "- 需要群组 **owner/editor**，或平台 **admin/agent**。\n"
+                "请在群组设置里把需要改代码的同事设为 **编辑者（editor）**。"
+            ),
+        }
 
     service = create_gamecenter_bridge_service()
     user_id = get_bot_user_id() or "system"
@@ -413,42 +831,143 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
         data = _json_dump(file_data)
         return {"ok": True, "content": _fmt_read_file(data), "file": data}
     if name == "patch_gamecenter_project_file":
+        slug = str(args.get("slug") or "")
+        path = str(args.get("path") or "")
+        content_arg = str(args.get("content") or "")
+        old_text = str(args.get("old_text") or "")
+        new_text = str(args.get("new_text") or "")
+        replace_all = bool(args.get("replace_all"))
+
+        if old_text or new_text:
+            if not old_text or not new_text:
+                return {
+                    "ok": False,
+                    "error": "old_text 与 new_text 必须同时提供",
+                    "content": "❌ 局部替换需要同时提供 old_text 和 new_text。",
+                }
+            if content_arg:
+                return {
+                    "ok": False,
+                    "error": "不能同时使用 content 与 old_text/new_text",
+                    "content": "❌ 请二选一：局部替换用 old_text+new_text，整文件覆盖用 content。",
+                }
+            try:
+                current = service.read_file(slug, path)
+            except HTTPException as exc:
+                detail = str(exc.detail)
+                return {
+                    "ok": False,
+                    "error": detail,
+                    "content": (
+                        f"❌ 读取失败: {detail}\n"
+                        "请先 list/read 确认 path，例如 `assets/scripts/ui/UIMain.ts`。"
+                    ),
+                }
+            if old_text not in current.content:
+                preview = _patch_verify_snippet(current.content, old_text=old_text)
+                return {
+                    "ok": False,
+                    "error": "old_text not found on disk",
+                    "content": (
+                        f"❌ `{current.path}` 中**找不到** old_text，未写入任何内容。\n"
+                        f"- 你提供的 old_text 前 80 字: `{old_text[:80]}`\n"
+                        f"- 磁盘文件片段:\n```\n{preview}\n```\n"
+                        "请先 read_gamecenter_project_file 获取精确文本后再 patch。"
+                    ),
+                }
+            count = current.content.count(old_text)
+            if count > 1 and not replace_all:
+                return {
+                    "ok": False,
+                    "error": f"old_text matches {count} times",
+                    "content": (
+                        f"❌ old_text 在文件中出现 {count} 次；请设 replace_all=true 或提供更精确的 old_text。"
+                    ),
+                }
+            limit = -1 if replace_all else 1
+            content_arg = current.content.replace(old_text, new_text, limit)
+
+        if not content_arg.strip():
+            return {
+                "ok": False,
+                "error": "empty patch content",
+                "content": "❌ 未提供有效内容：请传 content，或 old_text+new_text。",
+            }
+
         try:
             result = service.patch_file(
-                str(args.get("slug") or ""),
-                str(args.get("path") or ""),
-                content=str(args.get("content") or ""),
+                slug,
+                path,
+                content=content_arg,
                 actor_user_id=user_id,
                 summary=str(args.get("summary") or "") or None,
             )
         except HTTPException as exc:
             detail = str(exc.detail)
             return {
+                "ok": False,
                 "error": detail,
                 "content": (
                     f"❌ 写入失败: {detail}\n"
-                    "提示: path 必须是相对工程根目录的路径，例如 `assets/scripts/game/Stage.ts`；"
+                    "提示: path 必须是相对工程根目录的路径，例如 `assets/scripts/ui/UIMain.ts`；"
                     "先 list/read 确认文件存在，不要带 slug 前缀。"
                 ),
             }
-        content = _fmt_patch_result(result)
-        auto_build: dict[str, Any] | None = None
-        if result.get("ok") and not result.get("unchanged"):
-            auto_build = _try_auto_build_after_patch(
-                service,
-                slug=str(args.get("slug") or ""),
-                user_id=user_id,
-                summary=str(args.get("summary") or "") or None,
+
+        if result.get("unchanged"):
+            return {
+                "ok": False,
+                "unchanged": True,
+                "error": "提交内容与磁盘一致，未写入",
+                "content": _fmt_patch_result(result),
+                "path": result.get("path"),
+            }
+
+        verify_snippet = ""
+        try:
+            read_back = service.read_file(slug, str(result.get("path") or path))
+            actual_sha = hashlib.sha256(read_back.content.encode("utf-8")).hexdigest()
+            expected_sha = str(result.get("after_sha256") or "")
+            if expected_sha and actual_sha != expected_sha:
+                return {
+                    "ok": False,
+                    "error": "写入后磁盘校验失败",
+                    "content": (
+                        f"❌ `{result.get('path')}` 写入后校验失败（sha 不一致），请重试或检查磁盘权限。"
+                    ),
+                    **result,
+                }
+            verify_snippet = _patch_verify_snippet(
+                read_back.content,
+                old_text=old_text,
+                new_text=new_text,
             )
-            if auto_build:
-                if auto_build.get("error"):
-                    content += f"\n\n⚠️ 自动编译失败：{auto_build['error']}"
-                elif auto_build.get("ok"):
-                    content += "\n\n" + _fmt_build(auto_build)
+        except HTTPException as exc:
+            return {
+                "ok": False,
+                "error": f"写入后回读失败: {exc.detail}",
+                "content": f"❌ 已写入但回读校验失败: {exc.detail}",
+                **result,
+            }
+
+        content = _fmt_patch_result(result, verify_snippet=verify_snippet)
+        auto_build: dict[str, Any] | None = None
+        auto_build = _try_auto_build_after_patch(
+            service,
+            slug=slug,
+            user_id=user_id,
+            summary=str(args.get("summary") or "") or None,
+        )
+        if auto_build:
+            if auto_build.get("error"):
+                content += f"\n\n⚠️ 自动编译失败：{auto_build['error']}"
+            elif auto_build.get("ok"):
+                content += "\n\n" + _fmt_build(auto_build)
         return {
             "ok": True,
             "content": content,
             "modified_path": result.get("path"),
+            "verified": True,
             "auto_build": auto_build,
             **result,
         }
@@ -460,6 +979,38 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
         )
         result["play_urls"] = _play_urls_for_slug(str(args.get("slug") or ""))
         return {"ok": True, "content": _fmt_build(result), **result}
+    if name == "get_gamecenter_build_progress":
+        slug = str(args.get("slug") or "")
+        project = _json_dump(service.get_project(slug))
+        builds = service.list_builds(slug)
+        changes = service.list_changes(slug)
+        stdout_tail = ""
+        stderr_tail = ""
+        cfg = _gc_settings()
+        data_root_raw = (cfg.get("data_root") or "").strip()
+        if builds and data_root_raw:
+            data_root = Path(data_root_raw)
+            latest_id = str(builds[0].get("id") or "")
+            if latest_id:
+                stdout_tail, stderr_tail = _read_build_log_tail(data_root, slug, latest_id)
+        play_urls = _play_urls_for_slug(slug)
+        content = _fmt_build_progress(
+            slug,
+            project=project,
+            builds=builds,
+            changes=changes,
+            stdout_tail=stdout_tail,
+            stderr_tail=stderr_tail,
+            play_urls=play_urls,
+        )
+        return {
+            "ok": True,
+            "content": content,
+            "project": project,
+            "builds": builds,
+            "changes": changes[:5],
+            "play_urls": play_urls,
+        }
     if name == "list_gamecenter_project_changes":
         changes = service.list_changes(str(args.get("slug") or ""))
         return {"ok": True, "content": _fmt_changes(changes), "changes": changes}
@@ -471,7 +1022,18 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
         )
         return {"ok": True, **result}
     if name == "list_gamecenter_project_builds":
-        return {"ok": True, "builds": service.list_builds(str(args.get("slug") or ""))}
+        slug = str(args.get("slug") or "")
+        project = _json_dump(service.get_project(slug))
+        builds = service.list_builds(slug)
+        changes = service.list_changes(slug)
+        content = _fmt_build_progress(
+            slug,
+            project=project,
+            builds=builds,
+            changes=changes,
+            play_urls=_play_urls_for_slug(slug),
+        )
+        return {"ok": True, "content": content, "builds": builds}
     if name == "publish_gamecenter_project_build":
         result = service.publish_build(
             str(args.get("slug") or ""),
@@ -493,10 +1055,185 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
             actor_user_id=user_id,
         )
         return {"ok": True, **result}
+
+    # ── new generic devbridge tools ──
+
+    if name == "list_devbridge_projects":
+        items = [item.model_dump() for item in service.list_projects()]
+        slugs = [str(item.get("slug") or "") for item in items if item.get("slug")]
+        preview = ", ".join(slugs[:15])
+        if len(slugs) > 15:
+            preview += f", …（共 {len(slugs)} 个）"
+        return {
+            "ok": True,
+            "content": f"可访问 {len(items)} 个项目：{preview}",
+            "projects": items,
+        }
+
+    if name == "get_devbridge_project_status":
+        slug = str(args.get("slug") or "")
+        item = service.get_project(slug)
+        data = _json_dump(item)
+        return {"ok": True, "content": _fmt_project_status(data), "project": data}
+
+    if name == "list_devbridge_project_files":
+        slug = str(args.get("slug") or "")
+        listing = service.list_files(slug, str(args.get("path") or ""))
+        data = _json_dump(listing)
+        return {"ok": True, "content": _fmt_file_listing(data), "listing": data}
+
+    if name == "read_devbridge_project_file":
+        slug = str(args.get("slug") or "")
+        file_data = service.read_file(slug, str(args.get("path") or ""))
+        data = _json_dump(file_data)
+        return {"ok": True, "content": _fmt_read_file(data), "file": data}
+
+    if name == "patch_devbridge_project_file":
+        slug = str(args.get("slug") or "")
+        path = str(args.get("path") or "")
+        content_arg = str(args.get("content") or "")
+        old_text = str(args.get("old_text") or "")
+        new_text = str(args.get("new_text") or "")
+        replace_all = bool(args.get("replace_all"))
+        if old_text or new_text:
+            if not old_text or not new_text:
+                return {"ok": False, "error": "old_text 与 new_text 必须同时提供", "content": "❌ 局部替换需要同时提供 old_text 和 new_text"}
+            if content_arg:
+                return {"ok": False, "error": "不能同时使用 content 与 old_text/new_text", "content": "❌ 请二选一"}
+            try:
+                current = service.read_file(slug, path)
+            except HTTPException as exc:
+                return {"ok": False, "error": str(exc.detail), "content": f"❌ 读取失败: {exc.detail}"}
+            if old_text not in current.content:
+                preview = _patch_verify_snippet(current.content, old_text=old_text)
+                return {"ok": False, "error": "old_text not found", "content": f"❌ `{current.path}` 中找不到 old_text。磁盘片段:\n```\n{preview}\n```\n请先 read 文件获取精确文本。"}
+            count = current.content.count(old_text)
+            if count > 1 and not replace_all:
+                return {"ok": False, "error": f"old_text matches {count} times", "content": f"❌ old_text 出现 {count} 次，设 replace_all=true 或提供更精确的 old_text"}
+            content_arg = current.content.replace(old_text, new_text, -1 if replace_all else 1)
+        if not content_arg.strip():
+            return {"ok": False, "error": "empty patch content", "content": "❌ 未提供有效内容"}
+        try:
+            result = service.patch_file(slug, path, content=content_arg, actor_user_id=user_id, summary=str(args.get("summary") or "") or None)
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail), "content": f"❌ 写入失败: {exc.detail}"}
+        if result.get("unchanged"):
+            return {"ok": False, "unchanged": True, "error": "提交内容与磁盘一致", "content": _fmt_patch_result(result), "path": result.get("path")}
+        verify_snippet = ""
+        try:
+            read_back = service.read_file(slug, str(result.get("path") or path))
+            vs = _patch_verify_snippet(read_back.content, old_text=old_text, new_text=new_text)
+            verify_snippet = vs
+        except Exception:
+            pass
+        content = _fmt_patch_result(result, verify_snippet=verify_snippet)
+        return {"ok": True, "content": content, "modified_path": result.get("path"), **result}
+
+    if name == "build_devbridge_project":
+        result = service.build_project(str(args.get("slug") or ""), actor_user_id=user_id, summary=str(args.get("summary") or "") or None)
+        result["play_urls"] = _play_urls_for_slug(str(args.get("slug") or ""))
+        return {"ok": True, "content": _fmt_build(result), **result}
+
+    if name == "search_devbridge_project_files":
+        slug = str(args.get("slug") or "")
+        pattern = str(args.get("pattern") or "")
+        if not pattern:
+            return {"ok": False, "error": "pattern is required", "content": "❌ 搜索模式不能为空"}
+        result = service.search_files(
+            slug,
+            pattern,
+            path_hint=str(args.get("path") or ""),
+        )
+        content_lines = [f"🔍 `{slug}` 搜索结果: `{pattern}` — 匹配 {result['matches']} 条（扫描 {result['scanned_files']} 个文件）"]
+        for r in result.get("results", [])[:15]:
+            content_lines.append(f"- `{r['file']}:{r['line']}` {r['text']}")
+        if result.get("truncated"):
+            content_lines.append(f"…（结果已截断，如需更精确请缩小搜索范围）")
+        return {"ok": True, "content": "\n".join(content_lines), **result}
+
+    if name == "diff_devbridge_project_change":
+        slug = str(args.get("slug") or "")
+        change_id = str(args.get("change_id") or "")
+        try:
+            result = service.diff_change(slug, change_id)
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail), "content": f"❌ {exc.detail}"}
+        content = f"📋 变更 `{change_id}`"
+        if result.get("metadata"):
+            m = result["metadata"]
+            content += f"\n- 文件: `{m.get('path', '?')}` — {m.get('actor_user_id', '?')} @ {m.get('created_at', '?')}"
+        if result.get("lines_changed"):
+            content += f"\n- 变更 {result['lines_changed']} 行"
+        if result.get("diff"):
+            content += f"\n```diff\n{result['diff']}\n```"
+        return {"ok": True, "content": content, **result}
+
+    if name == "list_devbridge_templates":
+        templates = service._TEMPLATES
+        items = ", ".join(f"{k}（{v['description']}）" for k, v in sorted(templates.items()))
+        return {"ok": True, "content": f"可用项目模板: {items}", "templates": templates}
+
+    if name == "create_devbridge_project":
+        slug = str(args.get("slug") or "")
+        template = str(args.get("template") or "")
+        try:
+            result = service.create_project(slug, template)
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail), "content": f"❌ {exc.detail}"}
+        # Auto-add to group allowlist if running in group context
+        conv = get_bot_conversation()
+        if conv and conv.scope_type == "group" and conv.scope_id:
+            try:
+                db = get_bot_db()
+                if db:
+                    from sqlalchemy import select
+                    from app.models.group import Group
+                    group = (await db.execute(select(Group).where(Group.id == conv.scope_id))).scalar_one_or_none()
+                    if group:
+                        allowlists = dict(group.devbridge_project_allowlists or {})
+                        gc_list = list(allowlists.get("gamecenter") or [])
+                        if slug not in gc_list:
+                            gc_list.append(slug)
+                            allowlists["gamecenter"] = gc_list
+                            group.devbridge_project_allowlists = allowlists
+                            await db.commit()
+            except Exception:
+                pass
+        files = result.get("created_files", [])
+        play_urls = _play_urls_for_slug(slug)
+        content = f"✅ 项目 `{result['slug']}` 已创建（{result['template_description']}）\n- 模板: {result['template']}\n- 路径: `{result['project_dir']}`\n- 已自动加入管理列表"
+        if play_urls:
+            content += f"\n- 试玩地址: {play_urls[0]}"
+        content += "\n- 生成文件:\n  " + "\n  ".join(f"• `{f}`" for f in files)
+        return {"ok": True, "content": content, "play_urls": play_urls, **result}
+
+    if name == "upload_devbridge_asset":
+        slug = str(args.get("slug") or "")
+        path = str(args.get("path") or "")
+        data_b64 = str(args.get("data") or "")
+        overwrite = bool(args.get("overwrite"))
+        try:
+            result = service.upload_asset(slug, path, data_b64, overwrite=overwrite)
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail), "content": f"❌ {exc.detail}"}
+        size_kb = result["size_bytes"] / 1024
+        content = f"✅ 资源已上传 `{result['path']}` — {size_kb:.1f} KB"
+        if result.get("overwritten"):
+            content += "（已覆盖）"
+        return {"ok": True, "content": content, **result}
+
     return None
 
 
+_GAMECENTER_EXTENSIONS_REGISTERED = False
+
+
 def register_gamecenter_bridge_extensions() -> None:
+    global _GAMECENTER_EXTENSIONS_REGISTERED
+    if _GAMECENTER_EXTENSIONS_REGISTERED:
+        return
+    _GAMECENTER_EXTENSIONS_REGISTERED = True
+
     prev_extra = chat_extensions._handlers["extra_tools"]
     prev_augment = chat_extensions._handlers["augment_system_prompt"]
     prev_execute = chat_extensions._handlers["execute_tool"]
@@ -507,7 +1244,7 @@ def register_gamecenter_bridge_extensions() -> None:
         return tools
 
     def merged_augment(conversation: Conversation, ctx: Any, prompt: str) -> str:
-        next_prompt = _hint(prompt) if _conversation_allows_bridge(conversation) else prompt
+        next_prompt = _hint(prompt) if conversation_allows_bridge(conversation) else prompt
         return prev_augment(conversation, ctx, next_prompt)
 
     async def merged_execute(name: str, args: dict[str, Any], ctx: Any) -> Any | None:

@@ -35,6 +35,15 @@ if [[ -z "$SLUG" ]]; then
 fi
 
 if [[ -z "$PROJECT_DIR" ]]; then
+  REMOTE_PROJECT_HINT="$(
+    ssh "$RSYNC_HOST" "python3 '$REMOTE_MCHAT/ops/scripts/resolve-gamecenter-project.py' '$REMOTE_MCHAT' '$SLUG' 2>/dev/null || true"
+  )"
+  if [[ -n "$REMOTE_PROJECT_HINT" ]]; then
+    OUTER_HINT="$(gc_slug_outer_from_project_dir "$REMOTE_PROJECT_HINT" "$SLUG" "$REMOTE_ROOT" || true)"
+    if [[ -n "$OUTER_HINT" ]]; then
+      REMOTE_PARENT="$(basename "$(dirname "$OUTER_HINT")")"
+    fi
+  fi
   OUTER="$LOCAL_GC/$REMOTE_PARENT/$SLUG"
   PROJECT_DIR="$(gc_resolve_nested_project_dir "$OUTER")"
 fi
@@ -42,6 +51,10 @@ fi
 BUILD_OUT="$PROJECT_DIR/build/web-mobile"
 if [[ ! -d "$BUILD_OUT" || -z "$(ls -A "$BUILD_OUT" 2>/dev/null || true)" ]]; then
   echo "Missing build/web-mobile — run gamecenter-local-build-project.sh first" >&2
+  exit 1
+fi
+if [[ ! -f "$BUILD_OUT/index.html" ]]; then
+  echo "Refusing to sync: $BUILD_OUT/index.html missing (incomplete Cocos build)" >&2
   exit 1
 fi
 

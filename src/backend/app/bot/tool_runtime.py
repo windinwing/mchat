@@ -17,6 +17,8 @@ _bot_group_devbridge_allowlists: ContextVar[dict[str, set[str]] | None] = Contex
     "bot_group_devbridge_allowlists",
     default=None,
 )
+_bot_platform_user_role: ContextVar[str | None] = ContextVar("bot_platform_user_role", default=None)
+_bot_group_member_role: ContextVar[str | None] = ContextVar("bot_group_member_role", default=None)
 
 
 def set_bot_tool_context(
@@ -25,11 +27,15 @@ def set_bot_tool_context(
     conversation: Conversation,
     user_id: str,
     group_devbridge_allowlists: dict[str, set[str]] | None = None,
+    platform_user_role: str | None = None,
+    group_member_role: str | None = None,
 ) -> None:
     _bot_db.set(db)
     _bot_conversation.set(conversation)
     _bot_user_id.set(user_id)
     _bot_group_devbridge_allowlists.set(group_devbridge_allowlists)
+    _bot_platform_user_role.set(platform_user_role)
+    _bot_group_member_role.set(group_member_role)
 
 
 def clear_bot_tool_context() -> None:
@@ -37,6 +43,8 @@ def clear_bot_tool_context() -> None:
     _bot_conversation.set(None)
     _bot_user_id.set(None)
     _bot_group_devbridge_allowlists.set(None)
+    _bot_platform_user_role.set(None)
+    _bot_group_member_role.set(None)
 
 
 def get_bot_db() -> AsyncSession | None:
@@ -53,3 +61,11 @@ def get_bot_user_id() -> str | None:
 
 def get_bot_group_devbridge_allowlists() -> dict[str, set[str]] | None:
     return _bot_group_devbridge_allowlists.get()
+
+
+def get_bot_platform_user_role() -> str | None:
+    return _bot_platform_user_role.get()
+
+
+def get_bot_group_member_role() -> str | None:
+    return _bot_group_member_role.get()

@@ -32,6 +32,12 @@ if [[ -z "$SLUG" ]]; then
 fi
 
 REMOTE_PROJECT="$(gc_remote_project_dir "$HOST_RAW" "$SLUG" "$REMOTE_MCHAT" || true)"
+if [[ -n "$REMOTE_PROJECT" ]]; then
+  REMOTE_OUTER="$(gc_slug_outer_from_project_dir "$REMOTE_PROJECT" "$SLUG" "${REMOTE_GAMECENTER_ROOT:-/opt/xiaoxiao/gamecenter}" || true)"
+  if [[ -n "$REMOTE_OUTER" ]]; then
+    REMOTE_PARENT="$(basename "$(dirname "$REMOTE_OUTER")")"
+  fi
+fi
 LOCAL_OUTER="$LOCAL_GC/$REMOTE_PARENT/$SLUG"
 LOCAL_PROJECT="$(gc_resolve_nested_project_dir "$LOCAL_OUTER")"
 

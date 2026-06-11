@@ -49,9 +49,18 @@ fi
 LOCAL_GC="${LOCAL_GAMECENTER:-$HOME/dev/gamecenter-server}"
 REMOTE_ROOT="${REMOTE_GAMECENTER_ROOT:-/opt/xiaoxiao/gamecenter}"
 REMOTE_PARENT="${REMOTE_PROJECT_PARENT:-newsrc}"
+REMOTE_MCHAT="${REMOTE_MCHAT:-/opt/xiaoxiao/mchat}"
 
+REMOTE_PROJECT_DIR="$(gc_remote_project_dir "$HOST_RAW" "$SLUG" "$REMOTE_MCHAT" || true)"
+if [[ -n "$REMOTE_PROJECT_DIR" ]]; then
+  REMOTE_OUTER="$(gc_slug_outer_from_project_dir "$REMOTE_PROJECT_DIR" "$SLUG" "$REMOTE_ROOT" || true)"
+fi
+if [[ -z "${REMOTE_OUTER:-}" ]]; then
+  REMOTE_OUTER="${REMOTE_ROOT}/${REMOTE_PARENT}/${SLUG}"
+else
+  REMOTE_PARENT="$(basename "$(dirname "$REMOTE_OUTER")")"
+fi
 LOCAL_OUTER="$LOCAL_GC/$REMOTE_PARENT/$SLUG"
-REMOTE_OUTER="${REMOTE_ROOT}/${REMOTE_PARENT}/${SLUG}"
 
 echo "========================================"
 echo "GameCenter local pipeline"
@@ -63,7 +72,6 @@ echo "========================================"
 if [[ "$SKIP_PULL" -eq 0 ]]; then
   echo ""
   echo "==> [1/3] Pull from server"
-  REMOTE_PROJECT_DIR="$(gc_remote_project_dir "$HOST_RAW" "$SLUG" "${REMOTE_MCHAT:-/opt/xiaoxiao/mchat}" || true)"
   echo "  remote outer:  ${RSYNC_HOST}:${REMOTE_OUTER}/"
   if [[ -n "$REMOTE_PROJECT_DIR" ]]; then
     echo "  remote nested: ${REMOTE_PROJECT_DIR}"
@@ -86,7 +94,6 @@ if [[ "$SKIP_PULL" -eq 0 ]]; then
 else
   echo ""
   echo "==> [1/3] Pull skipped (--skip-pull)"
-  REMOTE_PROJECT_DIR="$(gc_remote_project_dir "$HOST_RAW" "$SLUG" "${REMOTE_MCHAT:-/opt/xiaoxiao/mchat}" || true)"
 fi
 
 if [[ ! -d "$LOCAL_OUTER" ]]; then
@@ -144,6 +151,11 @@ fi
 echo "Build output: $BUILD_OUT"
 if [[ ! -d "$BUILD_OUT" || -z "$(ls -A "$BUILD_OUT" 2>/dev/null || true)" ]]; then
   echo "build/web-mobile missing or empty: $BUILD_OUT" >&2
+  exit 1
+fi
+if [[ ! -f "$BUILD_OUT/index.html" ]]; then
+  echo "build/web-mobile incomplete (missing index.html): $BUILD_OUT" >&2
+  echo "Refusing to push a broken playable. For Cocos 2.x on Windows SSH, avoid --force (needs GPU/desktop session)." >&2
   exit 1
 fi
 

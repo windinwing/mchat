@@ -400,9 +400,10 @@ async def process_message(
             fallback_user_id=ai_config.user_id,
         )
         group_devbridge_allowlists: dict[str, set[str]] | None = None
+        group_member_role: str | None = None
         if conversation.scope_type == "group" and conversation.scope_id:
             from app.models.group import Group
-            from app.services.group_service import resolve_devbridge_project_allowlists
+            from app.services.group_service import GroupService, resolve_devbridge_project_allowlists
 
             group_row = await db_session.get(Group, conversation.scope_id)
             if group_row:
@@ -412,22 +413,41 @@ async def process_message(
                         provider: {slug for slug in slugs if slug}
                         for provider, slugs in raw.items()
                     }
+            membership = await GroupService(db_session).get_membership(
+                conversation.scope_id,
+                ws_user_id,
+            )
+            if membership is not None:
+                group_member_role = membership.role
         set_bot_tool_context(
             db=db_session,
             conversation=conversation,
             user_id=ws_user_id,
             group_devbridge_allowlists=group_devbridge_allowlists,
+            platform_user_role=getattr(end_user, "role", None) if end_user is not None else None,
+            group_member_role=group_member_role,
         )
 
         tools = list(build_openai_tools(tool_skills))
         tools.extend(chat_extensions.extra_tools(conversation, studio_ctx))
+        seen_tool_names: set[str] = set()
+        deduped_tools: list[dict] = []
+        for tool in tools:
+            name = (tool.get("function") or {}).get("name") if isinstance(tool, dict) else None
+            if name and name in seen_tool_names:
+                continue
+            if name:
+                seen_tool_names.add(name)
+            deduped_tools.append(tool)
+        tools = deduped_tools
         system_prompt = append_patent_tool_hints(system_prompt, tool_skills)
+        from app.bot.gamecenter_bridge_extensions import conversation_allows_bridge
         from app.bot.skill_context import append_gamecenter_dev_hints
 
         system_prompt = append_gamecenter_dev_hints(
             system_prompt,
             prompt_skills=prompt_skills,
-            scope_type=conversation.scope_type,
+            bridge_allowed=conversation_allows_bridge(conversation),
         )
         patent_links = patent_link_settings_from_skills(tool_skills)
 

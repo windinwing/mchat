@@ -23,6 +23,29 @@ gc_resolve_nested_project_dir() {
   printf '%s\n' "$outer"
 }
 
+# Outer slug directory for rsync (walk up from nested Cocos project dir).
+gc_slug_outer_from_project_dir() {
+  local project_dir="${1:-}"
+  local slug="${2:-}"
+  local remote_root="${3:-}"
+  if [[ -z "$project_dir" || -z "$slug" ]]; then
+    return 1
+  fi
+  local outer="$project_dir"
+  while [[ "$(basename "$outer")" != "$slug" ]]; do
+    local parent
+    parent="$(dirname "$outer")"
+    if [[ "$outer" == "$parent" ]]; then
+      return 1
+    fi
+    if [[ -n "$remote_root" && "$parent" == "$remote_root" ]]; then
+      return 1
+    fi
+    outer="$parent"
+  done
+  printf '%s\n' "$outer"
+}
+
 # Resolve remote nested Cocos project dir for a slug (requires ssh + mchat on server).
 gc_remote_project_dir() {
   local host_raw="${1:-}"
