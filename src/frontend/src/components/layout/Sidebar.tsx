@@ -53,7 +53,7 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
     { path: '/admin/knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
     { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
     { path: '/admin/devbridge', labelKey: 'nav.devbridge', icon: Code2 },
-    { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow, badgeKey: 'nav.workflowsBeta' },
+    { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow },
     { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
     { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
     { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
@@ -74,7 +74,7 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
     { path: '/admin/conversations', labelKey: 'nav.conversations', icon: MessageSquare },
     { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
     { path: '/admin/devbridge', labelKey: 'nav.devbridge', icon: Code2 },
-    { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow, badgeKey: 'nav.workflowsBeta' },
+    { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow },
     { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
     { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
     { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
@@ -105,11 +105,6 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
               <MessageCircle className="w-5 h-5 text-white" />
             </div>
             <span className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">MChat</span>
-          </div>
-        )}
-        {collapsed && (
-          <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center shrink-0 cursor-pointer" onClick={() => navigate('/admin')}>
-            <MessageCircle className="w-5 h-5 text-white" />
           </div>
         )}
         <button
@@ -148,9 +143,6 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
                 {!collapsed && (
                   <>
                     <span className="flex-1 text-left truncate">{t(item.labelKey)}</span>
-                    {'badgeKey' in item && item.badgeKey ? (
-                      <Badge variant="warning" size="sm" className="shrink-0">{t(item.badgeKey)}</Badge>
-                    ) : null}
                   </>
                 )}
               </button>

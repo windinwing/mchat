@@ -363,9 +363,6 @@ export function SkillManager() {
             leftIcon={<Search className="w-4 h-4" />}
             className="min-w-[240px]"
           />
-          <div className="w-[220px] max-w-full">
-            <Select value={scopeValue} onChange={(e) => setScopeValue(e.target.value)} options={scopeOptions} />
-          </div>
         </div>
         <div className="flex gap-2">
           {canAuthorSkills && (
@@ -415,6 +412,10 @@ export function SkillManager() {
             </Button>
           )}
         </div>
+      </div>
+
+      <div className="w-[220px] max-w-full">
+        <Select value={scopeValue} onChange={(e) => setScopeValue(e.target.value)} options={scopeOptions} />
       </div>
 
       {/* Hidden file input */}

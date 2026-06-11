@@ -90,3 +90,6 @@ ops/local/
 # Internal ops docs (local only)
 docs/core-cloud-split.zh.md
 docs/core-cloud-split.en.md
+
+# Runtime data
+data/

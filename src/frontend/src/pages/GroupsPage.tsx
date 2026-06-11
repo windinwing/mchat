@@ -105,6 +105,7 @@ export function GroupsPage() {
   const [selectedUserId, setSelectedUserId] = useState('')
   const [selectedRole, setSelectedRole] = useState('member')
   const [savingMember, setSavingMember] = useState(false)
+  const [updatingMemberRoleId, setUpdatingMemberRoleId] = useState<string | null>(null)
   const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', description: '' })
   const [skillOptions, setSkillOptions] = useState<SkillOption[]>([])
@@ -334,6 +335,24 @@ export function GroupsPage() {
       toast(err instanceof Error ? err.message : t('groups.memberSaveFailed'), { type: 'error' })
     } finally {
       setSavingMember(false)
+    }
+  }
+
+  const handleUpdateMemberRole = async (member: GroupMemberRow, role: string) => {
+    if (!memberDialogGroup || member.role === role) return
+    setUpdatingMemberRoleId(member.id)
+    try {
+      await api.post(`/groups/${memberDialogGroup.id}/members`, {
+        user_id: member.user_id,
+        role,
+      })
+      toast(t('groups.memberRoleUpdated'), { type: 'success' })
+      await loadMembers(memberDialogGroup)
+      await loadGroups()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t('groups.memberSaveFailed'), { type: 'error' })
+    } finally {
+      setUpdatingMemberRoleId(null)
     }
   }
 
@@ -593,20 +612,32 @@ export function GroupsPage() {
             <div className="space-y-2">
               {members.map((member) => (
                 <div key={member.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                       {member.display_name || member.username || member.user_id}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {t('groups.memberListRoles', {
+                      {t('groups.memberListAccount', {
                         account: accountRoleLabel(
                           member.user_role
                             ?? users.find((u) => u.id === member.user_id)?.role,
                           t,
                         ),
-                        group: groupRoleLabel(member.role, t),
                       })}
                     </p>
+                  </div>
+                  <div className="w-36 shrink-0">
+                    <Select
+                      aria-label={t('groups.memberRoleLabel')}
+                      value={member.role}
+                      disabled={updatingMemberRoleId === member.id}
+                      options={[
+                        { value: 'member', label: t('groups.roleMember') },
+                        { value: 'editor', label: t('groups.roleEditor') },
+                        { value: 'owner', label: t('groups.roleOwner') },
+                      ]}
+                      onChange={(e) => void handleUpdateMemberRole(member, e.target.value)}
+                    />
                   </div>
                   <Button variant="ghost" size="sm" onClick={() => void handleRemoveMember(member)}>
                     {t('common.delete')}
