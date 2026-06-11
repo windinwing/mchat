@@ -113,8 +113,10 @@
     "accountRoleAgent": "Staff",
     "accountRoleUser": "Registered user",
     "memberListRoles": "Account {{account}} · Group {{group}}",
+    "memberListAccount": "Account {{account}}",
     "addMember": "Add member",
     "memberSaved": "Member saved",
+    "memberRoleUpdated": "Member role updated",
     "memberSaveFailed": "Failed to save member",
     "memberRemoved": "Member removed",
     "memberRemoveFailed": "Failed to remove member",
@@ -1781,6 +1783,7 @@
     "voiceInput": "Voice input",
     "stopVoice": "Stop voice input",
     "send": "Send",
+    "stopGeneration": "Stop generation",
     "modifiedFilesTitle": "Modified files",
     "missingAgentId": "Missing Agent ID",
     "missingAgentHint": "Use a full URL, for example:",
@@ -2036,6 +2039,8 @@
     "newChat": "New chat",
     "newChatTitle": "New chat",
     "noChatHistory": "No conversations yet",
+    "deleteChatConfirm": "Delete this conversation? Messages cannot be recovered.",
+    "deleteChatFailed": "Delete failed",
     "untitledChat": "Untitled"
   }
 }

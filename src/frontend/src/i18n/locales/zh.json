@@ -113,8 +113,10 @@
     "accountRoleAgent": "员工",
     "accountRoleUser": "注册用户",
     "memberListRoles": "账号 {{account}} · 群组 {{group}}",
+    "memberListAccount": "账号 {{account}}",
     "addMember": "添加成员",
     "memberSaved": "成员已保存",
+    "memberRoleUpdated": "成员角色已更新",
     "memberSaveFailed": "保存成员失败",
     "memberRemoved": "成员已移除",
     "memberRemoveFailed": "移除成员失败",
@@ -1779,6 +1781,7 @@
     "voiceInput": "语音输入",
     "stopVoice": "停止语音输入",
     "send": "发送",
+    "stopGeneration": "停止生成",
     "modifiedFilesTitle": "本次修改的文件",
     "missingAgentId": "缺少 Agent ID",
     "missingAgentHint": "请使用完整链接，例如：",
@@ -2035,6 +2038,8 @@
     "newChat": "新对话",
     "newChatTitle": "新对话",
     "noChatHistory": "暂无历史对话",
+    "deleteChatConfirm": "确定删除这条对话？消息将无法恢复。",
+    "deleteChatFailed": "删除失败",
     "untitledChat": "未命名对话"
   }
 }

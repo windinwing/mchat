@@ -152,6 +152,8 @@ interface ChatState {
   streamingContent: string
   isLoading: boolean
   error: string | null
+  /** Per-conversation streaming state preserved across navigation */
+  _streamingSnapshots: Record<string, { content: string; isStreaming: boolean }>
 
   fetchConversations: () => Promise<void>
   fetchMessages: (conversationId: string) => Promise<void>
@@ -178,6 +180,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingContent: '',
   isLoading: false,
   error: null,
+  _streamingSnapshots: {},
 
   fetchConversations: async () => {
     set({ isLoading: true })
@@ -190,14 +193,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchMessages: async (conversationId: string) => {
-    const localSnapshot = get().messages
+    const state = get()
+    const prevConvId = state.currentConversation?.id
+
+    const localSnapshot = state.messages
     const sameConversation =
-      get().currentConversation?.id === conversationId ||
+      prevConvId === conversationId ||
       localSnapshot.some((m) => m.conversation_id === conversationId)
+
+    // Save streaming state for the conversation we're leaving
+    const snapshots = { ...state._streamingSnapshots }
+    if (prevConvId && prevConvId !== conversationId && state.isStreaming) {
+      snapshots[prevConvId] = {
+        content: state.streamingContent,
+        isStreaming: true,
+      }
+    }
+    // Restore streaming state for the conversation we're entering, if saved
+    const restored = snapshots[conversationId]
+    if (restored) {
+      delete snapshots[conversationId]
+    }
+
     set({
       isLoading: true,
-      isStreaming: false,
-      streamingContent: '',
+      isStreaming: restored ? true : false,
+      streamingContent: restored ? restored.content : '',
+      _streamingSnapshots: snapshots,
       ...(sameConversation
         ? {}
         : { messages: [], currentConversation: null }),

@@ -191,6 +191,7 @@ export function useChat(conversationId?: string) {
     error,
     sendMessage,
     createConversation,
+    endStream,
     clearCurrentConversation,
     setError,
   }

@@ -234,6 +234,24 @@ async def close_conversation(
     return {"status": "closed"}
 
 
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    chat_service = ChatService(db)
+    success = await chat_service.delete_conversation(
+        conversation_id=conversation_id,
+        actor_user_id=current_user.id,
+    )
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+
 @router.post("/conversations/init", response_model=ConversationResponse)
 async def init_conversation(
     request: InitConversationRequest,

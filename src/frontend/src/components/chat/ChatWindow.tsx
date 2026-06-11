@@ -13,6 +13,7 @@ interface ChatWindowProps {
   isStreaming: boolean
   streamingContent: string
   onSend: (content: string, options?: ChatSendOptions) => void
+  onStop: () => void
   title?: string
   emptyMessage?: string
   disabled?: boolean
@@ -38,6 +39,7 @@ export function ChatWindow({
   isStreaming,
   streamingContent,
   onSend,
+  onStop,
   title,
   emptyMessage,
   disabled = false,
@@ -63,13 +65,29 @@ export function ChatWindow({
   const resolvedEmpty = emptyMessage ?? t('chat.emptyStart')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const forceScrollRef = useRef(false)
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' })
+  }
+
+  const handleSend = (content: string, options?: ChatSendOptions) => {
+    forceScrollRef.current = true
+    onSend(content, options)
+    requestAnimationFrame(() => scrollToBottom('auto'))
+  }
 
   useEffect(() => {
     const container = containerRef.current
     if (!container || !messagesEndRef.current) return
+    if (forceScrollRef.current) {
+      scrollToBottom(isStreaming ? 'auto' : 'smooth')
+      if (!isStreaming) forceScrollRef.current = false
+      return
+    }
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
     if (distanceFromBottom < 160) {
-      messagesEndRef.current.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth' })
+      scrollToBottom(isStreaming ? 'auto' : 'smooth')
     }
   }, [messages, streamingContent, isStreaming])
 
@@ -175,7 +193,9 @@ export function ChatWindow({
           )}
         >
       <ChatInput
-        onSend={onSend}
+        onSend={handleSend}
+        onStop={onStop}
+        isStreaming={isStreaming}
         disabled={disabled}
         compact={embed}
         singleLine={embed}

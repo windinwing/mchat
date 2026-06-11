@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { MessageSquare, Plus } from 'lucide-react'
+import { MessageSquare, Plus, Trash2 } from 'lucide-react'
 import api from '@/lib/api'
 import { Conversation } from '@/stores/chat'
 import { Button } from '@/components/ui/Button'
+import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { cn } from '@/lib/utils'
+import { toast } from '@/components/ui/Toast'
+
+interface ScopeOption {
+  value: string
+  label: string
+}
 
 interface AssistantChatSidebarProps {
   channelId?: string
@@ -15,6 +22,9 @@ interface AssistantChatSidebarProps {
   chatBasePath?: string
   scopeType?: 'personal' | 'group'
   scopeId?: string
+  scopeOptions?: ScopeOption[]
+  scopeValue?: string
+  onScopeChange?: (value: string) => void
 }
 
 function buildChatUrl(
@@ -41,6 +51,9 @@ export function AssistantChatSidebar({
   chatBasePath = '/chat',
   scopeType = 'personal',
   scopeId,
+  scopeOptions,
+  scopeValue,
+  onScopeChange,
 }: AssistantChatSidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -54,7 +67,7 @@ export function AssistantChatSidebar({
       const data = await api.get<{ items: Conversation[]; total: number }>(
         '/chat/conversations',
         {
-          limit: '50',
+          limit: '200',
           scope_type: scopeType,
           ...(scopeId ? { scope_id: scopeId } : {}),
           ...(channelId ? { customer_id: channelId } : {}),
@@ -71,6 +84,19 @@ export function AssistantChatSidebar({
   useEffect(() => {
     load()
   }, [load, activeConversationId])
+
+  const handleDelete = async (conv: Conversation) => {
+    if (!window.confirm(t('portal.deleteChatConfirm', 'Delete this conversation?'))) return
+    try {
+      await api.delete(`/chat/conversations/${conv.id}`)
+      if (conv.id === activeConversationId) {
+        navigate(buildChatUrl(chatBasePath, 'new', channelId, scopeType, scopeId))
+      }
+      await load()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t('portal.deleteChatFailed'), { type: 'error' })
+    }
+  }
 
   const handleNewChat = async () => {
     setCreating(true)
@@ -97,8 +123,17 @@ export function AssistantChatSidebar({
   }
 
   return (
-    <aside className="hidden md:flex w-64 lg:w-72 shrink-0 flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+    <aside className="flex w-56 sm:w-64 lg:w-72 shrink-0 flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
       <div className="p-3 border-b border-gray-100 dark:border-gray-700">
+        {scopeOptions && scopeOptions.length > 1 && onScopeChange && (
+          <Select
+            className="mb-3"
+            value={scopeValue}
+            options={scopeOptions}
+            onChange={(event) => onScopeChange(event.target.value)}
+            aria-label={t('chat.scopeLabel', '聊天作用域')}
+          />
+        )}
         <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
           {t('portal.chatHistory', 'History')}
         </p>
@@ -144,14 +179,25 @@ export function AssistantChatSidebar({
                 navigate(buildChatUrl(chatBasePath, conv.id, channelId, scopeType, scopeId))
               }
               className={cn(
-                'w-full text-left rounded-lg px-3 py-2.5 text-sm transition-colors flex gap-2 items-start',
+                'w-full text-left rounded-lg px-3 py-2.5 text-sm transition-colors flex gap-2 items-start group',
                 active
                   ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-800 dark:text-primary-200'
                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50',
               )}
             >
               <MessageSquare className="w-4 h-4 shrink-0 mt-0.5 opacity-60" />
-              <span className="line-clamp-2 leading-snug">{label}</span>
+              <span className="line-clamp-2 leading-snug flex-1">{label}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleDelete(conv)
+                }}
+                title={t('common.delete')}
+                className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-red-900/30 text-gray-400 hover:text-red-600 transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             </button>
           )
         })}

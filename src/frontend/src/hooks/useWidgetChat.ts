@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import i18n from '@/i18n'
 import { normalizeMessageMedia } from '@/lib/mediaUrl'
 import type { Message } from '@/stores/chat'
@@ -123,6 +123,7 @@ export function useWidgetChat(
   const [streamingContent, setStreamingContent] = useState('')
   const [historyLoading, setHistoryLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const base = apiUrl.replace(/\/$/, '')
   const scope = widgetScope(agentId, skillId)
@@ -249,6 +250,8 @@ export function useWidgetChat(
       setIsStreaming(true)
       setStreamingContent('')
       setError(null)
+      const controller = new AbortController()
+      abortRef.current = controller
 
       const convId = localStorage.getItem(conversationStorageKey(scope))
 
@@ -271,6 +274,7 @@ export function useWidgetChat(
           const uploadRes = await fetch(`${base}/widget/${agentId}/upload`, {
             method: 'POST',
             body: form,
+            signal: controller.signal,
           })
           if (!uploadRes.ok) {
             const errBody = await uploadRes.json().catch(() => ({}))
@@ -300,6 +304,7 @@ export function useWidgetChat(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: payload,
+          signal: controller.signal,
         })
 
         if (streamRes.ok && streamRes.headers.get('content-type')?.includes('text/event-stream')) {
@@ -363,22 +368,26 @@ export function useWidgetChat(
           ]),
         )
       } catch (e) {
-        if (previewUrl) URL.revokeObjectURL(previewUrl)
-        const errMsg = e instanceof Error ? e.message : i18n.t('chat.networkError')
-        setError(errMsg)
-        setMessages((prev) => [
-          ...prev.filter((m) => m.id !== tempId),
-          userMessage,
-          {
-            id: `error-${Date.now()}`,
-            conversation_id: '',
-            role: 'assistant',
-            content: errMsg,
-            content_type: 'text',
-            created_at: new Date().toISOString(),
-          },
-        ])
-      } finally {
+        if (e instanceof DOMException && e.name === 'AbortError') {
+          // user stopped — keep partial content in streamingContent, let ChatWindow show it
+        } else {
+          if (previewUrl) URL.revokeObjectURL(previewUrl)
+          const errMsg = e instanceof Error ? e.message : i18n.t('chat.networkError')
+          setError(errMsg)
+          setMessages((prev) => [
+            ...prev.filter((m) => m.id !== tempId),
+            userMessage,
+            {
+              id: `error-${Date.now()}`,
+              conversation_id: '',
+              role: 'assistant',
+              content: errMsg,
+              content_type: 'text',
+              created_at: new Date().toISOString(),
+            },
+          ])
+      }} finally {
+        abortRef.current = null
         setIsLoading(false)
         setIsStreaming(false)
         setStreamingContent('')
@@ -386,6 +395,13 @@ export function useWidgetChat(
     },
     [agentId, base, isLoading, isStreaming, skillId, scope],
   )
+
+  const endStream = useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setIsStreaming(false)
+    setIsLoading(false)
+  }, [])
 
   return {
     messages,
@@ -395,6 +411,7 @@ export function useWidgetChat(
     historyLoading,
     error,
     sendMessage,
+    endStream,
     reloadHistory: loadHistory,
     setError,
   }

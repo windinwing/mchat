@@ -223,6 +223,7 @@ export function Widget({
       isStreaming={chat.isStreaming}
       streamingContent={chat.streamingContent}
       onSend={(content, options) => chat.sendMessage(content, options?.file)}
+      onStop={chat.endStream}
       title={isPage ? resolved.botName : undefined}
       emptyMessage={
         resolved.subscriptionActive

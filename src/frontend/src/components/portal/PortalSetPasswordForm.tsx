@@ -11,7 +11,6 @@ export function PortalSetPasswordForm() {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [saving, setSaving] = useState(false)
-  const [useCurrent, setUseCurrent] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -21,9 +20,9 @@ export function PortalSetPasswordForm() {
     }
     setSaving(true)
     try {
-      await api.post('/auth/set-password', {
+      await api.post('/auth/change-password', {
+        current_password: currentPassword,
         new_password: newPassword,
-        current_password: useCurrent ? currentPassword : undefined,
       })
       toast(t('users.passwordChanged'), { type: 'success' })
       setCurrentPassword('')
@@ -42,24 +41,14 @@ export function PortalSetPasswordForm() {
       <p className="text-sm text-gray-500 dark:text-gray-400">
         {t('portal.setPasswordHint')}
       </p>
-      <label className="flex items-center gap-2 text-sm cursor-pointer text-gray-700 dark:text-gray-300">
-        <input
-          type="checkbox"
-          checked={useCurrent}
-          onChange={(e) => setUseCurrent(e.target.checked)}
-          className="rounded border-gray-300"
-        />
-        {t('portal.haveOldPassword')}
-      </label>
-      {useCurrent && (
-        <Input
-          label={t('users.currentPassword')}
-          type="password"
-          value={currentPassword}
-          onChange={(e) => setCurrentPassword(e.target.value)}
-          autoComplete="current-password"
-        />
-      )}
+      <Input
+        label={t('users.currentPassword')}
+        type="password"
+        value={currentPassword}
+        onChange={(e) => setCurrentPassword(e.target.value)}
+        required
+        autoComplete="current-password"
+      />
       <Input
         label={t('users.newPassword')}
         type="password"

@@ -857,3 +857,24 @@ class ChatService:
         )
 
         return True
+
+    async def delete_conversation(
+        self,
+        conversation_id: str,
+        actor_user_id: str,
+    ) -> bool:
+        result = await self.db.execute(
+            select(Conversation).where(Conversation.id == conversation_id)
+        )
+        conversation = result.scalar_one_or_none()
+        if conversation is None:
+            return False
+        if not await self._actor_can_access_conversation(actor_user_id, conversation):
+            raise HTTPException(status_code=403, detail="Cannot delete this conversation")
+
+        await self.db.execute(
+            Message.__table__.delete().where(Message.conversation_id == conversation_id)
+        )
+        await self.db.delete(conversation)
+        await self.db.flush()
+        return True

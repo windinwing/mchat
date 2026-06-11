@@ -153,6 +153,10 @@ export function ChatPage() {
     }
   }
 
+  const handleStop = () => {
+    chat.endStream()
+  }
+
   const handleScopeChange = (value: string) => {
     if (value === 'personal') {
       writeStoredChatScope(user?.role, { type: 'personal' })
@@ -174,6 +178,17 @@ export function ChatPage() {
           chatBasePath="/chat"
           scopeType={scopeType}
           scopeId={scopeId}
+          scopeOptions={[
+            { value: 'personal', label: t('chat.scopePersonal', '个人空间') },
+            ...groupOptions.map((group) => ({
+              value: `group:${group.id}`,
+              label: `${t('chat.scopeGroup', '群组')}: ${group.name}`,
+            })),
+          ]}
+          scopeValue={
+            scopeType === 'group' && scopeId ? `group:${scopeId}` : 'personal'
+          }
+          onScopeChange={handleScopeChange}
         />
       )}
 
@@ -200,17 +215,6 @@ export function ChatPage() {
               </p>
             )}
           </div>
-          <div className="w-52 hidden sm:block">
-            <Select
-              value={scopeType === 'group' && scopeId ? `group:${scopeId}` : 'personal'}
-              options={[
-                { value: 'personal', label: t('chat.scopePersonal', '个人空间') },
-                ...groupOptions.map((group) => ({ value: `group:${group.id}`, label: `${t('chat.scopeGroup', '群组')}: ${group.name}` })),
-              ]}
-              onChange={(event) => handleScopeChange(event.target.value)}
-              aria-label={t('chat.scopeLabel', '聊天作用域')}
-            />
-          </div>
           <LanguageSwitcher variant="ghost" />
         </header>
 
@@ -232,6 +236,7 @@ export function ChatPage() {
             isStreaming={chat.isStreaming}
             streamingContent={chat.streamingContent}
             onSend={handleSend}
+            onStop={handleStop}
             disabled={chat.isStreaming}
             loading={chat.isLoading}
             emptyMessage={

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Send, Paperclip, X, Mic, Square, Link2, Plus } from 'lucide-react'
+import { Send, Paperclip, X, Mic, Square, Link2, Plus, StopCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSpeechInput } from '@/hooks/useSpeechInput'
 import { useInputHistory } from '@/hooks/useInputHistory'
@@ -8,6 +8,8 @@ import { ChatSendOptions, OutboundAsset } from '@/stores/chat'
 
 interface ChatInputProps {
   onSend: (content: string, options?: ChatSendOptions) => void
+  onStop?: () => void
+  isStreaming?: boolean
   disabled?: boolean
   placeholder?: string
   compact?: boolean
@@ -26,6 +28,8 @@ interface ChatInputProps {
 
 export function ChatInput({
   onSend,
+  onStop,
+  isStreaming = false,
   disabled = false,
   placeholder,
   compact = false,
@@ -485,6 +489,17 @@ export function ChatInput({
         >
           <Send className="w-5 h-5" />
         </button>
+
+        {isStreaming && onStop && (
+          <button
+            type="button"
+            onClick={onStop}
+            title={t('chat.stopGeneration')}
+            className="p-2.5 rounded-xl bg-red-600 text-white hover:bg-red-700 transition-colors animate-pulse"
+          >
+            <StopCircle className="w-5 h-5" />
+          </button>
+        )}
       </div>
     </div>
   )
