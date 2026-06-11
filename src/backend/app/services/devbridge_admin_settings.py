@@ -30,6 +30,7 @@ class GamecenterBridgeSettings(BaseModel):
     bridge_group_scope_only: bool | None = None
     release_keep_builds: int | None = None
     release_keep: int | None = None
+    git_auto_commit: bool | None = None
 
 
 class CustomBridgeProviderSettings(BaseModel):
@@ -151,6 +152,7 @@ def resolved_gamecenter_settings() -> dict[str, Any]:
             int(settings.gamecenter_release_keep_builds or 10),
         ),
         "release_keep": _pick_int(admin.release_keep, int(settings.gamecenter_release_keep or 20)),
+        "git_auto_commit": _pick_bool(admin.git_auto_commit, bool(getattr(settings, "gamecenter_git_auto_commit", False))),
     }
 
 

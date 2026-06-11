@@ -645,9 +645,90 @@ _NEW_WRITE_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_init_devbridge_project",
+            "description": "Initialize a git repository for a project. Creates .gitignore (library/temp/build/node_modules), stages all files, and creates an initial commit. Only needed once per project.",
+            "parameters": {
+                "type": "object",
+                "properties": {"slug": {"type": "string", "description": "Project slug/folder name"}},
+                "required": ["slug"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_commit_devbridge_project",
+            "description": "Stage all changes and create a git commit. Use after code edits to save a checkpoint.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Project slug/folder name"},
+                    "message": {"type": "string", "description": "Commit message"},
+                },
+                "required": ["slug", "message"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_set_remote_devbridge_project",
+            "description": "Set the git remote origin URL for pushing to GitLab/GitHub.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Project slug/folder name"},
+                    "remote_url": {"type": "string", "description": "Git remote URL, e.g. git@10.98.8.123:game/my-project.git"},
+                },
+                "required": ["slug", "remote_url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_push_devbridge_project",
+            "description": "Push commits to the configured remote origin.",
+            "parameters": {
+                "type": "object",
+                "properties": {"slug": {"type": "string", "description": "Project slug/folder name"}},
+                "required": ["slug"],
+            },
+        },
+    },
 ]
 
-_NEW_READ_TOOL_NAMES = {tool["function"]["name"] for tool in _NEW_READ_TOOLS}
+_NEW_GIT_READ_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "git_status_devbridge_project",
+            "description": "Show git working tree status: changed files, untracked files, remote config.",
+            "parameters": {
+                "type": "object",
+                "properties": {"slug": {"type": "string", "description": "Project slug/folder name"}},
+                "required": ["slug"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_log_devbridge_project",
+            "description": "Show recent git commit history for a project.",
+            "parameters": {
+                "type": "object",
+                "properties": {"slug": {"type": "string", "description": "Project slug/folder name"}},
+                "required": ["slug"],
+            },
+        },
+    },
+]
+
+_NEW_READ_TOOL_NAMES = {tool["function"]["name"] for tool in _NEW_READ_TOOLS} | {tool["function"]["name"] for tool in _NEW_GIT_READ_TOOLS}
 _NEW_WRITE_TOOL_NAMES = {tool["function"]["name"] for tool in _NEW_WRITE_TOOLS}
 _NEW_ALL_TOOL_NAMES = _NEW_READ_TOOL_NAMES | _NEW_WRITE_TOOL_NAMES
 
@@ -771,6 +852,7 @@ def _extra_tools(conversation: Conversation, _ctx: Any) -> list[dict[str, Any]]:
         return []
     tools = list(_READ_TOOLS)
     tools.extend(_NEW_READ_TOOLS)
+    tools.extend(_NEW_GIT_READ_TOOLS)
     if not devbridge_write_allowed():
         return tools
     cfg = _gc_settings()
@@ -963,6 +1045,18 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
                 content += f"\n\n⚠️ 自动编译失败：{auto_build['error']}"
             elif auto_build.get("ok"):
                 content += "\n\n" + _fmt_build(auto_build)
+
+        # auto git commit when enabled
+        slug = str(args.get("slug") or "")
+        cfg = _gc_settings()
+        if cfg.get("git_auto_commit"):
+            try:
+                git_result = service.git_commit(slug, (str(args.get("summary") or "") or f"Update {result.get('path', '?')}"))
+                if git_result.get("commit"):
+                    content += f"\n📝 已自动提交: `{git_result['commit']}`"
+            except Exception:
+                pass
+
         return {
             "ok": True,
             "content": content,
@@ -1127,6 +1221,17 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
         except Exception:
             pass
         content = _fmt_patch_result(result, verify_snippet=verify_snippet)
+
+        # auto git commit when enabled
+        cfg = _gc_settings()
+        if cfg.get("git_auto_commit"):
+            try:
+                git_result = service.git_commit(slug, (str(args.get("summary") or "") or f"Update {result.get('path', path)}"))
+                if git_result.get("commit"):
+                    content += f"\n📝 已自动提交: `{git_result['commit']}`"
+            except Exception:
+                pass
+
         return {"ok": True, "content": content, "modified_path": result.get("path"), **result}
 
     if name == "build_devbridge_project":
@@ -1221,6 +1326,75 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
         if result.get("overwritten"):
             content += "（已覆盖）"
         return {"ok": True, "content": content, **result}
+
+    # ── git tools ──
+
+    if name == "git_status_devbridge_project":
+        slug = str(args.get("slug") or "")
+        result = service.git_status(slug)
+        if not result.get("initialized"):
+            return {"ok": True, "content": f"📂 `{slug}` 尚未初始化 git。用 git_init_devbridge_project 来启用版本管理。", **result}
+        changes = result.get("files", [])
+        lines = [f"📂 `{slug}` git 状态"]
+        if changes:
+            for f in changes[:20]:
+                lines.append(f"  {f['status']:>2} {f['file']}")
+            if len(changes) > 20:
+                lines.append(f"  … 共 {len(changes)} 项变更")
+        else:
+            lines.append("  ✅ 工作区干净")
+        if result.get("has_remote"):
+            lines.append("  🌐 已配置远程仓库")
+        return {"ok": True, "content": "\n".join(lines), **result}
+
+    if name == "git_log_devbridge_project":
+        slug = str(args.get("slug") or "")
+        result = service.git_log(slug)
+        if not result.get("initialized"):
+            return {"ok": True, "content": f"📂 `{slug}` 尚未初始化 git。", **result}
+        commits = result.get("commits", [])
+        lines = [f"📂 `{slug}` 最近提交:"]
+        for c in commits[:15]:
+            lines.append(f"  {c}")
+        if len(commits) > 15:
+            lines.append(f"  … 共 {len(commits)} 条")
+        return {"ok": True, "content": "\n".join(lines), **result}
+
+    if name == "git_init_devbridge_project":
+        slug = str(args.get("slug") or "")
+        try:
+            result = service.git_init(slug)
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail), "content": f"❌ {exc.detail}"}
+        return {"ok": True, "content": f"✅ `{slug}` git 仓库已初始化（含 .gitignore、初始提交）", **result}
+
+    if name == "git_commit_devbridge_project":
+        slug = str(args.get("slug") or "")
+        message = str(args.get("message") or "Update via DevBridge")
+        try:
+            result = service.git_commit(slug, message)
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail), "content": f"❌ {exc.detail}"}
+        if result.get("status") == "nothing_to_commit":
+            return {"ok": True, "content": f"📂 `{slug}` 没有需要提交的变更，工作区已是最新。", **result}
+        return {"ok": True, "content": f"✅ `{slug}` 已提交: `{result.get('commit', '')}`", **result}
+
+    if name == "git_set_remote_devbridge_project":
+        slug = str(args.get("slug") or "")
+        remote_url = str(args.get("remote_url") or "")
+        try:
+            result = service.git_set_remote(slug, remote_url)
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail), "content": f"❌ {exc.detail}"}
+        return {"ok": True, "content": f"✅ `{slug}` 远程仓库已设为 `{result['remote_url']}`", **result}
+
+    if name == "git_push_devbridge_project":
+        slug = str(args.get("slug") or "")
+        try:
+            result = service.git_push(slug)
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail), "content": f"❌ {exc.detail}"}
+        return {"ok": True, "content": f"✅ `{slug}` 已推送到远程仓库", **result}
 
     return None
 

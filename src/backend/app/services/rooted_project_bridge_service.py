@@ -463,6 +463,94 @@ class RootedProjectBridgeService:
         meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"ok": True, **metadata}
 
+    # ── git integration ──
+
+    _GITIGNORE_CONTENT = "library/\ntemp/\nbuild/\nnode_modules/\n.idea/\n.vscode/\n*.log\n"
+
+    @staticmethod
+    def _git(project_dir: Path, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", str(project_dir), *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    def git_init(self, slug: str) -> dict:
+        self._ensure_write_enabled()
+        project_dir = self._project_dir(slug)
+        if (project_dir / ".git").is_dir():
+            raise HTTPException(status_code=409, detail="Git already initialized")
+        proc = self._git(project_dir, "init")
+        if proc.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"git init failed: {proc.stderr.strip()}")
+        gitignore = project_dir / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text(self._GITIGNORE_CONTENT)
+        self._git(project_dir, "add", "-A")
+        self._git(project_dir, "commit", "-m", "Initial commit (DevBridge)")
+        return {"ok": True, "slug": slug, "action": "initialized"}
+
+    def git_commit(self, slug: str, message: str) -> dict:
+        self._ensure_write_enabled()
+        project_dir = self._project_dir(slug)
+        if not (project_dir / ".git").is_dir():
+            raise HTTPException(status_code=400, detail="Git not initialized. Use git_init first.")
+        msg = (message or "Update via DevBridge").strip()[:500]
+        self._git(project_dir, "add", "-A")
+        proc = self._git(project_dir, "commit", "-m", msg)
+        if proc.returncode != 0:
+            detail = proc.stdout.strip() + "\n" + proc.stderr.strip()
+            if "nothing to commit" in detail.lower():
+                return {"ok": True, "slug": slug, "message": msg, "status": "nothing_to_commit"}
+            raise HTTPException(status_code=500, detail=f"git commit failed: {detail}")
+        log = self._git(project_dir, "log", "-1", "--oneline")
+        return {"ok": True, "slug": slug, "message": msg, "commit": log.stdout.strip()}
+
+    def git_status(self, slug: str) -> dict:
+        self._ensure_enabled()
+        project_dir = self._project_dir(slug)
+        if not (project_dir / ".git").is_dir():
+            return {"ok": True, "slug": slug, "initialized": False, "files": []}
+        proc = self._git(project_dir, "status", "--porcelain")
+        lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+        files = [{"status": l[:2].strip(), "file": l[3:]} for l in lines]
+        has_remote = self._git(project_dir, "remote", "get-url", "origin").returncode == 0
+        return {"ok": True, "slug": slug, "initialized": True, "has_remote": has_remote, "files": files}
+
+    def git_log(self, slug: str, *, max_count: int = 20) -> dict:
+        self._ensure_enabled()
+        project_dir = self._project_dir(slug)
+        if not (project_dir / ".git").is_dir():
+            return {"ok": True, "slug": slug, "initialized": False, "commits": []}
+        proc = self._git(project_dir, "log", f"-{min(max_count, 100)}", "--oneline", "--decorate")
+        commits = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+        return {"ok": True, "slug": slug, "initialized": True, "commits": commits}
+
+    def git_set_remote(self, slug: str, remote_url: str) -> dict:
+        self._ensure_write_enabled()
+        project_dir = self._project_dir(slug)
+        if not (project_dir / ".git").is_dir():
+            raise HTTPException(status_code=400, detail="Git not initialized. Use git_init first.")
+        url = remote_url.strip()
+        if not url:
+            raise HTTPException(status_code=400, detail="Remote URL is required")
+        self._git(project_dir, "remote", "remove", "origin")
+        proc = self._git(project_dir, "remote", "add", "origin", url)
+        if proc.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"git remote add failed: {proc.stderr.strip()}")
+        return {"ok": True, "slug": slug, "remote_url": url}
+
+    def git_push(self, slug: str) -> dict:
+        self._ensure_write_enabled()
+        project_dir = self._project_dir(slug)
+        if not (project_dir / ".git").is_dir():
+            raise HTTPException(status_code=400, detail="Git not initialized. Use git_init first.")
+        proc = self._git(project_dir, "push", "-u", "origin", "HEAD")
+        if proc.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"git push failed: {proc.stderr.strip()}")
+        return {"ok": True, "slug": slug, "pushed": True}
+
     def _write_build_metadata(self, build_root: Path, metadata: dict) -> None:
         build_root.mkdir(parents=True, exist_ok=True)
         (build_root / "metadata.json").write_text(
