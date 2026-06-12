@@ -5,6 +5,7 @@ from loguru import logger
 from sqlalchemy import select
 
 from app.bot.engine import process_message
+from app.bot.patent_links import linkify_patent_ids, patent_link_settings_from_skills
 from app.bot.reply_persist import ensure_assistant_reply_persisted, persist_assistant_reply
 from app.services.llm_credentials import ensure_ai_config_api_key, is_usable_api_key
 from app.core.database import async_session_factory
@@ -219,6 +220,12 @@ async def on_message_created(
                         db, conv, full_content, is_error=True, ai_config=ai_config
                     )
                     assistant_id = fallback.id
+
+            # Apply patent linkification to streamed content (same as engine does for DB)
+            from app.bot.patent_links import default_patent_portal_url_template
+            template = default_patent_portal_url_template()
+            if template:
+                full_content = linkify_patent_ids(full_content, enabled=True, template=template)
 
             # Signal stream end (include DB id so UI can dedupe)
             await ws_manager.send_to_conversation(
