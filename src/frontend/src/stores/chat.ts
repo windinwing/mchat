@@ -469,10 +469,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       const fromPayload = (message.content ?? '').trim()
       const fromStream = (state.streamingContent ?? '').trim()
-      const content = fromPayload || fromStream
+      let content = fromPayload || fromStream
       if (!content) {
         return { isStreaming: false, streamingContent: '' }
       }
+      // Strip trailing partial HTML/markdown tags (e.g. <em ..., <a href=...)
+      content = content.replace(/\s*<[^>\s]*(?:\s[^>]*)?$/, '')
       const id = message.id || `msg-${Date.now()}`
       const conversation_id =
         message.conversation_id || state.messages[0]?.conversation_id || ''

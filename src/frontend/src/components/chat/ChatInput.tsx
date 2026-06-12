@@ -475,20 +475,22 @@ export function ChatInput({
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={disabled || (!content.trim() && !selectedFile && outboundLinks.length === 0)}
-          className={cn(
-            'p-2.5 rounded-xl transition-colors',
-            content.trim() || selectedFile || outboundLinks.length > 0
-              ? 'bg-primary-600 text-white hover:bg-primary-700'
-              : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500 cursor-not-allowed',
-          )}
-          title={t('chat.send')}
-        >
-          <Send className="w-5 h-5" />
-        </button>
+        {!isStreaming && (
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={disabled || (!content.trim() && !selectedFile && outboundLinks.length === 0)}
+            className={cn(
+              'p-2.5 rounded-xl transition-colors',
+              content.trim() || selectedFile || outboundLinks.length > 0
+                ? 'bg-primary-600 text-white hover:bg-primary-700'
+                : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500 cursor-not-allowed',
+            )}
+            title={t('chat.send')}
+          >
+            <Send className="w-5 h-5" />
+          </button>
+        )}
 
         {isStreaming && onStop && (
           <button
