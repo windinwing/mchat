@@ -503,6 +503,22 @@ async def process_message(
                 }
             )
         messages_list.extend(sanitize_history_messages(history_payload))
+
+        # Compress context if approaching model limit
+        from app.bot.context_compressor import compress_history, get_context_limit
+
+        context_limit = get_context_limit(ai_config.model or "")
+        from app.bot.provider import create_provider as _provider_factory
+
+        messages_list = await compress_history(
+            messages_list,
+            context_limit=context_limit,
+            provider_factory=_provider_factory,
+            model=ai_config.model or "",
+            api_key=ai_config.api_key or "",
+            api_base=ai_config.api_base,
+        )
+
         messages_list.append(
             {
                 "role": "user",
