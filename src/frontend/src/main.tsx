@@ -3,10 +3,12 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
+import { installChunkLoadRecovery } from './lib/chunkLoadRecovery'
 import { initTheme } from './lib/theme'
 import './i18n'
 import './styles/index.css'
 
+installChunkLoadRecovery()
 initTheme()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

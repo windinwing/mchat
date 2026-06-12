@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react'
 import { AlertTriangle } from 'lucide-react'
+import { isChunkLoadError, reloadOnceOnChunkError } from '@/lib/chunkLoadRecovery'
 
 interface Props {
   children: ReactNode
@@ -18,10 +19,18 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): State {
+    if (isChunkLoadError(error)) {
+      reloadOnceOnChunkError()
+      return { hasError: false, error: null }
+    }
     return { hasError: true, error }
   }
 
   componentDidCatch(error: Error, info: { componentStack: string }) {
+    if (isChunkLoadError(error)) {
+      reloadOnceOnChunkError()
+      return
+    }
     console.error('ErrorBoundary caught:', error, info.componentStack)
   }
 
@@ -39,16 +48,18 @@ export class ErrorBoundary extends Component<Props, State> {
             Something went wrong
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 max-w-md">
-            {this.state.error?.message || 'An unexpected error occurred.'}
+            {isChunkLoadError(this.state.error)
+              ? '页面资源已更新，请刷新后继续使用。'
+              : this.state.error?.message || 'An unexpected error occurred.'}
           </p>
           <button
             onClick={() => {
               this.setState({ hasError: false, error: null })
-              window.location.reload()
+              reloadOnceOnChunkError()
             }}
             className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
           >
-            Reload Page
+            {isChunkLoadError(this.state.error) ? '刷新页面' : 'Reload Page'}
           </button>
         </div>
       )

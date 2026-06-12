@@ -1,14 +1,10 @@
 /** Cloud-only portal routes (imported by AppPortal / main-portal only). */
-import { lazy, Suspense } from 'react'
+import { Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { isCloudEdition } from '@/lib/edition'
+import { lazyNamed } from '@/lib/chunkLoadRecovery'
 import { UserLayout } from './components/layout/UserLayout'
 import { Spinner } from './components/ui/Spinner'
-
-const lazyNamed = <T extends Record<string, React.ComponentType<any>>>(
-  loader: () => Promise<T>,
-  name: keyof T
-) => lazy(() => loader().then(m => ({ default: m[name] })))
 
 const RegisterPage = lazyNamed(() => import('./pages/RegisterPage'), 'RegisterPage')
 const Auth9235CallbackPage = lazyNamed(

@@ -1,15 +1,11 @@
-import { lazy, Suspense } from 'react'
+import { Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { isCloudEdition, isSignupEnabled } from '@/lib/edition'
+import { lazyNamed } from '@/lib/chunkLoadRecovery'
 import { AdminLayout } from './components/layout/AdminLayout'
 import { UserLayout } from './components/layout/UserLayout'
 import { Spinner } from './components/ui/Spinner'
 import { DocumentTitle } from './components/common/DocumentTitle'
-
-const lazyNamed = <T extends Record<string, React.ComponentType<any>>>(
-  loader: () => Promise<T>,
-  name: keyof T
-) => lazy(() => loader().then(m => ({ default: m[name] })))
 
 const LandingPage = lazyNamed(() => import('./pages/LandingPage'), 'LandingPage')
 const AdminLogin = lazyNamed(() => import('./pages/AdminLogin'), 'AdminLogin')
