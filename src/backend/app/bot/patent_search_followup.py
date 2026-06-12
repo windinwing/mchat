@@ -107,6 +107,15 @@ def patent_search_presentation_nudge(skill: Skill | None) -> str:
     return _DEFAULT_PRESENTATION_NUDGE
 
 
+_DEFAULT_EXPORT_NUDGE = (
+    "（用户看不到本条消息。下载链接已在上方显示。）\n"
+    "请用一句话确认导出成功（如「已导出 N 条记录」），然后给 2-3 条后续操作建议"
+    "（如翻页导出、统计分析、专利详情）。\n"
+    "⚠️ 禁止生成下载链接！链接已在上方展示，不要重复。"
+    "不要写 command= / page= 等技术参数。"
+)
+
+
 def patent_search_observation_nudge(skill: Skill | None) -> str:
     custom = _skill_cfg(skill, "observation_nudge", None)
     if isinstance(custom, str) and custom.strip():

@@ -18,6 +18,7 @@ from app.utils.chat_upload import attachment_prompt_text
 from app.bot.provider import create_provider
 from app.bot.patent_links import linkify_patent_ids, patent_link_settings_from_skills
 from app.bot.patent_search_followup import (
+    _DEFAULT_EXPORT_NUDGE,
     find_patent_search_skill,
     is_patent_search_success,
     patent_search_enable_presentation,
@@ -450,6 +451,7 @@ async def process_message(
             bridge_allowed=conversation_allows_bridge(conversation),
         )
         patent_links = patent_link_settings_from_skills(tool_skills)
+        logger.info("patent_links enabled={} template={}", patent_links["enabled"], patent_links["template"])
 
         def _with_patent_links(text: str) -> str:
             return linkify_patent_ids(
@@ -633,6 +635,7 @@ async def process_message(
 
             patent_search_for_summary = False
             patent_search_for_presentation = False
+            patent_search_for_export = False
             tools_executed_this_turn = True
             for tc in tool_calls_list:
                 tool_name = tc.get("name", "")
@@ -685,11 +688,13 @@ async def process_message(
                         tool_name, cmd, tool_display
                     )
                     is_export = cmd == "export"
-                    if patent_search_enable_presentation(patent_skill) and patent_search_ok:
+                    if patent_search_enable_presentation(patent_skill) and patent_search_ok and not is_export:
                         patent_search_for_presentation = True
                     elif is_export:
-                        # Export: skip raw display, let AI summarize
+                        # Export: show tool display (correct download URL), use short nudge
                         full_response += tool_display
+                        yield tool_display
+                        patent_search_for_export = True
                     else:
                         full_response += tool_display
                         yield tool_display
@@ -734,6 +739,22 @@ async def process_message(
                 synthesis_done = True
                 break
 
+            if patent_search_for_export:
+                messages_list.append(
+                    {
+                        "role": "user",
+                        "content": _DEFAULT_EXPORT_NUDGE,
+                    }
+                )
+                export_parts: list[str] = []
+                async for token in _stream_followup(with_tools=False, parts_out=export_parts):
+                    yield token
+                if export_parts:
+                    export_text = "".join(export_parts)
+                    full_response += export_text
+                synthesis_done = True
+                break
+
         if tools_executed_this_turn and not synthesis_done:
             messages_list.append(
                 {
@@ -766,6 +787,10 @@ async def process_message(
 
         if full_response:
             full_response = _with_patent_links(full_response)
+            # Fix AI-generated download URLs that use wrong domain
+            full_response = full_response.replace(
+                "https://www.9235.net/uploads/", "/uploads/"
+            )
             auto_reply_assets = [match["asset"] for match in auto_reply_matches]
             merged_assets = auto_reply_assets + tool_turn_assets
             assistant_extra_data = enrich_message_extra_data(
