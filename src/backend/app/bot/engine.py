@@ -587,6 +587,7 @@ async def process_message(
                             parts_out.append(token)
             if process_fn and all_tokens:
                 processed = process_fn("".join(all_tokens))
+                logger.info("process_fn applied: {} tokens → {} chars, has_action={}", len(all_tokens), len(processed), '](action:' in processed)
                 full_response += processed
                 # Yield processed content as one chunk for clean display
                 yield processed

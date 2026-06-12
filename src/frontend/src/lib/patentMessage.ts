@@ -133,3 +133,24 @@ export function prepareAssistantMarkdown(content: string): string {
 
   return `\`\`\`text\n${stripPatentTextFence(stripped)}\n\`\`\``
 }
+
+/**
+ * Convert dot-separated operation text into clickable action links.
+ * e.g. "下一页 · 导出Excel" → "[下一页](action:下一页) · [导出Excel](action:导出Excel)"
+ * Idempotent - skips text that already contains action links.
+ */
+export function injectActionLinksInMarkdown(content: string): string {
+  if (!content || content.includes('](action:')) return content
+  return content.replace(
+    /(?:^|\n)([^·\n]+(?:·[^·\n]+){2,})/gm,
+    (_, ops: string) => {
+      const items = ops.split(/·/).map(s => s.trim()).filter(Boolean)
+      if (items.length <= 1) return _
+      const linked = items
+        .filter(item => !item.includes(']('))
+        .map(item => `[${item}](action:${item})`)
+      if (!linked.length) return _
+      return linked.join(' · ')
+    },
+  )
+}

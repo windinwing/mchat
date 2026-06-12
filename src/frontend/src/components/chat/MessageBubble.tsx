@@ -11,6 +11,7 @@ import { createMarkdownComponents } from './markdownComponents'
 import { useThrottledValue } from '@/hooks/useThrottledValue'
 import { resolveUploadUrl } from '@/lib/mediaUrl'
 import { prepareAssistantMarkdown } from '@/lib/patentMessage'
+import { injectActionLinksInMarkdown } from '@/lib/patentMessage'
 import { rewriteMiniProgramLinksInMarkdown } from '@/lib/wechatMiniProgram'
 
 import { SkillDraftCard, SkillDraftExtra } from './SkillDraftCard'
@@ -70,7 +71,7 @@ export function MessageBubble({
       displayContent.includes('Connection error'))
   const assistantText = isErrorReply
     ? displayContent
-    : rewriteMiniProgramLinksInMarkdown(prepareAssistantMarkdown(throttledContent))
+    : injectActionLinksInMarkdown(rewriteMiniProgramLinksInMarkdown(prepareAssistantMarkdown(throttledContent)))
 
   type Attachment = { url?: string; name?: string; mime?: string }
   type OutboundAsset = {
