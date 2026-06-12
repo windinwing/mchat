@@ -7,6 +7,7 @@ import { isCloudEdition } from '@/lib/edition'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
+import { SiteCopyrightFooter } from '@/components/common/SiteCopyrightFooter'
 
 export function RegisterPage() {
   const { t } = useTranslation()
@@ -183,6 +184,9 @@ export function RegisterPage() {
             </Link>
           </p>
         </div>
+      </div>
+      <div className="absolute bottom-4 left-0 right-0 px-4">
+        <SiteCopyrightFooter className="text-center" />
       </div>
     </div>
   )

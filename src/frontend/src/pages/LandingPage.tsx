@@ -22,6 +22,7 @@ import { ThemeToggle } from '@/components/common/ThemeToggle'
 import { useAuthStore } from '@/stores/auth'
 import { landingScreenshot, LANDING_PREVIEW_CARDS } from '@/lib/landingImages'
 import { preferredStaffPath } from '@/lib/appPreferences'
+import { SiteCopyrightFooter } from '@/components/common/SiteCopyrightFooter'
 
 const GITHUB_URL = 'https://github.com/windinwing/mchat'
 
@@ -420,6 +421,9 @@ docker compose -f ops/docker/docker-compose.lite.yml up -d
       )}
 
       <footer className="border-t border-gray-200 dark:border-gray-800 py-12 bg-white dark:bg-gray-900">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-6">
+          <SiteCopyrightFooter className="text-center" />
+        </div>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <MessageCircle className="w-5 h-5 text-primary-600" />
