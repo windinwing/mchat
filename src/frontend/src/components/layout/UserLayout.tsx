@@ -13,6 +13,8 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  Workflow,
+  Clock3,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import { Avatar } from '@/components/ui/Avatar'
@@ -26,6 +28,8 @@ const navItems = [
   { path: '/portal/dashboard', label: 'portal.dashboard', icon: LayoutDashboard },
   { path: '/portal/templates', label: 'portal.templates', icon: ShoppingBag },
   { path: '/portal/channels', label: 'portal.myChannels', icon: MessageSquare },
+  { path: '/portal/workflows', label: 'portal.workflowsNav', icon: Workflow },
+  { path: '/portal/schedules', label: 'portal.schedulesNav', icon: Clock3 },
   { path: '/portal/groups', label: 'portal.groups', icon: Users },
   { path: '/portal/orders', label: 'portal.orders', icon: Receipt },
   { path: '/portal/account', label: 'portal.account', icon: Settings },

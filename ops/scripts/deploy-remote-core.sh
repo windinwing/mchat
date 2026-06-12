@@ -138,6 +138,19 @@ for patent_skill in patent-search patent-transaction patent-disclosure patent-re
   sync_skill_dir "$patent_skill"
 done
 
+echo "==> Refresh tenant patent-search copies (Widget uses tenant workspace skills)"
+ssh "$REMOTE" "set -euo pipefail
+REMOTE_DIR='${REMOTE_DIR}'
+for d in \"\${REMOTE_DIR}\"/data/tenants/*/skills/patent-search; do
+  [ -d \"\$d\" ] || continue
+  echo \"  -> \$d\"
+  rsync -a --delete \
+    --exclude '__pycache__/' \
+    --exclude '.DS_Store' \
+    --exclude 'config.json' \
+    \"\${REMOTE_DIR}/skills/patent-search/\" \"\$d/\"
+done"
+
 echo "==> Remote setup (Core backend: app.main:app)"
 ssh "$REMOTE" "chmod +x ${REMOTE_DIR}/ops/scripts/gamecenter-*.sh ${REMOTE_DIR}/ops/scripts/resolve-gamecenter-project.py ${REMOTE_DIR}/ops/deploy/remote-setup.sh && bash ${REMOTE_DIR}/ops/deploy/remote-setup.sh"
 

@@ -150,6 +150,12 @@ class SkillScheduleService:
     async def create_schedule(
         self, *, user_id: str, data: SkillScheduleCreate
     ) -> SkillScheduleResponse:
+        from app.models.user import User
+        from app.services.workflow_entitlements import ensure_can_create_schedule
+
+        user = await self.db.get(User, user_id)
+        if user is not None:
+            await ensure_can_create_schedule(self.db, user)
         target_type = data.target_type
         skill_id: str | None = None
         workflow_id: str | None = None

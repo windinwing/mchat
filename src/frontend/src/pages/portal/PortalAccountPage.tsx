@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Badge } from '@/components/ui/Badge'
 import { toast } from '@/components/ui/Toast'
 import { PortalSetPasswordForm } from '@/components/portal/PortalSetPasswordForm'
 import { PortalAdvancedPanel } from '@/components/portal/PortalAdvancedPanel'
@@ -44,6 +45,7 @@ export function PortalAccountPage() {
   const effectiveName = displayName.trim() || user?.display_name || user?.username || ''
   const hasProfileChanges =
     displayName.trim() !== (user?.display_name || '') || avatarUrl !== (user?.avatar_url || '')
+  const showPasswordSection = user?.can_set_password !== false && !user?.external_provider
 
   const uploadAvatar = async (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -86,6 +88,11 @@ export function PortalAccountPage() {
     await uploadAvatar(file)
   }
 
+  const handleRemoveAvatar = () => {
+    setAvatarUrl('')
+    toast(t('portal.avatarRemoved'), { type: 'info' })
+  }
+
   const handleProfileSave = async () => {
     setSaving(true)
     try {
@@ -102,7 +109,7 @@ export function PortalAccountPage() {
   }
 
   return (
-    <div className="space-y-8 max-w-2xl text-gray-900 dark:text-gray-200">
+    <div className="w-full max-w-4xl mx-auto space-y-6 text-gray-900 dark:text-gray-200">
       <Link
         to="/portal/dashboard"
         className="inline-flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600"
@@ -111,14 +118,19 @@ export function PortalAccountPage() {
         {t('portal.backDashboard')}
       </Link>
 
-      <div>
-        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-          {t('portal.accountTitle')}
-        </h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {user?.phone || user?.username}
-          {user?.email && ` · ${user.email}`}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            {t('portal.accountTitle')}
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            {user?.phone || user?.username}
+            {user?.email && ` · ${user.email}`}
+          </p>
+        </div>
+        {hasProfileChanges && (
+          <Badge variant="warning">{t('portal.unsavedChanges')}</Badge>
+        )}
       </div>
 
       <section className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6 space-y-5">
@@ -131,7 +143,7 @@ export function PortalAccountPage() {
           </p>
         </div>
 
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+        <div className="grid gap-6 lg:grid-cols-[auto,1fr]">
           <div className="flex flex-col items-center gap-3">
             <Avatar
               src={resolvedAvatarUrl}
@@ -139,7 +151,7 @@ export function PortalAccountPage() {
               size="xl"
               className="ring-4 ring-primary-100 dark:ring-primary-900/40"
             />
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-center gap-2">
               <Button
                 type="button"
                 variant="outline"
@@ -156,7 +168,7 @@ export function PortalAccountPage() {
                 size="sm"
                 leftIcon={<Trash2 className="w-4 h-4" />}
                 disabled={!avatarUrl}
-                onClick={() => setAvatarUrl('')}
+                onClick={handleRemoveAvatar}
               >
                 {t('portal.removeAvatar')}
               </Button>
@@ -172,7 +184,7 @@ export function PortalAccountPage() {
             />
           </div>
 
-          <div className="flex-1 space-y-4">
+          <div className="space-y-4 min-w-0">
             <Input
               label={t('portal.displayNameLabel')}
               value={displayName}
@@ -187,7 +199,7 @@ export function PortalAccountPage() {
               onPaste={handleAvatarPaste}
             >
               <div className="flex items-start gap-3">
-                <ClipboardPaste className="w-4 h-4 mt-0.5 text-gray-400" />
+                <ClipboardPaste className="w-4 h-4 mt-0.5 text-gray-400 shrink-0" />
                 <div>
                   <p className="font-medium text-gray-800 dark:text-gray-100">
                     {t('portal.avatarPasteTitle')}
@@ -213,19 +225,24 @@ export function PortalAccountPage() {
         </div>
       </section>
 
-      {user?.can_set_password !== false && (
+      {showPasswordSection && (
         <section className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
             {t('portal.setPasswordTitle')}
           </h2>
-          <PortalSetPasswordForm />
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            {user?.has_password ? t('portal.passwordSectionChange') : t('portal.passwordSectionSet')}
+          </p>
+          <PortalSetPasswordForm hasPassword={Boolean(user?.has_password)} />
         </section>
       )}
 
       {user?.external_provider && (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('portal.password9235Hint')}
-        </p>
+        <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {t('portal.password9235Hint')}
+          </p>
+        </section>
       )}
 
       <PortalAdvancedPanel hint={t('portal.accountAdvancedAiHint')}>

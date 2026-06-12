@@ -62,30 +62,40 @@ async function request<T = any>(endpoint: string, options: RequestOptions = {}):
     }
 
     if (response.status === 401) {
-      const isLoginRequest = endpoint === '/auth/login'
+      const isLoginRequest =
+        endpoint === '/auth/login' || endpoint === '/auth/sso/9235/callback'
       if (!isLoginRequest) {
         removeToken()
-        if (window.location.pathname !== '/admin/login') {
+        const path = window.location.pathname
+        if (path.startsWith('/portal')) {
+          if (path !== '/register') {
+            window.location.href = '/register'
+          }
+        } else if (path !== '/admin/login') {
           window.location.href = '/admin/login'
         }
       }
     }
 
-    const detail =
+    const rawDetail =
       errorData.detail ??
       errorData.message ??
       errorData.error ??
       (typeof errorData === 'string' ? errorData : null)
 
-    throw new ApiError(
-      typeof detail === 'string'
-        ? detail
-        : Array.isArray(detail)
-          ? detail.map((d: { msg?: string }) => d.msg || String(d)).join('; ')
-          : '请求失败',
-      response.status,
-      errorData,
-    )
+    let message = '请求失败'
+    if (typeof rawDetail === 'string') {
+      message = rawDetail
+    } else if (Array.isArray(rawDetail)) {
+      message = rawDetail.map((d: { msg?: string }) => d.msg || String(d)).join('; ')
+    } else if (rawDetail && typeof rawDetail === 'object' && 'message' in rawDetail) {
+      const nested = (rawDetail as { message?: unknown }).message
+      if (typeof nested === 'string' && nested.trim()) {
+        message = nested
+      }
+    }
+
+    throw new ApiError(message, response.status, errorData)
   }
 
   if (response.status === 204) {

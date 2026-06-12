@@ -221,8 +221,13 @@ async def on_message_created(
                     )
                     assistant_id = fallback.id
 
-            # Apply patent linkification to streamed content (same as engine does for DB)
+            # Align streamed end payload with engine post-processing
             from app.bot.patent_links import default_patent_portal_url_template
+            from app.bot.engine import _strip_tool_echo_text
+            from app.utils.outbound_assets import sanitize_hallucinated_download_urls
+
+            full_content = _strip_tool_echo_text(full_content)
+            full_content = sanitize_hallucinated_download_urls(full_content)
             template = default_patent_portal_url_template()
             if template:
                 full_content = linkify_patent_ids(full_content, enabled=True, template=template)

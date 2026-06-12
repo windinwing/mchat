@@ -93,10 +93,11 @@ async def ensure_assistant_reply_persisted(
         return None
 
     existing = await find_assistant_reply_after(db, conversation.id, user_message)
-    if existing is not None and (existing.content or "").strip() == text:
-        return existing
-    if existing is not None and not looks_like_config_error(text):
-        return existing
+    if existing is not None:
+        if (existing.content or "").strip() == text:
+            return existing
+        if not looks_like_config_error(text) and existing.extra_data:
+            return existing
 
     return await persist_assistant_reply(
         db,

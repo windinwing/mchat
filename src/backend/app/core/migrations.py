@@ -211,6 +211,7 @@ def apply_schema_patches(conn: Connection) -> list[str]:
             ("phone_verified_at", "DATETIME NULL"),
             ("external_provider", "VARCHAR(50) NULL"),
             ("external_id", "VARCHAR(64) NULL"),
+            ("password_set_at", "DATETIME NULL"),
             ("skill_ids", "JSON NULL"),
         ]
         for col_name, col_def in user_patches:
@@ -219,6 +220,16 @@ def apply_schema_patches(conn: Connection) -> list[str]:
                     text(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
                 )
                 applied.append(f"users.{col_name}")
+        if "password_set_at" in _column_names(conn, "users"):
+            conn.execute(
+                text(
+                    "UPDATE users SET password_set_at = created_at "
+                    "WHERE password_set_at IS NULL "
+                    "AND external_provider IS NULL "
+                    "AND phone IS NULL"
+                )
+            )
+            applied.append("users.password_set_at_backfill")
 
     # ---- customer_configs fields for channel rental ----
     if "customer_configs" in inspect(conn).get_table_names():

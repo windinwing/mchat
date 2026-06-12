@@ -509,6 +509,12 @@ class WorkflowService:
     async def create_workflow(
         self, *, user_id: str, data: WorkflowCreate
     ) -> WorkflowResponse:
+        from app.models.user import User
+        from app.services.workflow_entitlements import ensure_can_create_workflow
+
+        user = await self.db.get(User, user_id)
+        if user is not None:
+            await ensure_can_create_workflow(self.db, user)
         workflow = SkillWorkflow(
             user_id=user_id,
             name=data.name.strip(),
@@ -675,6 +681,16 @@ class WorkflowService:
         description: str | None = None,
         enabled: bool = True,
     ) -> WorkflowResponse:
+        from app.models.user import User
+        from app.services.workflow_entitlements import (
+            ensure_can_create_workflow,
+            ensure_can_save_dag,
+        )
+
+        user = await self.db.get(User, user_id)
+        if user is not None:
+            await ensure_can_create_workflow(self.db, user)
+            await ensure_can_save_dag(self.db, user)
         tpl = get_workflow_template(template_id)
         tpl_name: str | None = None
         tpl_desc: str | None = None
@@ -732,6 +748,12 @@ class WorkflowService:
         if "enabled" in payload and payload["enabled"] is not None:
             workflow.enabled = bool(payload["enabled"])
         if "graph_json" in payload:
+            from app.models.user import User
+            from app.services.workflow_entitlements import ensure_can_save_dag
+
+            user = await self.db.get(User, user_id)
+            if user is not None and payload["graph_json"]:
+                await ensure_can_save_dag(self.db, user)
             graph = payload["graph_json"]
             if graph:
                 graph = await self._resolve_graph_skill_ids(graph, user_id=user_id)
@@ -1092,6 +1114,12 @@ class WorkflowService:
         self, *, workflow_id: str, user_id: str, input_payload: dict | None = None
     ) -> WorkflowRunDetailResponse:
         """Enqueue workflow run; returns immediately while execution continues in background."""
+        from app.models.user import User
+        from app.services.workflow_entitlements import ensure_can_run_workflow
+
+        user = await self.db.get(User, user_id)
+        if user is not None:
+            await ensure_can_run_workflow(self.db, user)
         workflow = await self._get_workflow(workflow_id=workflow_id, user_id=user_id)
         if not workflow.enabled:
             raise HTTPException(

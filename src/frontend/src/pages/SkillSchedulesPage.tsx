@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Clock3, Eye, Play, Plus, RefreshCw, Trash2 } from 'lucide-react'
 
@@ -12,6 +13,11 @@ import { Badge } from '@/components/ui/Badge'
 import { Dialog } from '@/components/ui/Dialog'
 import { toast } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
+import {
+  WorkflowEntitlementBanner,
+  useWorkflowEntitlements,
+} from '@/components/portal/WorkflowEntitlementBanner'
+import { automationCheckoutPath, extractAutomationLimit } from '@/lib/automationLimit'
 
 interface Skill {
   id: string
@@ -67,6 +73,10 @@ const DEFAULT_CRON = '*/30 * * * *'
 
 export function SkillSchedulesPage() {
   const { t } = useTranslation()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const isPortal = location.pathname.startsWith('/portal')
+  const entitlements = useWorkflowEntitlements()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -137,7 +147,33 @@ export function SkillSchedulesPage() {
     setFormEnabled(true)
   }
 
+  const showLimitToast = (err: unknown, fallbackKey: string) => {
+    const limit = extractAutomationLimit(err)
+    if (limit) {
+      toast(limit.message || t(fallbackKey), { type: 'error' })
+      if (isPortal && limit.upgrade_template_id) {
+        navigate(automationCheckoutPath(limit))
+      }
+      return true
+    }
+    const msg = err instanceof Error ? err.message : String(err)
+    toast(t(fallbackKey), { type: 'error', message: msg })
+    return false
+  }
+
   const openCreateDialog = () => {
+    if (entitlements && !entitlements.can_create_schedule) {
+      toast(t('portal.automationFreeHint'), { type: 'warning' })
+      if (isPortal && entitlements.upgrade_template_id) {
+        navigate(
+          automationCheckoutPath({
+            upgrade_template_id: entitlements.upgrade_template_id,
+            upgrade_channel_id: entitlements.upgrade_channel_id,
+          }),
+        )
+      }
+      return
+    }
     resetForm()
     setDialogOpen(true)
   }
@@ -203,8 +239,8 @@ export function SkillSchedulesPage() {
       }
       setDialogOpen(false)
       await loadAll()
-    } catch (err: any) {
-      toast(t('schedules.toastSaveFailed'), { type: 'error', message: err.message })
+    } catch (err: unknown) {
+      showLimitToast(err, 'schedules.toastSaveFailed')
     } finally {
       setSaving(false)
     }
@@ -278,11 +314,17 @@ export function SkillSchedulesPage() {
           >
             {t('common.refresh')}
           </Button>
-          <Button leftIcon={<Plus className="w-4 h-4" />} onClick={openCreateDialog}>
+          <Button
+            leftIcon={<Plus className="w-4 h-4" />}
+            onClick={openCreateDialog}
+            disabled={entitlements !== null && !entitlements.can_create_schedule}
+          >
             {t('schedules.newSchedule')}
           </Button>
         </div>
       </div>
+
+      <WorkflowEntitlementBanner />
 
       <Card>
         <CardContent className="py-4">

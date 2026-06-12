@@ -60,6 +60,11 @@ class User(Base):
     external_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
+    password_set_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When user chose their login password; null = OTP/SSO only",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

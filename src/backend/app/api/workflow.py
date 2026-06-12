@@ -26,9 +26,19 @@ from app.schemas.workflow import (
     WorkflowTemplateSummary,
     WorkflowUpdate,
 )
+from app.schemas.workflow_entitlements import WorkflowEntitlementsResponse
+from app.services.workflow_entitlements import get_workflow_entitlements
 from app.services.workflow_service import WorkflowService
 
 router = APIRouter()
+
+
+@router.get("/entitlements", response_model=WorkflowEntitlementsResponse)
+async def workflow_entitlements(
+    current_user: User = Depends(require_permission(Permission.SKILLS_READ)),
+    db: AsyncSession = Depends(get_db),
+) -> WorkflowEntitlementsResponse:
+    return await get_workflow_entitlements(db, current_user)
 
 
 @router.get("", response_model=list[WorkflowResponse])

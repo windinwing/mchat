@@ -15,6 +15,10 @@ export function Auth9235CallbackPage() {
     clearError()
     const xtk = params.get('xtk')
     if (!xtk) {
+      if (params.get('token')) {
+        setLocalError(t('auth.ssoWrongTokenParam'))
+        return
+      }
       setLocalError(t('auth.ssoMissingToken'))
       return
     }

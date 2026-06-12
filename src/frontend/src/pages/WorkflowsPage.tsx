@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Eye, LayoutTemplate, Network, Pencil, Play, Plus, RefreshCw, Trash2, Workflow } from 'lucide-react'
 
@@ -16,6 +17,11 @@ import { WorkflowGraphEditor, type WorkflowGraphValue } from '@/components/workf
 import { WorkflowReportPanel } from '@/components/workflow/WorkflowReportPanel'
 import { extractStartInputFields, graphNeedsReportTitle, buildDefaultReportTitle } from '@/lib/workflowSkillMeta'
 import { resolveRunDisplayName, runListSubtitle } from '@/lib/workflowRunLabel'
+import {
+  WorkflowEntitlementBanner,
+  useWorkflowEntitlements,
+} from '@/components/portal/WorkflowEntitlementBanner'
+import { automationCheckoutPath, extractAutomationLimit } from '@/lib/automationLimit'
 
 interface Skill {
   id: string
@@ -113,6 +119,10 @@ interface WorkflowApprovalTask {
 
 export function WorkflowsPage() {
   const { t, i18n } = useTranslation()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const isPortal = location.pathname.startsWith('/portal')
+  const entitlements = useWorkflowEntitlements()
   const uiLocale = i18n.language?.startsWith('zh') ? 'zh' : 'en'
   const [loading, setLoading] = useState(true)
   const [workflows, setWorkflows] = useState<WorkflowItem[]>([])
@@ -209,7 +219,33 @@ export function WorkflowsPage() {
     }
   }
 
+  const showLimitToast = (err: unknown, fallbackKey: string) => {
+    const limit = extractAutomationLimit(err)
+    if (limit) {
+      toast(limit.message || t(fallbackKey), { type: 'error' })
+      if (isPortal && limit.upgrade_template_id) {
+        navigate(automationCheckoutPath(limit))
+      }
+      return true
+    }
+    const msg = err instanceof Error ? err.message : String(err)
+    toast(t(fallbackKey), { type: 'error', message: msg })
+    return false
+  }
+
   const openCreate = () => {
+    if (entitlements && !entitlements.can_create_workflow) {
+      toast(t('portal.automationFreeHint'), { type: 'warning' })
+      if (isPortal && entitlements.upgrade_template_id) {
+        navigate(
+          automationCheckoutPath({
+            upgrade_template_id: entitlements.upgrade_template_id,
+            upgrade_channel_id: entitlements.upgrade_channel_id,
+          }),
+        )
+      }
+      return
+    }
     setNameInput('')
     setDescriptionInput('')
     setEnabledInput(true)
@@ -236,8 +272,8 @@ export function WorkflowsPage() {
       setCreateOpen(false)
       await loadAll()
       toast(t('workflows.toastCreated'), { type: 'success' })
-    } catch (err: any) {
-      toast(t('workflows.toastSaveFailed'), { type: 'error', message: err.message })
+    } catch (err: unknown) {
+      showLimitToast(err, 'workflows.toastSaveFailed')
     } finally {
       setSaving(false)
     }
@@ -301,8 +337,8 @@ export function WorkflowsPage() {
       } else {
         await refreshRuns()
       }
-    } catch (err: any) {
-      toast(t('workflows.toastRunFailed'), { type: 'error', message: err.message })
+    } catch (err: unknown) {
+      showLimitToast(err, 'workflows.toastRunFailed')
     } finally {
       setRunningMap((prev) => ({ ...prev, [run.workflow_id]: false }))
     }
@@ -375,8 +411,8 @@ export function WorkflowsPage() {
       } else {
         await refreshRuns()
       }
-    } catch (err: any) {
-      toast(t('workflows.toastRunFailed'), { type: 'error', message: err.message })
+    } catch (err: unknown) {
+      showLimitToast(err, 'workflows.toastRunFailed')
     } finally {
       setRunningMap((prev) => ({ ...prev, [row.id]: false }))
       setRunInputOpen(false)
@@ -482,8 +518,8 @@ export function WorkflowsPage() {
       setCreateFromTplOpen(false)
       setCreateFromTplTarget(null)
       await loadAll()
-    } catch (err: any) {
-      toast(t('workflows.toastTemplateCreateFailed'), { type: 'error', message: err.message })
+    } catch (err: unknown) {
+      showLimitToast(err, 'workflows.toastTemplateCreateFailed')
     } finally {
       setCreatingTemplateId(null)
     }
@@ -500,8 +536,8 @@ export function WorkflowsPage() {
       await api.post(`/workflows/from-template/${templateId}`, {})
       toast(t('workflows.toastTemplateCreated'), { type: 'success' })
       await loadAll()
-    } catch (err: any) {
-      toast(t('workflows.toastTemplateCreateFailed'), { type: 'error', message: err.message })
+    } catch (err: unknown) {
+      showLimitToast(err, 'workflows.toastTemplateCreateFailed')
     } finally {
       setCreatingTemplateId(null)
     }
@@ -614,8 +650,8 @@ export function WorkflowsPage() {
       toast(t('workflows.toastGraphSaved'), { type: 'success' })
       setGraphOpen(false)
       await loadAll()
-    } catch (err: any) {
-      toast(t('workflows.toastGraphSaveFailed'), { type: 'error', message: err.message })
+    } catch (err: unknown) {
+      showLimitToast(err, 'workflows.toastGraphSaveFailed')
     }
   }
 
@@ -692,11 +728,17 @@ export function WorkflowsPage() {
           <Button variant="secondary" leftIcon={<RefreshCw className="w-4 h-4" />} onClick={loadAll}>
             {t('common.refresh')}
           </Button>
-          <Button leftIcon={<Plus className="w-4 h-4" />} onClick={openCreate}>
+          <Button
+            leftIcon={<Plus className="w-4 h-4" />}
+            onClick={openCreate}
+            disabled={entitlements !== null && !entitlements.can_create_workflow}
+          >
             {t('workflows.newWorkflow')}
           </Button>
         </div>
       </div>
+
+      <WorkflowEntitlementBanner />
 
       {builtinTemplates.some((tpl) => tpl.category === 'notification') ? (
         <Card>

@@ -44,6 +44,11 @@ const PortalAccountPage = lazyNamed(
   () => import('./pages/portal/PortalAccountPage'),
   'PortalAccountPage',
 )
+const WorkflowsPage = lazyNamed(() => import('./pages/WorkflowsPage'), 'WorkflowsPage')
+const SkillSchedulesPage = lazyNamed(
+  () => import('./pages/SkillSchedulesPage'),
+  'SkillSchedulesPage',
+)
 
 function PageSuspense({ children }: { children: React.ReactNode }) {
   return (
@@ -112,6 +117,14 @@ export function PortalRoutes() {
       <Route
         path="/portal/channels/:id/knowledge"
         element={<UserLayout><PageSuspense><PortalChannelKnowledge /></PageSuspense></UserLayout>}
+      />
+      <Route
+        path="/portal/workflows"
+        element={<UserLayout><PageSuspense><WorkflowsPage /></PageSuspense></UserLayout>}
+      />
+      <Route
+        path="/portal/schedules"
+        element={<UserLayout><PageSuspense><SkillSchedulesPage /></PageSuspense></UserLayout>}
       />
     </Routes>
   )

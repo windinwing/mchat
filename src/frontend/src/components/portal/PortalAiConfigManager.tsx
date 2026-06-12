@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
+import { toast } from '@/components/ui/Toast'
 
 const PROVIDERS = [
   { value: 'openai', label: 'OpenAI' },
@@ -41,6 +42,7 @@ export function PortalAiConfigManager({ onUpdated }: { onUpdated?: () => void })
 
   const handleCreate = async () => {
     if (!form.name.trim() || !form.api_key.trim()) {
+      toast(t('portal.aiConfigFieldsRequired'), { type: 'error' })
       return
     }
     setSaving(true)
@@ -55,6 +57,11 @@ export function PortalAiConfigManager({ onUpdated }: { onUpdated?: () => void })
       setForm({ name: '', provider: 'openai', model: 'gpt-4o-mini', api_key: '', api_base: '' })
       reload()
       onUpdated?.()
+      toast(t('portal.aiConfigCreated'), { type: 'success' })
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t('portal.aiConfigCreateFailed'), {
+        type: 'error',
+      })
     } finally {
       setSaving(false)
     }

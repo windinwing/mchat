@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
+import re
 import uuid
 
 from loguru import logger
@@ -18,13 +19,15 @@ from app.utils.chat_upload import attachment_prompt_text
 from app.bot.provider import create_provider
 from app.bot.patent_links import inject_action_links, linkify_patent_ids, patent_link_settings_from_skills
 from app.bot.patent_search_followup import (
-    _DEFAULT_EXPORT_NUDGE,
     find_patent_search_skill,
     is_patent_search_success,
+    patent_export_retry_nudge,
+    patent_generic_synthesis_nudge,
     patent_search_enable_presentation,
     patent_search_enable_summary,
     patent_search_observation_nudge,
     patent_search_presentation_nudge,
+    user_wants_patent_export,
 )
 from app.bot.skill_context import (
     append_patent_tool_hints,
@@ -42,7 +45,11 @@ from app.models.group import GroupMemoryEntry
 from app.models.knowledge import KnowledgeBase
 from app.models.message import Message
 from app.models.skill import Skill
-from app.utils.outbound_assets import enrich_message_extra_data
+from app.utils.outbound_assets import (
+    enrich_message_extra_data,
+    has_upload_file_assets,
+    sanitize_hallucinated_download_urls,
+)
 from app.bot.auto_reply_rules import (
     build_auto_reply_note,
     detect_message_channel,
@@ -90,6 +97,44 @@ def _format_structured_tool_dict(result: dict[str, Any]) -> str:
     if len(body) > 3500:
         body = body[:3500] + "\n…"
     return f"```json\n{body}\n```"
+
+
+_TOOL_FRIENDLY_LABELS: dict[str, str] = {
+    "patent-search": "专利检索",
+    "patent-report": "专利报告",
+    "patent-transaction": "专利交易",
+    "patent-disclosure": "专利交底书",
+    "mchat-help": "帮助",
+    "mchat-ops": "运维",
+    "mchat-notify": "通知",
+    "dev-assistant": "开发助手",
+    "gamecenter-dev-agent": "游戏开发",
+}
+
+
+def _tool_step_header(tool_name: str) -> str:
+    """User-facing tool step label; patent tools omit the wrench header (output is self-explanatory)."""
+    if (tool_name or "").startswith("patent-"):
+        return ""
+    label = _TOOL_FRIENDLY_LABELS.get(tool_name, tool_name)
+    if not label:
+        return ""
+    return f"\n\n**{label}**\n"
+
+
+_TOOL_ECHO_RE = re.compile(
+    r"\*\*🔧\s*`[^`]+`\*\*|\*\*🔧[^*\n]+\*\*|🔧\s*`[^`]+`",
+    re.IGNORECASE,
+)
+
+
+def _strip_tool_echo_text(text: str) -> str:
+    """Remove LLM echoes of tool names (🔧 patent-search) from user-visible content."""
+    if not text:
+        return text
+    cleaned = _TOOL_ECHO_RE.sub("", text)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 
 def _tool_result_display_text(result: Any) -> str:
@@ -460,6 +505,11 @@ async def process_message(
                 template=str(patent_links["template"]),
             )
 
+        def _sanitize_visible_text(text: str) -> str:
+            return _with_patent_links(
+                sanitize_hallucinated_download_urls(_strip_tool_echo_text(text))
+            )
+
         system_prompt, knowledge_hits = await _append_rag_context(
             system_prompt,
             message.content,
@@ -539,6 +589,10 @@ async def process_message(
         max_tool_rounds = 12
         tools_executed_this_turn = False
         synthesis_done = False
+        patent_export_retry_used = False
+        export_wanted = bool(
+            patent_skill and user_wants_patent_export(message.content)
+        )
 
         def _merge_usage(chunk: dict[str, Any]) -> None:
             pt = int(chunk.get("prompt_tokens") or 0)
@@ -620,8 +674,6 @@ async def process_message(
                         yield token
                     else:
                         first_pass_content += token
-                        full_response += token
-                        yield token
                 elif chunk.get("type") == "tool_call":
                     tc = chunk.get("tool_call", {})
                     tid = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
@@ -636,6 +688,24 @@ async def process_message(
 
             tool_calls_list = list(tool_calls_map.values())
             if not tool_calls_list:
+                if (
+                    export_wanted
+                    and not patent_export_retry_used
+                    and _tool_round < max_tool_rounds - 1
+                ):
+                    patent_export_retry_used = True
+                    if first_pass_content:
+                        messages_list.append(
+                            {"role": "assistant", "content": first_pass_content}
+                        )
+                    messages_list.append(
+                        {"role": "user", "content": patent_export_retry_nudge()}
+                    )
+                    continue
+                if first_pass_content:
+                    cleaned = _sanitize_visible_text(first_pass_content)
+                    full_response += cleaned
+                    yield cleaned
                 break
 
             messages_list.append(
@@ -658,9 +728,10 @@ async def process_message(
                     if cmd == "search" and tool_args.get("details") is None:
                         tool_args["details"] = True
 
-                step_header = f"\n\n**🔧 `{tool_name}`**\n"
-                full_response += step_header
-                yield step_header
+                step_header = _tool_step_header(tool_name)
+                if step_header:
+                    full_response += step_header
+                    yield step_header
 
                 try:
                     from app.workspace.resolver import workspace_user_id_for_execution
@@ -701,7 +772,12 @@ async def process_message(
                         tool_name, cmd, tool_display
                     )
                     is_export = cmd == "export"
-                    if patent_search_enable_presentation(patent_skill) and patent_search_ok and not is_export:
+                    if (
+                        patent_search_enable_presentation(patent_skill)
+                        and patent_search_ok
+                        and not is_export
+                        and not export_wanted
+                    ):
                         patent_search_for_presentation = True
                     elif is_export:
                         # Export: show tool display (correct download URL), use short nudge
@@ -713,6 +789,21 @@ async def process_message(
                         yield tool_display
                     if patent_search_enable_summary(patent_skill) and patent_search_ok:
                         patent_search_for_summary = True
+
+            if patent_search_for_export or has_upload_file_assets(tool_turn_assets):
+                synthesis_done = True
+                break
+
+            if (
+                export_wanted
+                and not has_upload_file_assets(tool_turn_assets)
+                and not patent_export_retry_used
+            ):
+                patent_export_retry_used = True
+                messages_list.append(
+                    {"role": "user", "content": patent_export_retry_nudge()}
+                )
+                continue
 
             if patent_search_for_presentation:
                 nudge = patent_search_presentation_nudge(patent_skill)
@@ -727,7 +818,7 @@ async def process_message(
                 async for token in _stream_followup(
                     with_tools=False,
                     parts_out=presentation_parts,
-                    process_fn=lambda t: _with_patent_links(inject_action_links(t)),
+                    process_fn=lambda t: _sanitize_visible_text(inject_action_links(t)),
                 ):
                     yield token
                 if presentation_parts:
@@ -749,7 +840,7 @@ async def process_message(
                 async for token in _stream_followup(
                     with_tools=False,
                     parts_out=summary_parts,
-                    process_fn=lambda t: _with_patent_links(inject_action_links(t)),
+                    process_fn=lambda t: _sanitize_visible_text(inject_action_links(t)),
                 ):
                     yield token
                 if summary_parts:
@@ -762,51 +853,39 @@ async def process_message(
                 synthesis_done = True
                 break
 
-            if patent_search_for_export:
-                messages_list.append(
-                    {
-                        "role": "user",
-                        "content": _DEFAULT_EXPORT_NUDGE,
-                    }
-                )
-                export_parts: list[str] = []
-                async for token in _stream_followup(
-                    with_tools=False,
-                    parts_out=export_parts,
-                    process_fn=lambda t: _with_patent_links(inject_action_links(t)),
-                ):
-                    yield token
-                if export_parts:
-                    export_text = "".join(export_parts)
-                    full_response += export_text
-                synthesis_done = True
-                break
-
         if tools_executed_this_turn and not synthesis_done:
-            messages_list.append(
-                {
-                    "role": "user",
-                    "content": (
+            if export_wanted and not has_upload_file_assets(tool_turn_assets):
+                export_hint = "导出尚未完成，请再次点击「导出Excel」。\n\n"
+                full_response += export_hint
+                yield export_hint
+                synthesis_done = True
+            else:
+                synthesis_nudge = (
+                    patent_generic_synthesis_nudge()
+                    if patent_skill
+                    else (
                         "请根据以上工具调用结果，用中文向用户说明：已查看或修改了什么、"
                         "关键结论与建议的下一步。若任务尚未完成，请明确还差什么。"
                         "不要再次调用工具。"
-                    ),
-                }
-            )
-            synthesis_parts: list[str] = []
-            async for token in _stream_followup(
-                with_tools=False,
-                parts_out=synthesis_parts,
-                process_fn=lambda t: _with_patent_links(inject_action_links(t)),
-            ):
-                yield token
-            if synthesis_parts:
-                synthesis_text = _with_patent_links("".join(synthesis_parts))
-                if not synthesis_text.startswith("\n"):
-                    synthesis_text = "\n\n" + synthesis_text.lstrip()
-                if not synthesis_text.endswith("\n\n"):
-                    synthesis_text = synthesis_text.rstrip() + "\n\n"
-                full_response += synthesis_text
+                    )
+                )
+                messages_list.append(
+                    {"role": "user", "content": synthesis_nudge}
+                )
+                synthesis_parts: list[str] = []
+                async for token in _stream_followup(
+                    with_tools=False,
+                    parts_out=synthesis_parts,
+                    process_fn=lambda t: _sanitize_visible_text(inject_action_links(t)),
+                ):
+                    yield token
+                if synthesis_parts:
+                    synthesis_text = _with_patent_links("".join(synthesis_parts))
+                    if not synthesis_text.startswith("\n"):
+                        synthesis_text = "\n\n" + synthesis_text.lstrip()
+                    if not synthesis_text.endswith("\n\n"):
+                        synthesis_text = synthesis_text.rstrip() + "\n\n"
+                    full_response += synthesis_text
 
         auto_reply_note = build_auto_reply_note(auto_reply_matches)
         if auto_reply_note:
@@ -815,6 +894,8 @@ async def process_message(
             yield note_chunk
 
         if full_response:
+            full_response = _strip_tool_echo_text(full_response)
+            full_response = sanitize_hallucinated_download_urls(full_response)
             full_response = _with_patent_links(full_response)
             # Fix AI-generated download URLs that use wrong domain
             full_response = full_response.replace(

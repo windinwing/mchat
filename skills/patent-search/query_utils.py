@@ -56,6 +56,10 @@ _SORT_ALIASES = {
     "公开日": "!documentDate",
     "最新申请": "!applicationDate",
     "最新公开": "!documentDate",
+    # Widget action pill 字面消息
+    "按最新公开排序": "!documentDate",
+    "按最新公布排序": "!documentDate",
+    "按最新申请排序": "!applicationDate",
 }
 
 SORT_LABELS = {
@@ -135,7 +139,14 @@ def prepare_search_request(
     """返回 (检索式, api_sort, 排序说明)。"""
     raw = (query or "").strip()
     api_sort = resolve_search_sort(raw, sort)
-    search_q = clean_search_query(raw) or raw
+    cleaned = clean_search_query(raw)
+    if cleaned:
+        search_q = cleaned
+    elif api_sort:
+        # 整句仅为排序指令（如 action pill）；检索词须由 LLM 在 query 中单独传入
+        search_q = ""
+    else:
+        search_q = raw
     return search_q, api_sort, sort_display_label(api_sort)
 
 

@@ -30,6 +30,8 @@ from cloud.services.portal_chat_service import PortalChatService
 from cloud.services.portal_payment_service import PortalPaymentService
 from cloud.services.portal_service import PortalService
 from cloud.services.studio_memory_service import StudioMemoryService
+from app.schemas.workflow_entitlements import WorkflowEntitlementsResponse
+from app.services.workflow_entitlements import get_workflow_entitlements
 
 router = APIRouter()
 
@@ -65,6 +67,15 @@ async def get_order_invoice(
 ) -> PortalInvoiceResponse:
     """Invoice payload (client renders printable view)."""
     return await PortalPaymentService(db).get_order_invoice(current_user, order_id)
+
+
+@router.get("/automation/entitlements", response_model=WorkflowEntitlementsResponse)
+async def portal_automation_entitlements(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WorkflowEntitlementsResponse:
+    """Workflow / schedule limits for the current portal user."""
+    return await get_workflow_entitlements(db, current_user)
 
 
 @router.get("/dashboard", response_model=PortalDashboardStats)

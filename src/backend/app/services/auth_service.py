@@ -90,12 +90,14 @@ class AuthService:
                 detail="Username already exists",
             )
 
+        now = datetime.now(timezone.utc)
         user = User(
             username=username,
             password_hash=get_password_hash(password),
             role="agent",
             display_name=display_name or username,
             avatar_url=avatar_url,
+            password_set_at=now,
         )
         self.db.add(user)
         await self.db.flush()
@@ -136,6 +138,7 @@ class AuthService:
                     detail="Email already registered",
                 )
 
+        now = datetime.now(timezone.utc)
         user = User(
             username=username,
             email=email,
@@ -143,6 +146,7 @@ class AuthService:
             role="user",
             display_name=display_name or username,
             account_status="active",
+            password_set_at=now,
         )
         self.db.add(user)
         await self.db.flush()
@@ -166,11 +170,13 @@ class AuthService:
         if result.scalar_one_or_none() is not None:
             return None
 
+        now = datetime.now(timezone.utc)
         user = User(
             username=username,
             password_hash=get_password_hash(password),
             role="admin",
             display_name="Admin",
+            password_set_at=now,
         )
         self.db.add(user)
         await self.db.flush()
@@ -180,16 +186,29 @@ class AuthService:
     async def change_password(
         self,
         user: User,
-        current_password: str,
+        current_password: str | None,
         new_password: str,
     ) -> None:
-        """Change password for the authenticated user."""
-        if not verify_password(current_password, user.password_hash):
+        """Set or change password for the authenticated user."""
+        if user.external_provider:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Current password is incorrect",
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Password is managed by your external account provider",
             )
-        user.password_hash = get_password_hash(new_password)
+        now = datetime.now(timezone.utc)
+        if user.password_set_at is None:
+            user.password_hash = get_password_hash(new_password)
+            user.password_set_at = now
+        else:
+            if not current_password or not verify_password(
+                current_password, user.password_hash
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Current password is incorrect",
+                )
+            user.password_hash = get_password_hash(new_password)
+            user.password_set_at = now
         await self.db.flush()
 
     async def update_profile(
@@ -245,6 +264,7 @@ class AuthService:
             role=role,
             display_name=display_name or username,
             skill_ids=skill_ids,
+            password_set_at=datetime.now(timezone.utc),
         )
         self.db.add(user)
         await self.db.flush()
@@ -282,6 +302,7 @@ class AuthService:
             user.display_name = display_name
         if password is not None:
             user.password_hash = get_password_hash(password)
+            user.password_set_at = datetime.now(timezone.utc)
         if set_skill_ids:
             user.skill_ids = skill_ids  # type: ignore[assignment]
         if set_workspace_container_allowed:
@@ -388,6 +409,8 @@ class AuthService:
     async def login_or_link_9235(self, *, account: str) -> TokenResponse:
         """Sign in via 9235.net SSO; create or link a portal user."""
         account = (account or "").strip()
+        if account.startswith("+86") and len(account) > 3:
+            account = account[3:]
         if not account:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

@@ -119,6 +119,19 @@ for patent_dir in "$PROJECT_DIR"/skills/patent-*; do
   sync_skill_dir "$(basename "$patent_dir")"
 done
 
+echo "==> Refresh tenant patent-search copies (Widget uses tenant workspace skills)"
+ssh "$REMOTE" "set -euo pipefail
+REMOTE_DIR='${REMOTE_DIR}'
+for d in \"\${REMOTE_DIR}\"/data/tenants/*/skills/patent-search; do
+  [ -d \"\$d\" ] || continue
+  echo \"  -> \$d\"
+  rsync -a --delete \
+    --exclude '__pycache__/' \
+    --exclude '.DS_Store' \
+    --exclude 'config.json' \
+    \"\${REMOTE_DIR}/skills/patent-search/\" \"\$d/\"
+done"
+
 echo "==> Remote setup (pip, db migrate, restart Cloud services)"
 ssh "$REMOTE" "chmod +x ${REMOTE_DIR}/ops/deploy/remote-setup-cloud.sh && bash ${REMOTE_DIR}/ops/deploy/remote-setup-cloud.sh"
 

@@ -106,6 +106,7 @@ class WidgetChatResponse(BaseModel):
     conversation_id: str = Field(..., alias="conversationId")
     message_id: str = Field(..., alias="messageId")
     user_attachments: list[dict] | None = Field(None, alias="userAttachments")
+    extra_data: dict | None = Field(None, alias="extraData")
 
     model_config = {"populate_by_name": True}
 
@@ -439,6 +440,7 @@ async def widget_chat(
             response=full_response or "抱歉，我暂时无法回复，请稍后再试。",
             conversation_id=ctx.conversation.id,
             message_id=assistant_msg.id if assistant_msg else ctx.user_message.id,
+            extra_data=assistant_msg.extra_data if assistant_msg else None,
         )
     except HTTPException:
         raise
@@ -507,11 +509,15 @@ async def widget_chat_stream(
                 yield sse_line(
                     "done",
                     {
-                        "content": full_response,
+                        "content": (assistant_msg.content if assistant_msg else None)
+                        or full_response,
                         "conversationId": ctx.conversation.id,
                         "messageId": assistant_msg.id
                         if assistant_msg
                         else ctx.user_message.id,
+                        "extraData": assistant_msg.extra_data
+                        if assistant_msg
+                        else None,
                     },
                 )
             except HTTPException as e:

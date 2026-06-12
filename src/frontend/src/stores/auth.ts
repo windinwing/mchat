@@ -12,6 +12,7 @@ export interface User {
   phone?: string | null
   external_provider?: string | null
   can_set_password?: boolean
+  has_password?: boolean
 }
 
 interface AuthState {

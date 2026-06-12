@@ -54,6 +54,25 @@ export interface EmbedCode {
   widget_url: string
 }
 
+export interface WorkflowEntitlements {
+  plan: string
+  max_workflows: number | null
+  max_schedules: number | null
+  max_runs_month: number | null
+  dag_enabled: boolean
+  channel_triggers_enabled: boolean
+  workflow_count: number
+  schedule_count: number
+  runs_month: number
+  can_create_workflow: boolean
+  can_create_schedule: boolean
+  can_run_workflow: boolean
+  upgrade_required: boolean
+  upgrade_template_id: string | null
+  upgrade_channel_id: string | null
+  plan_label: string
+}
+
 export interface PortalDashboardStats {
   total_channels: number
   active_channels: number
@@ -298,4 +317,7 @@ export const portalApi = {
     api.put<StudioMemory>(`/portal/channels/${channelId}/memory`, { content }),
   getChannelDailyMemory: (channelId: string, date: string) =>
     api.get<StudioDailyMemory>(`/portal/channels/${channelId}/memory/daily/${date}`),
+
+  getAutomationEntitlements: () =>
+    api.get<WorkflowEntitlements>('/portal/automation/entitlements'),
 }

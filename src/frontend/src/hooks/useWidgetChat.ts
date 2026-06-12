@@ -50,7 +50,12 @@ function dedupeMessages(messages: Message[]): Message[] {
 async function consumeWidgetStream(
   response: Response,
   onToken: (chunk: string, full: string) => void,
-): Promise<{ conversationId: string; messageId: string; response: string }> {
+): Promise<{
+  conversationId: string
+  messageId: string
+  response: string
+  extraData?: Record<string, unknown>
+}> {
   if (!response.body) {
     throw new Error('浏览器不支持流式响应')
   }
@@ -61,6 +66,7 @@ async function consumeWidgetStream(
   let full = ''
   let conversationId = ''
   let messageId = ''
+  let extraData: Record<string, unknown> | undefined
 
   while (true) {
     const { done, value } = await reader.read()
@@ -80,6 +86,7 @@ async function consumeWidgetStream(
         conversationId?: string
         messageId?: string
         message?: string
+        extraData?: Record<string, unknown>
       }
 
       if (data.type === 'token' && data.content) {
@@ -89,13 +96,14 @@ async function consumeWidgetStream(
         conversationId = data.conversationId || conversationId
         messageId = data.messageId || messageId
         if (data.content) full = data.content
+        if (data.extraData) extraData = data.extraData
       } else if (data.type === 'error') {
         throw new Error(data.message || '流式请求失败')
       }
     }
   }
 
-  return { conversationId, messageId, response: full }
+  return { conversationId, messageId, response: full, extraData }
 }
 
 function welcomeOnlyMessage(welcomeMessage: string): Message {
@@ -260,6 +268,7 @@ export function useWidgetChat(
           conversationId: string
           messageId: string
           response: string
+          extraData?: Record<string, unknown>
           userAttachments?: Array<{ url?: string; name?: string; mime?: string }>
         }
 
@@ -330,6 +339,7 @@ export function useWidgetChat(
             conversationId: data.conversationId,
             messageId: data.messageId,
             response: data.response || '',
+            extraData: data.extraData,
           }
           setStreamingContent(result.response)
         }
@@ -344,14 +354,15 @@ export function useWidgetChat(
           )
         }
 
-        const assistantMessage: Message = {
+        const assistantMessage: Message = normalizeMessageMedia({
           id: result.messageId || `assistant-${Date.now()}`,
           conversation_id: result.conversationId || convId || '',
           role: 'assistant',
           content: result.response || i18n.t('chat.fallbackResponse'),
           content_type: 'text',
+          extra_data: result.extraData,
           created_at: new Date().toISOString(),
-        }
+        })
 
         const finalUserMessage = normalizeMessageMedia({
           ...userMessage,

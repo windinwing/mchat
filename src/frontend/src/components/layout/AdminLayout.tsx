@@ -10,6 +10,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { ThemeToggle } from '@/components/common/ThemeToggle'
 import { setPreferredStaffMode } from '@/lib/appPreferences'
+import { isCloudEdition } from '@/lib/edition'
 import { Avatar } from '@/components/ui/Avatar'
 
 interface AdminLayoutProps {
@@ -35,24 +36,11 @@ export function AdminLayout({ children }: AdminLayoutProps) {
   }, [isLoading, isAuthenticated, navigate, location.pathname])
 
   useEffect(() => {
-    // Wait until user profile is loaded; otherwise refresh can briefly redirect to /admin.
-    if (isLoading || !isAuthenticated || !user || user.role === 'admin') return
+    if (isLoading || !isAuthenticated || !user || user.role !== 'user') return
+    if (!isCloudEdition) return
 
-    const adminOnlyPrefixes = [
-      '/admin/settings',
-      '/admin/channels',
-      '/admin/users',
-      '/admin/roles',
-      '/admin/templates',
-      '/admin/orders',
-    ]
-
-    const blocked = adminOnlyPrefixes.some(
-      (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`),
-    )
-
-    if (blocked) {
-      navigate('/admin', { replace: true })
+    if (location.pathname.startsWith('/admin')) {
+      navigate('/portal/dashboard', { replace: true })
     }
   }, [isLoading, isAuthenticated, user?.role, location.pathname, navigate])
 

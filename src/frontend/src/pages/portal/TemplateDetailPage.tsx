@@ -124,6 +124,16 @@ export function TemplateDetailPage() {
           </div>
         </div>
 
+        <div className="mb-6 p-4 rounded-xl border border-primary-100 dark:border-primary-900/40 bg-primary-50/40 dark:bg-primary-950/20">
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            {t('portal.templateAutomationTitle')}
+          </p>
+          <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1.5 list-disc list-inside">
+            <li>{t('portal.templateAutomationTrial')}</li>
+            <li>{t('portal.templateAutomationPro')}</li>
+          </ul>
+        </div>
+
         {ownedChannel ? (
           <div className="space-y-3">
             <p className="text-sm text-gray-600 dark:text-gray-400">

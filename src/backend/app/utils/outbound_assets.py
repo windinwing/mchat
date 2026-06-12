@@ -7,8 +7,86 @@ from pathlib import Path
 from urllib.parse import urlparse, unquote
 
 _MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+_MARKDOWN_UPLOAD_LINK_RE = re.compile(r"\[([^\]]+)\]\((/uploads/[^)\s]+)\)")
 _URL_RE = re.compile(r'(?<!\()\bhttps?://[^\s<>"]+')
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
+
+# LLM-invented download URLs (not produced by skill export pipeline).
+_HALLUCINATED_FILE_URL_RE = re.compile(
+    r"^https?://(?:www\.)?mchat\.com/files/",
+    re.I,
+)
+_HALLUCINATED_UUID_FILE_RE = re.compile(
+    r"^https?://[^/]+/files/[a-f0-9-]{36}\.[a-z0-9]+$",
+    re.I,
+)
+_BOGUS_MARKDOWN_FILE_LINK_RE = re.compile(
+    r"\[([^\]]*)\]\((?:https?://[^/]+)?/files/[a-f0-9-]{36}\.[a-z0-9]+[^)]*\)",
+    re.I,
+)
+_BOGUS_RAW_FILE_URL_RE = re.compile(
+    r"https?://(?:www\.)?mchat\.com/files/\S+",
+    re.I,
+)
+_BOGUS_ARROW_DOWNLOAD_RE = re.compile(
+    r"[📄📥]?\s*[^\n→\[]*\.xlsx\s*→\s*点击下载",
+    re.I,
+)
+_FAKE_EXPORT_LINE_MARKERS = (
+    "下载链接已生成",
+    "请您点击链接下载",
+    "如果仍然无法下载",
+    "更换浏览器",
+    "邮箱",
+    "发送到邮箱",
+    "还需要其他帮助",
+)
+_FAKE_XLSX_ARROW_LINE_RE = re.compile(r"\.xlsx\s*→", re.I)
+
+
+def is_hallucinated_download_url(url: str) -> bool:
+    """True for LLM-fabricated file URLs that should not be shown or collected."""
+    u = (url or "").strip()
+    if not u:
+        return False
+    if u.startswith("/files/") and "/uploads/" not in u:
+        return True
+    if _HALLUCINATED_FILE_URL_RE.match(u):
+        return True
+    if _HALLUCINATED_UUID_FILE_RE.match(u):
+        return True
+    return False
+
+
+def sanitize_hallucinated_download_urls(text: str) -> str:
+    """Strip bogus download links from assistant markdown before persist/display."""
+    if not text:
+        return text
+    cleaned = _BOGUS_MARKDOWN_FILE_LINK_RE.sub("", text)
+    cleaned = _BOGUS_RAW_FILE_URL_RE.sub("", cleaned)
+    cleaned = _BOGUS_ARROW_DOWNLOAD_RE.sub("", cleaned)
+    if "/uploads/" not in text:
+        kept_lines: list[str] = []
+        for line in cleaned.splitlines():
+            if any(marker in line for marker in _FAKE_EXPORT_LINE_MARKERS):
+                continue
+            if _FAKE_XLSX_ARROW_LINE_RE.search(line) and "/uploads/" not in line:
+                continue
+            kept_lines.append(line)
+        cleaned = "\n".join(kept_lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def has_upload_file_assets(assets: list[dict] | None) -> bool:
+    """True when tool/extra payload already contains a real uploaded file URL."""
+    for asset in assets or []:
+        if not isinstance(asset, dict):
+            continue
+        url = str(asset.get("url") or "").strip()
+        if url.startswith("/uploads/"):
+            return True
+    return False
 
 
 def _basename_from_url(url: str) -> str:
@@ -79,6 +157,8 @@ def extract_content_assets(content: str) -> list[dict]:
     seen_urls: set[str] = set()
 
     for label, url in _MARKDOWN_LINK_RE.findall(text):
+        if is_hallucinated_download_url(url):
+            continue
         normalized = normalize_outbound_asset(
             {"name": label.strip(), "url": url, "source": "markdown_link"},
             default_source="markdown_link",
@@ -87,8 +167,24 @@ def extract_content_assets(content: str) -> list[dict]:
             assets.append(normalized)
             seen_urls.add(normalized["url"])
 
+    for label, url in _MARKDOWN_UPLOAD_LINK_RE.findall(text):
+        if is_hallucinated_download_url(url):
+            continue
+        normalized = normalize_outbound_asset(
+            {
+                "name": label.strip(),
+                "url": url,
+                "source": "upload_link",
+                "type": "file",
+            },
+            default_source="upload_link",
+        )
+        if normalized is not None and normalized["url"] not in seen_urls:
+            assets.append(normalized)
+            seen_urls.add(normalized["url"])
+
     for url in _URL_RE.findall(text):
-        if url in seen_urls:
+        if url in seen_urls or is_hallucinated_download_url(url):
             continue
         normalized = normalize_outbound_asset(
             {"url": url, "source": "raw_url"},

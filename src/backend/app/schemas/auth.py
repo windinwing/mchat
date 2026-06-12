@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class LoginRequest(BaseModel):
@@ -31,14 +31,27 @@ class UserResponse(BaseModel):
     username: str
     role: str
     email: str | None = None
+    phone: str | None = None
+    external_provider: str | None = None
     account_status: str = "active"
     avatar_url: str | None = None
     display_name: str | None = None
     skill_ids: list | None = None
     workspace_container_allowed: bool | None = None
+    password_set_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def has_password(self) -> bool:
+        return self.password_set_at is not None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def can_set_password(self) -> bool:
+        return not self.external_provider
 
 
 class TokenResponse(BaseModel):
@@ -58,9 +71,11 @@ class BootstrapResponse(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    """Change password for the current user."""
+    """Change or set password for the current user."""
 
-    current_password: str = Field(..., min_length=1, max_length=255)
+    current_password: str | None = Field(
+        None, min_length=1, max_length=255
+    )
     new_password: str = Field(..., min_length=6, max_length=255)
 
 

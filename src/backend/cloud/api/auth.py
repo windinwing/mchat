@@ -1,6 +1,6 @@
 """Cloud auth API — phone OTP signup and 9235.net SSO."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -16,7 +16,7 @@ from cloud.schemas.auth import (
 )
 from cloud.services import otp_service
 from cloud.services.patent9235_auth import (
-    mchat_callback_url,
+    resolve_9235_login_url,
     sso_login_url,
     verify_xtk,
 )
@@ -96,15 +96,19 @@ async def login_by_phone(
 
 
 @router.get("/sso/9235/url", response_model=SsoLoginUrlResponse)
-async def sso_9235_url(request: Request) -> SsoLoginUrlResponse:
+async def sso_9235_url() -> SsoLoginUrlResponse:
     """URL to start 9235.net login (product SSO)."""
-    origin = request.headers.get("origin") or str(request.base_url).rstrip("/")
-    if not request.headers.get("origin") and settings.cors_origins != "*":
-        first = settings.cors_origins.split(",")[0].strip()
-        if first:
-            origin = first
-    callback = mchat_callback_url(origin)
-    return SsoLoginUrlResponse(url=sso_login_url(redirect_after=callback))
+    if not (settings.patent9235_jwt_secret or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="9235 SSO not configured (PATENT9235_JWT_SECRET)",
+        )
+    if not resolve_9235_login_url():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="9235 SSO login URL not configured",
+        )
+    return SsoLoginUrlResponse(url=sso_login_url())
 
 
 @router.get("/sso/9235/callback", response_model=TokenResponse)

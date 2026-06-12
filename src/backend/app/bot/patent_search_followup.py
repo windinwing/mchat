@@ -61,7 +61,34 @@ _SUCCESS_MARKERS = (
     "🔍 搜索完成",
     "Search complete",
     "search complete",
+    "✅ 已导出",
 )
+
+_EXPORT_INTENT_KEYWORDS = ("导出", "下载", "excel", "xlsx", "表格")
+
+
+def user_wants_patent_export(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(keyword in lowered for keyword in _EXPORT_INTENT_KEYWORDS)
+
+
+def patent_export_retry_nudge() -> str:
+    return (
+        "（用户看不到本条消息。）\n"
+        "用户要求导出 Excel，你必须调用 patent-search 且 command=export，"
+        "复用上一条检索的 query（及 sort/page 如适用）。\n"
+        "不要用文字假装已生成下载链接；导出成功后会由系统展示 /uploads/ 下载链接。"
+    )
+
+
+def patent_generic_synthesis_nudge() -> str:
+    return (
+        "请根据以上工具调用结果，用中文向用户说明关键结论与建议的下一步。"
+        "若任务尚未完成，请明确还差什么。不要再次调用工具。\n"
+        "⚠️ 禁止编造下载链接或写「链接已生成」而无 /uploads/ 真实链接；"
+        "禁止提及邮箱、发送邮件、更换浏览器。\n"
+        "若用户要导出 Excel 但工具未返回下载链接，说明需重新点击「导出Excel」。"
+    )
 
 
 def find_patent_search_skill(tool_skills: list[Skill]) -> Skill | None:
