@@ -231,7 +231,7 @@ export function LandingPage() {
               ? [
                   { v: '5+', k: 'statsTemplates' },
                   { v: '14', k: 'statsTrial' },
-                  { v: '1', k: 'statsEmbed' },
+                  { v: t('landingCloud.statsChannelsValue'), k: 'statsChannels' },
                 ].map((s) => (
                   <div key={s.k} className="text-center">
                     <p className="text-2xl sm:text-3xl font-bold text-primary-600">{s.v}</p>
@@ -267,20 +267,11 @@ export function LandingPage() {
             </ul>
           </div>
 
-          <div className="rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-xl bg-gray-50 dark:bg-gray-800/50 mb-8">
-            <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-500 dark:text-gray-400">
-              {lp('previewFrameTitle')}
-            </div>
-            {cloud ? (
-              <Link to="/portal/templates" className="block">
-                <img
-                  src={landingScreenshot('home.zone', i18n.language)}
-                  alt={lp('previewTitle')}
-                  className="w-full h-auto"
-                  loading="lazy"
-                />
-              </Link>
-            ) : (
+          {!cloud && (
+            <div className="rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-xl bg-gray-50 dark:bg-gray-800/50 mb-8">
+              <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-500 dark:text-gray-400">
+                {t('landing.previewFrameTitle')}
+              </div>
               <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="block">
                 <img
                   src={landingScreenshot('home.zone', i18n.language)}
@@ -289,8 +280,8 @@ export function LandingPage() {
                   loading="lazy"
                 />
               </a>
-            )}
-          </div>
+            </div>
+          )}
 
           {cloud && (
             <div className="mb-8 rounded-2xl border border-primary-200 dark:border-primary-800/60 bg-gradient-to-br from-primary-50/90 to-violet-50/50 dark:from-primary-950/40 dark:to-violet-950/20 p-5 sm:p-6">
