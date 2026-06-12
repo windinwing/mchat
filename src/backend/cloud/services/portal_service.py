@@ -109,28 +109,29 @@ class PortalService:
         billing_period: str = "monthly",
         active_order_id: str | None = None,
         subscription_ends_at: datetime | None = None,
+        admin_grant: bool = False,
     ) -> MyChannelResponse:
-        ensure_public_api_available()
-        result = await self.db.execute(
-            select(ChannelTemplate).where(
-                ChannelTemplate.id == request.template_id,
-                ChannelTemplate.is_published == True,
-            )
-        )
+        if not admin_grant:
+            ensure_public_api_available()
+        tpl_q = select(ChannelTemplate).where(ChannelTemplate.id == request.template_id)
+        if not admin_grant:
+            tpl_q = tpl_q.where(ChannelTemplate.is_published == True)
+        result = await self.db.execute(tpl_q)
         template = result.scalar_one_or_none()
         if template is None:
             raise HTTPException(status_code=404, detail="Template not found")
 
-        price = (
-            template.price_yearly_cents
-            if billing_period == "yearly" and template.price_yearly_cents > 0
-            else template.price_monthly_cents
-        )
-        if price > 0 and not paid_order:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="Payment required for this template",
+        if not admin_grant:
+            price = (
+                template.price_yearly_cents
+                if billing_period == "yearly" and template.price_yearly_cents > 0
+                else template.price_monthly_cents
             )
+            if price > 0 and not paid_order:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Payment required for this template",
+                )
 
         # Prevent duplicate channels from the same template
         dup_result = await self.db.execute(
@@ -145,11 +146,14 @@ class PortalService:
                 detail="You already have a channel from this template",
             )
 
-        trial_end = (
-            datetime.now(timezone.utc) + timedelta(days=template.trial_days)
-            if template.trial_days > 0
-            else None
-        )
+        if admin_grant:
+            trial_end = None
+        else:
+            trial_end = (
+                datetime.now(timezone.utc) + timedelta(days=template.trial_days)
+                if template.trial_days > 0
+                else None
+            )
 
         # Use template's referenced AI config, or create from spec
         ai_config_id = None
@@ -219,7 +223,10 @@ class PortalService:
             if kb_id:
                 knowledge_base_ids.append(kb_id)
 
-        if paid_order:
+        if admin_grant:
+            plan = "free"
+            sub_end = None
+        elif paid_order:
             plan = "pro"
             sub_end = subscription_ends_at or subscription_end_from_period(
                 billing_period

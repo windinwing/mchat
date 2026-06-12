@@ -49,6 +49,17 @@ class AdminChannelSubscriptionUpdate(BaseModel):
     note: str | None = Field(None, max_length=500, description="Optional audit note")
 
 
+class AdminProvisionChannelRequest(BaseModel):
+    """Admin creates a workspace for a user and grants subscription in one step."""
+
+    template_id: str = Field(..., min_length=1)
+    channel_name: str | None = Field(None, max_length=200)
+    grant_trial_days: int | None = Field(None, ge=1, le=730)
+    grant_pro_days: int | None = Field(None, ge=1, le=3650)
+    extend_pro_months: int | None = Field(None, ge=1, le=120)
+    note: str | None = Field(None, max_length=500)
+
+
 class AdminPortalUserSubscription(BaseModel):
     """Portal user with zero or more workspace channels."""
 

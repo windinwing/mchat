@@ -29,6 +29,13 @@ interface PortalUserSubscription {
   channels: ChannelSubscription[]
 }
 
+interface ChannelTemplateOption {
+  id: string
+  name: string
+  category: string
+  is_published: boolean
+}
+
 type QuickAction =
   | { kind: 'trial'; days: number }
   | { kind: 'pro_days'; days: number; grant: boolean }
@@ -93,6 +100,24 @@ export function AdminSubscriptionsPage() {
   const [trialEndsAt, setTrialEndsAt] = useState('')
   const [subscriptionEndsAt, setSubscriptionEndsAt] = useState('')
   const [note, setNote] = useState('')
+  const [templates, setTemplates] = useState<ChannelTemplateOption[]>([])
+  const [provisioningUser, setProvisioningUser] = useState<PortalUserSubscription | null>(null)
+  const [provisionTemplateId, setProvisionTemplateId] = useState('')
+  const [provisionNote, setProvisionNote] = useState('')
+  const [provisionSaving, setProvisionSaving] = useState(false)
+  const [provisionError, setProvisionError] = useState<string | null>(null)
+
+  useEffect(() => {
+    api
+      .get<ChannelTemplateOption[]>('/admin/templates')
+      .then((list) => {
+        setTemplates(list || [])
+        if (list?.length) {
+          setProvisionTemplateId((cur) => cur || list[0].id)
+        }
+      })
+      .catch(() => setTemplates([]))
+  }, [])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -226,6 +251,63 @@ export function AdminSubscriptionsPage() {
     if (searchInput.trim()) setViewMode('users')
   }
 
+  const openProvision = (user: PortalUserSubscription) => {
+    setProvisioningUser(user)
+    setProvisionError(null)
+    setProvisionNote('')
+    if (templates.length > 0) {
+      setProvisionTemplateId(templates[0].id)
+    }
+  }
+
+  const closeProvision = () => {
+    setProvisioningUser(null)
+    setProvisionError(null)
+  }
+
+  const runProvision = async (body: Record<string, unknown>) => {
+    if (!provisioningUser || !provisionTemplateId) return
+    setProvisionSaving(true)
+    setProvisionError(null)
+    try {
+      const res = await api.post<{ channel: ChannelSubscription; message: string }>(
+        `/admin/subscriptions/users/${provisioningUser.user_id}/provision`,
+        {
+          template_id: provisionTemplateId,
+          note: provisionNote || undefined,
+          ...body,
+        },
+      )
+      setRows((prev) => {
+        const exists = prev.some((r) => r.channel_id === res.channel.channel_id)
+        return exists
+          ? prev.map((r) => (r.channel_id === res.channel.channel_id ? res.channel : r))
+          : [res.channel, ...prev]
+      })
+      setUserRows((prev) =>
+        prev.map((u) =>
+          u.user_id === provisioningUser.user_id
+            ? {
+                ...u,
+                channels: u.channels.some((c) => c.channel_id === res.channel.channel_id)
+                  ? u.channels.map((c) =>
+                      c.channel_id === res.channel.channel_id ? res.channel : c,
+                    )
+                  : [res.channel, ...u.channels],
+              }
+            : u,
+        ),
+      )
+      closeProvision()
+      openEdit(res.channel)
+      setSaveOk(res.message)
+    } catch (e: unknown) {
+      setProvisionError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setProvisionSaving(false)
+    }
+  }
+
   if (loading && rows.length === 0) {
     return (
       <div className="flex justify-center py-16">
@@ -346,9 +428,18 @@ export function AdminSubscriptionsPage() {
                   {user.user_phone || user.user_display_name || user.user_username || user.user_id}
                 </p>
                 {user.channels.length === 0 ? (
-                  <p className="text-sm text-amber-700 dark:text-amber-300 mt-2">
-                    {t('adminSubscriptions.userNoChannels')}
-                  </p>
+                  <div className="mt-3 space-y-2">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {t('adminSubscriptions.userNoChannelsHint')}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => openProvision(user)}
+                      className="text-sm px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                    >
+                      {t('adminSubscriptions.provisionWorkspace')}
+                    </button>
+                  </div>
                 ) : (
                   <ul className="mt-3 space-y-2">
                     {user.channels.map((ch) => (
@@ -436,6 +527,80 @@ export function AdminSubscriptionsPage() {
               {t('adminSubscriptions.empty')}
             </p>
           )}
+        </div>
+      )}
+
+      {provisioningUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl p-6 space-y-4">
+            <div className="flex justify-between items-start gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {t('adminSubscriptions.provisionTitle')}
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  {provisioningUser.user_phone ||
+                    provisioningUser.user_display_name ||
+                    provisioningUser.user_username}
+                </p>
+              </div>
+              <button type="button" onClick={closeProvision} className="text-gray-500">
+                ✕
+              </button>
+            </div>
+            {provisionError && (
+              <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 text-sm text-red-600 dark:text-red-300">
+                {provisionError}
+              </div>
+            )}
+            <label className="block text-sm">
+              <span className="text-gray-500 dark:text-gray-400">{t('adminSubscriptions.template')}</span>
+              <select
+                className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2"
+                value={provisionTemplateId}
+                onChange={(e) => setProvisionTemplateId(e.target.value)}
+              >
+                {templates.map((tpl) => (
+                  <option key={tpl.id} value={tpl.id}>
+                    {tpl.name}
+                    {!tpl.is_published ? ` (${t('adminSubscriptions.unpublished')})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="text-gray-500 dark:text-gray-400">{t('adminSubscriptions.note')}</span>
+              <input
+                className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2"
+                value={provisionNote}
+                onChange={(e) => setProvisionNote(e.target.value)}
+                placeholder={t('adminSubscriptions.notePlaceholder')}
+              />
+            </label>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {t('adminSubscriptions.provisionHint')}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <QuickBtn
+                disabled={provisionSaving || !provisionTemplateId}
+                onClick={() => void runProvision({ grant_trial_days: 14 })}
+              >
+                {t('adminSubscriptions.grantTrial14')}
+              </QuickBtn>
+              <QuickBtn
+                disabled={provisionSaving || !provisionTemplateId}
+                onClick={() => void runProvision({ grant_pro_days: 30 })}
+              >
+                {t('adminSubscriptions.grantPro30')}
+              </QuickBtn>
+              <QuickBtn
+                disabled={provisionSaving || !provisionTemplateId}
+                onClick={() => void runProvision({ extend_pro_months: 12 })}
+              >
+                {t('adminSubscriptions.grantPro1y')}
+              </QuickBtn>
+            </div>
+          </div>
         </div>
       )}
 

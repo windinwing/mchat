@@ -11,12 +11,14 @@ from cloud.schemas.admin_subscription import (
     AdminChannelSubscriptionUpdate,
     AdminChannelSubscriptionUpdateResult,
     AdminPortalUserSubscription,
+    AdminProvisionChannelRequest,
 )
 from cloud.services.admin_subscription_service import (
     apply_channel_subscription_update,
     get_channel_subscription,
     list_channel_subscriptions,
     list_portal_users_with_subscriptions,
+    provision_user_channel,
 )
 
 router = APIRouter()
@@ -58,6 +60,21 @@ async def admin_list_portal_user_subscriptions(
 ) -> list[AdminPortalUserSubscription]:
     """Portal users with their channels; includes users who have not rented a workspace."""
     return await list_portal_users_with_subscriptions(db, q=q, limit=limit)
+
+
+@router.post(
+    "/admin/subscriptions/users/{user_id}/provision",
+    response_model=AdminChannelSubscriptionUpdateResult,
+)
+async def admin_provision_user_channel(
+    user_id: str,
+    body: AdminProvisionChannelRequest,
+    admin: User = Depends(require_permission(Permission.USERS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+) -> AdminChannelSubscriptionUpdateResult:
+    """Create a workspace from a template and grant trial/Pro without user checkout."""
+    row, message = await provision_user_channel(db, user_id, body, admin=admin)
+    return AdminChannelSubscriptionUpdateResult(channel=row, message=message)
 
 
 @router.get(

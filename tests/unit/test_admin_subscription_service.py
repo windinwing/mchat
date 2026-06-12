@@ -10,12 +10,16 @@ from fastapi import HTTPException
 from app.models.channel_template import ChannelTemplate
 from app.models.customer import CustomerConfig
 from app.models.user import User
-from cloud.schemas.admin_subscription import AdminChannelSubscriptionUpdate
+from cloud.schemas.admin_subscription import (
+    AdminChannelSubscriptionUpdate,
+    AdminProvisionChannelRequest,
+)
 from cloud.services.admin_subscription_service import (
     apply_channel_subscription_update,
     extend_end_by_days,
     list_channel_subscriptions,
     list_portal_users_with_subscriptions,
+    provision_user_channel,
 )
 
 
@@ -120,6 +124,43 @@ async def test_list_portal_users_includes_user_without_channel(db_session):
     assert len(rows) == 1
     assert rows[0].user_username == "dave"
     assert rows[0].channels == []
+
+
+@pytest.mark.asyncio
+async def test_provision_user_channel_without_existing_workspace(db_session):
+    admin = User(id="adm-4", username="admin4", password_hash="x", role="admin")
+    user = User(
+        id="u-6",
+        username="13891633096",
+        phone="13891633096",
+        password_hash="x",
+        role="user",
+    )
+    tpl = ChannelTemplate(
+        id="tpl-prov",
+        name="Patent workspace",
+        category="patent_rag",
+        trial_days=7,
+        price_monthly_cents=9900,
+        is_published=True,
+    )
+    db_session.add_all([admin, user, tpl])
+    await db_session.flush()
+
+    row, msg = await provision_user_channel(
+        db_session,
+        user.id,
+        AdminProvisionChannelRequest(
+            template_id=tpl.id,
+            grant_pro_days=30,
+            note="admin gift",
+        ),
+        admin=admin,
+    )
+    assert row.plan == "pro"
+    assert row.subscription_ends_at is not None
+    assert row.user_phone == "13891633096"
+    assert "开通" in msg or "granted" in msg
 
 
 @pytest.mark.asyncio

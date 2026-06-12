@@ -17,7 +17,10 @@ from cloud.schemas.admin_subscription import (
     AdminChannelSubscriptionRow,
     AdminChannelSubscriptionUpdate,
     AdminPortalUserSubscription,
+    AdminProvisionChannelRequest,
 )
+from cloud.schemas.portal import RentChannelRequest
+from cloud.services.portal_service import PortalService
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -284,3 +287,73 @@ async def list_portal_users_with_subscriptions(
         )
         for u in users
     ]
+
+
+def _subscription_from_provision(
+    body: AdminProvisionChannelRequest,
+) -> AdminChannelSubscriptionUpdate:
+    grant_pro_days = body.grant_pro_days
+    if (
+        body.grant_trial_days is None
+        and grant_pro_days is None
+        and body.extend_pro_months is None
+    ):
+        grant_pro_days = 30
+    return AdminChannelSubscriptionUpdate(
+        grant_trial_days=body.grant_trial_days,
+        grant_pro_days=grant_pro_days,
+        extend_pro_months=body.extend_pro_months,
+        note=body.note,
+    )
+
+
+async def provision_user_channel(
+    db: AsyncSession,
+    user_id: str,
+    body: AdminProvisionChannelRequest,
+    *,
+    admin: User,
+) -> tuple[AdminChannelSubscriptionRow, str]:
+    """Create workspace from template for a portal user, then grant subscription."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.role != "user":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Only portal users (role=user) can receive provisioned workspaces",
+        )
+
+    dup_result = await db.execute(
+        select(CustomerConfig).where(
+            CustomerConfig.user_id == user.id,
+            CustomerConfig.template_id == body.template_id,
+        )
+    )
+    existing = dup_result.scalar_one_or_none()
+    sub_update = _subscription_from_provision(body)
+
+    if existing is not None:
+        row, msg = await apply_channel_subscription_update(
+            db, existing.id, sub_update, admin=admin
+        )
+        return row, f"已有该模板工作空间；{msg}"
+
+    portal = PortalService(db)
+    channel = await portal.rent_channel(
+        user,
+        RentChannelRequest(template_id=body.template_id, name=body.channel_name),
+        admin_grant=True,
+    )
+    row, msg = await apply_channel_subscription_update(
+        db, channel.id, sub_update, admin=admin
+    )
+    logger.info(
+        "admin provision channel={} user={} template={} admin={} note={}",
+        channel.id,
+        user.username,
+        body.template_id,
+        admin.username,
+        body.note or "",
+    )
+    return row, f"已开通工作空间；{msg}"
