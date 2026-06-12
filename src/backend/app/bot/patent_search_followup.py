@@ -40,6 +40,8 @@ _DEFAULT_TOOL_HINT = (
     "- 用户要「最新/最近」专利：必须传 sort=!documentDate；"
     "「最新申请/按申请日」传 sort=!applicationDate；"
     "query 可只写关键词（如「无人机」），勿丢掉排序意图\n"
+    "- export: 传 command=export、query（如「华为」）。用户说「导出/下载 Excel/表格」时必须用此命令。"
+    "导出后会返回下载链接。\n"
     "- analysis: 必须同时传 command=analysis、query、dimension（applicant|ipc|"
     "applicationYear|legalStatus|province）\n"
     "- detail/claims/legal 等: 传 patent_id\n"

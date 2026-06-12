@@ -23,14 +23,14 @@ def _coerce_bool(value: Any) -> bool:
 
 
 def default_patent_portal_url_template() -> str:
-    """White-label default from env; empty means no global patent links."""
+    """Default patent portal URL template; configurable via env PATENT_PORTAL_URL_TEMPLATE."""
     explicit = (getattr(settings, "patent_portal_url_template", None) or "").strip()
     if explicit:
         return explicit
     base = (getattr(settings, "patent9235_base_url", None) or "").strip().rstrip("/")
     if base:
         return f"{base}/patent/{{patent_id}}.html"
-    return ""
+    return "https://www.9235.net/patent/{patent_id}.html"
 
 
 def patent_link_settings_from_skills(tool_skills: list[Any]) -> dict[str, Any]:
@@ -57,7 +57,7 @@ def patent_link_settings_from_skills(tool_skills: list[Any]) -> dict[str, Any]:
         )
         return {"enabled": enabled, "template": str(template)}
     fallback = default_patent_portal_url_template()
-    return {"enabled": False, "template": fallback}
+    return {"enabled": bool(fallback), "template": fallback}
 
 
 def _portal_url(patent_id: str, template: str) -> str:
