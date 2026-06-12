@@ -16,7 +16,7 @@ from app.bot.messages import (
 )
 from app.utils.chat_upload import attachment_prompt_text
 from app.bot.provider import create_provider
-from app.bot.patent_links import linkify_patent_ids, patent_link_settings_from_skills
+from app.bot.patent_links import inject_action_links, linkify_patent_ids, patent_link_settings_from_skills
 from app.bot.patent_search_followup import (
     _DEFAULT_EXPORT_NUDGE,
     find_patent_search_skill,
@@ -789,6 +789,7 @@ async def process_message(
 
         if full_response:
             full_response = _with_patent_links(full_response)
+            full_response = inject_action_links(full_response)
             # Fix AI-generated download URLs that use wrong domain
             full_response = full_response.replace(
                 "https://www.9235.net/uploads/", "/uploads/"

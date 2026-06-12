@@ -84,3 +84,34 @@ def linkify_patent_ids(text: str, *, enabled: bool, template: str) -> str:
         part if _MD_LINK_CHUNK_RE.fullmatch(part) else _link_plain(part)
         for part in parts
     )
+
+
+def inject_action_links(text: str) -> str:
+    """Auto-wrap common operation text as [label](action:command) links.
+    Works around LLMs stripping unknown protocols from markdown links."""
+    # Single-line operation pills: "下一页 · 排序 · 导出Excel"
+    def _wrap_ops(match: re.Match) -> str:
+        items = [i.strip() for i in re.split(r'\s*[·|]\s*', match.group(1)) if i.strip()]
+        if len(items) <= 1:
+            return match.group(0)
+        linked = [f'[{item}](action:{item})' for item in items]
+        return ' · '.join(linked)
+
+    text = re.sub(
+        r'(?:^|\n)([^·\n]+(?:·[^·\n]+){2,})',
+        _wrap_ops,
+        text,
+        flags=re.MULTILINE,
+    )
+    # Bullet points after operation headers
+    def _link_ops(match: re.Match) -> str:
+        label = match.group(1)
+        cmd = match.group(2)
+        return f'- [{label}](action:{cmd})'
+
+    text = re.sub(
+        r'[-\*]\s*([^：\n]+)[：:]\s*[「「]?([^」」\n]+)[」」]?',
+        _link_ops,
+        text,
+    )
+    return text
