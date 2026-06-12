@@ -8,10 +8,25 @@ export function landingScreenshot(name: string, locale: string): string {
   return `/landing/mchat.${name}.${zh ? 'zh' : 'en'}.png`
 }
 
-export const LANDING_PREVIEW_CARDS = [
+export type LandingPreviewCard = {
+  key: string
+  image: string
+  highlight?: boolean
+}
+
+export const LANDING_PREVIEW_CARDS: readonly LandingPreviewCard[] = [
   { key: 'previewCardConversations', image: 'conversations' },
   { key: 'previewCardKnowledge', image: 'knowledge' },
   { key: 'previewCardWidget', image: 'widget' },
   { key: 'previewCardWorkflow', image: 'workflow' },
   { key: 'previewCardWorkflowGraph', image: 'workflow.graph' },
-] as const
+]
+
+/** Cloud landing: lead with skill / workflow orchestration screenshots. */
+export const LANDING_PREVIEW_CARDS_CLOUD: readonly LandingPreviewCard[] = [
+  { key: 'previewCardWorkflow', image: 'workflow', highlight: true },
+  { key: 'previewCardWorkflowGraph', image: 'workflow.graph', highlight: true },
+  { key: 'previewCardConversations', image: 'conversations' },
+  { key: 'previewCardKnowledge', image: 'knowledge' },
+  { key: 'previewCardWidget', image: 'widget' },
+]

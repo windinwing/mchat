@@ -20,7 +20,12 @@ import {
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { ThemeToggle } from '@/components/common/ThemeToggle'
 import { useAuthStore } from '@/stores/auth'
-import { landingScreenshot, LANDING_PREVIEW_CARDS } from '@/lib/landingImages'
+import {
+  landingScreenshot,
+  LANDING_PREVIEW_CARDS,
+  LANDING_PREVIEW_CARDS_CLOUD,
+} from '@/lib/landingImages'
+import { LandingPreviewCarousel } from '@/components/landing/LandingPreviewCarousel'
 import { preferredStaffPath } from '@/lib/appPreferences'
 import { SiteCopyrightFooter } from '@/components/common/SiteCopyrightFooter'
 
@@ -287,24 +292,36 @@ export function LandingPage() {
             )}
           </div>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {LANDING_PREVIEW_CARDS.map(({ key, image }) => (
-              <figure
-                key={key}
-                className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-900 shadow-sm hover:shadow-md transition-shadow"
-              >
-                <img
-                  src={landingScreenshot(image, i18n.language)}
-                  alt={t(`landing.${key}`)}
-                  className="w-full h-auto aspect-video object-cover object-top"
-                  loading="lazy"
-                />
-                <figcaption className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 border-t border-gray-100 dark:border-gray-800">
-                  {t(`landing.${key}`)}
-                </figcaption>
-              </figure>
-            ))}
-          </div>
+          {cloud && (
+            <div className="mb-8 rounded-2xl border border-primary-200 dark:border-primary-800/60 bg-gradient-to-br from-primary-50/90 to-violet-50/50 dark:from-primary-950/40 dark:to-violet-950/20 p-5 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                <div className="shrink-0 w-11 h-11 rounded-xl bg-primary-600 text-white flex items-center justify-center">
+                  <Workflow className="w-6 h-6" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {t('landingCloud.previewWorkflowSpotlightTitle')}
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+                    {t('landingCloud.previewWorkflowSpotlightDesc')}
+                  </p>
+                  <Link
+                    to="/portal/workflow-center"
+                    className="inline-flex mt-3 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400"
+                  >
+                    {t('landingCloud.previewWorkflowSpotlightCta')} →
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <LandingPreviewCarousel
+            cards={cloud ? LANDING_PREVIEW_CARDS_CLOUD : LANDING_PREVIEW_CARDS}
+            locale={i18n.language}
+            labelPrefix="landing"
+            showWorkflowHighlight={cloud}
+          />
         </div>
       </section>
 
