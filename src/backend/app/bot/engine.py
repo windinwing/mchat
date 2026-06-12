@@ -702,10 +702,12 @@ async def process_message(
                         patent_search_for_summary = True
 
             if patent_search_for_presentation:
+                nudge = patent_search_presentation_nudge(patent_skill)
+                logger.info("patent_presentation_nudge len={} has_action={}", len(nudge), "action:" in nudge)
                 messages_list.append(
                     {
                         "role": "user",
-                        "content": patent_search_presentation_nudge(patent_skill),
+                        "content": nudge,
                     }
                 )
                 presentation_parts: list[str] = []
