@@ -416,6 +416,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       clearTimeout(streamSafetyTimer)
       streamSafetyTimer = null
     }
+    // Preserve partial content as a message so it doesn't vanish
+    const state = get()
+    if (state.streamingContent && state.isStreaming) {
+      state.finalizeStream({
+        id: `partial-${Date.now()}`,
+        conversation_id: state.currentConversation?.id || '',
+        content: state.streamingContent + '\n\n[Response interrupted]',
+      })
+      return
+    }
     set({ isStreaming: false, streamingContent: '' })
   },
 

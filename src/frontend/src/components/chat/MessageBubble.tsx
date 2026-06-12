@@ -391,6 +391,11 @@ export function MessageBubble({
             {isStreaming && (
               <span className="cursor-blink inline-block w-[2px] h-4 bg-current ml-0.5 align-middle" />
             )}
+            {!isStreaming && displayContent.includes('[Response interrupted]') && (
+              <span className="inline-flex items-center gap-1 mt-1 text-xs text-amber-600 dark:text-amber-400">
+                ⚠️ Response was interrupted — may be incomplete
+              </span>
+            )}
           </div>
         )}
 
