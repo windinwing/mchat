@@ -120,7 +120,8 @@ export function createMarkdownComponents(
       const rawHref = href || ''
       // Action links: [下一页](action:下一页) → clickable button that sends a chat message
       if (rawHref.startsWith('action:')) {
-        const actionText = rawHref.slice('action:'.length)
+        const rawAction = rawHref.slice('action:'.length)
+        const actionText = (() => { try { return decodeURIComponent(rawAction) } catch { return rawAction } })()
         const label = typeof children === 'string' ? children : actionText
         const handleAction = (e: React.MouseEvent) => {
           e.preventDefault()
