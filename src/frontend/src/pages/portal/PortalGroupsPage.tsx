@@ -273,17 +273,29 @@ export function PortalGroupsPage() {
             {t('portal.groupsSubtitle')}
           </p>
         </div>
-        <div className="w-72 max-w-full">
-          <Select
-            label={t('portal.groupSelectLabel')}
-            value={groupId}
-            options={groups.map((group) => ({ value: group.id, label: group.name }))}
-            onChange={(e) => setGroupId(e.target.value)}
-          />
-        </div>
+        {groups.length > 0 && (
+          <div className="w-72 max-w-full">
+            <Select
+              label={t('portal.groupSelectLabel')}
+              value={groupId}
+              options={groups.map((group) => ({ value: group.id, label: group.name }))}
+              onChange={(e) => setGroupId(e.target.value)}
+            />
+          </div>
+        )}
       </div>
 
-      {!selectedGroup ? (
+      {groups.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center space-y-2">
+            <Users className="w-10 h-10 mx-auto text-gray-300 dark:text-gray-600" />
+            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{t('portal.groupsEmpty')}</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto leading-relaxed">
+              {t('portal.groupsInviteOnlyHint')}
+            </p>
+          </CardContent>
+        </Card>
+      ) : !selectedGroup ? (
         <Card>
           <CardContent>
             <p className="text-sm text-gray-500 dark:text-gray-400">{t('portal.groupsEmpty')}</p>

@@ -10,11 +10,13 @@ from cloud.schemas.admin_subscription import (
     AdminChannelSubscriptionRow,
     AdminChannelSubscriptionUpdate,
     AdminChannelSubscriptionUpdateResult,
+    AdminPortalUserSubscription,
 )
 from cloud.services.admin_subscription_service import (
     apply_channel_subscription_update,
     get_channel_subscription,
     list_channel_subscriptions,
+    list_portal_users_with_subscriptions,
 )
 
 router = APIRouter()
@@ -42,6 +44,20 @@ async def admin_list_channel_subscriptions(
         active_only=active_only,
         limit=limit,
     )
+
+
+@router.get(
+    "/admin/subscriptions/users",
+    response_model=list[AdminPortalUserSubscription],
+)
+async def admin_list_portal_user_subscriptions(
+    q: str | None = None,
+    limit: int = 100,
+    _admin: User = Depends(require_permission(Permission.USERS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+) -> list[AdminPortalUserSubscription]:
+    """Portal users with their channels; includes users who have not rented a workspace."""
+    return await list_portal_users_with_subscriptions(db, q=q, limit=limit)
 
 
 @router.get(

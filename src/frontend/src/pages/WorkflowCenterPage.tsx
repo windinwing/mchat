@@ -217,18 +217,22 @@ export function WorkflowCenterPage() {
         ))}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-[1fr,200px]">
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={t('workflowCenter.searchPlaceholder')}
-          leftIcon={<Search className="w-4 h-4" />}
-        />
-        <Select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          options={categoryOptions}
-        />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[12rem]">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('workflowCenter.searchPlaceholder')}
+            leftIcon={<Search className="w-4 h-4" />}
+          />
+        </div>
+        <div className="w-44 shrink-0">
+          <Select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            options={categoryOptions}
+          />
+        </div>
       </div>
 
       {filtered.length === 0 ? (

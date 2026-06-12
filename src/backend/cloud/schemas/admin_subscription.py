@@ -35,6 +35,9 @@ class AdminChannelSubscriptionUpdate(BaseModel):
     grant_trial_days: int | None = Field(
         None, ge=1, le=730, description="Set free_trial and trial end from now"
     )
+    grant_pro_days: int | None = Field(
+        None, ge=1, le=3650, description="Grant or extend Pro by N days from now or active end"
+    )
     extend_pro_days: int | None = Field(
         None, ge=1, le=3650, description="Extend Pro subscription by N days"
     )
@@ -44,6 +47,16 @@ class AdminChannelSubscriptionUpdate(BaseModel):
     clear_trial: bool = False
     clear_subscription: bool = False
     note: str | None = Field(None, max_length=500, description="Optional audit note")
+
+
+class AdminPortalUserSubscription(BaseModel):
+    """Portal user with zero or more workspace channels."""
+
+    user_id: str
+    user_username: str | None = None
+    user_phone: str | None = None
+    user_display_name: str | None = None
+    channels: list[AdminChannelSubscriptionRow] = Field(default_factory=list)
 
 
 class AdminChannelSubscriptionUpdateResult(BaseModel):

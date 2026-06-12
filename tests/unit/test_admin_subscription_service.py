@@ -15,6 +15,7 @@ from cloud.services.admin_subscription_service import (
     apply_channel_subscription_update,
     extend_end_by_days,
     list_channel_subscriptions,
+    list_portal_users_with_subscriptions,
 )
 
 
@@ -88,6 +89,37 @@ async def test_list_channel_subscriptions_search(db_session):
     assert len(rows) == 1
     assert rows[0].channel_name == "Alice workspace"
     assert rows[0].subscription_active is True
+
+
+@pytest.mark.asyncio
+async def test_grant_pro_from_free_plan(db_session):
+    admin = User(id="adm-3", username="admin3", password_hash="x", role="admin")
+    user = User(id="u-4", username="carol", password_hash="x", role="user")
+    ch = CustomerConfig(id="ch-4", name="Carol bot", user_id=user.id, plan="free", enabled=True)
+    db_session.add_all([admin, user, ch])
+    await db_session.flush()
+
+    row, msg = await apply_channel_subscription_update(
+        db_session,
+        ch.id,
+        AdminChannelSubscriptionUpdate(grant_pro_days=30),
+        admin=admin,
+    )
+    assert row.plan == "pro"
+    assert row.subscription_ends_at is not None
+    assert "granted" in msg
+
+
+@pytest.mark.asyncio
+async def test_list_portal_users_includes_user_without_channel(db_session):
+    user = User(id="u-5", username="dave", phone="13900002222", password_hash="x", role="user")
+    db_session.add(user)
+    await db_session.flush()
+
+    rows = await list_portal_users_with_subscriptions(db_session, q="dave")
+    assert len(rows) == 1
+    assert rows[0].user_username == "dave"
+    assert rows[0].channels == []
 
 
 @pytest.mark.asyncio

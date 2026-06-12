@@ -16,6 +16,7 @@ from app.services.subscription_gate import is_subscription_active
 from cloud.schemas.admin_subscription import (
     AdminChannelSubscriptionRow,
     AdminChannelSubscriptionUpdate,
+    AdminPortalUserSubscription,
 )
 
 
@@ -157,18 +158,24 @@ async def apply_channel_subscription_update(
         config.trial_ends_at = now + timedelta(days=body.grant_trial_days)
         changes.append(f"granted {body.grant_trial_days}d trial")
 
-    if body.extend_pro_days is not None:
+    pro_days = body.grant_pro_days if body.grant_pro_days is not None else body.extend_pro_days
+    if pro_days is not None:
         config.plan = "pro"
+        config.trial_ends_at = None
         config.subscription_ends_at = extend_end_by_days(
             config.subscription_ends_at,
-            body.extend_pro_days,
+            pro_days,
             now=now,
         )
-        changes.append(f"extended pro by {body.extend_pro_days}d")
+        if body.grant_pro_days is not None:
+            changes.append(f"granted pro by {pro_days}d")
+        else:
+            changes.append(f"extended pro by {pro_days}d")
 
     if body.extend_pro_months is not None:
         days = body.extend_pro_months * 30
         config.plan = "pro"
+        config.trial_ends_at = None
         config.subscription_ends_at = extend_end_by_days(
             config.subscription_ends_at,
             days,
@@ -197,6 +204,7 @@ async def apply_channel_subscription_update(
                     pass
                 elif not any(
                     [
+                        body.grant_pro_days,
                         body.extend_pro_days,
                         body.extend_pro_months,
                         body.subscription_ends_at,
@@ -225,3 +233,54 @@ async def apply_channel_subscription_update(
     row = await get_channel_subscription(db, channel_id)
     message = "；".join(changes)
     return row, message
+
+
+async def list_portal_users_with_subscriptions(
+    db: AsyncSession,
+    *,
+    q: str | None = None,
+    limit: int = 100,
+) -> list[AdminPortalUserSubscription]:
+    """Portal users and their workspace channels (including users with no channel)."""
+    stmt = (
+        select(User)
+        .where(User.role == "user")
+        .order_by(User.created_at.desc())
+        .limit(min(limit, 200))
+    )
+    if q:
+        term = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                User.username.ilike(term),
+                User.phone.ilike(term),
+                User.display_name.ilike(term),
+            )
+        )
+    users = list((await db.execute(stmt)).scalars().all())
+    if not users:
+        return []
+
+    user_ids = [u.id for u in users]
+    channel_stmt = (
+        select(CustomerConfig, User, ChannelTemplate)
+        .join(User, CustomerConfig.user_id == User.id)
+        .outerjoin(ChannelTemplate, CustomerConfig.template_id == ChannelTemplate.id)
+        .where(CustomerConfig.user_id.in_(user_ids))
+        .order_by(CustomerConfig.updated_at.desc())
+    )
+    channel_rows = (await db.execute(channel_stmt)).all()
+    by_user: dict[str, list[AdminChannelSubscriptionRow]] = {uid: [] for uid in user_ids}
+    for config, user, template in channel_rows:
+        by_user.setdefault(user.id, []).append(_row_from_parts(config, user, template))
+
+    return [
+        AdminPortalUserSubscription(
+            user_id=u.id,
+            user_username=u.username,
+            user_phone=getattr(u, "phone", None),
+            user_display_name=getattr(u, "display_name", None),
+            channels=by_user.get(u.id, []),
+        )
+        for u in users
+    ]

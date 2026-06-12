@@ -12,7 +12,6 @@ import {
   writeStoredChannelId,
   writeStoredChatScope,
 } from '@/lib/appPreferences'
-import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/Button'
 import { AppModeSwitch } from '@/components/common/AppModeSwitch'
@@ -244,27 +243,6 @@ export function ChatHomePage({ mode: modeProp }: ChatHomePageProps) {
     return (
       <ChatHomeShell showModeSwitch={showModeSwitch} modeSwitchVariant={modeSwitchVariant}>
         <div className="flex flex-col items-center justify-center flex-1 gap-3">
-          <div className="w-full max-w-sm px-6">
-            <Select
-              label={t('chat.scopeLabel', '聊天作用域')}
-              value={chatScopeType === 'group' ? `group:${chatScopeId}` : 'personal'}
-              options={[
-                { value: 'personal', label: t('chat.scopePersonal', '个人空间') },
-                ...groupOptions.map((group) => ({ value: `group:${group.id}`, label: `${t('chat.scopeGroup', '群组')}: ${group.name}` })),
-              ]}
-              onChange={(event) => {
-                const value = event.target.value
-                if (value === 'personal') {
-                  setChatScopeType('personal')
-                  setChatScopeId('')
-                  return
-                }
-                const [, groupId] = value.split(':')
-                setChatScopeType('group')
-                setChatScopeId(groupId || '')
-              }}
-            />
-          </div>
           <Spinner size="lg" />
           <p className="text-sm text-gray-500">{t('common.loading')}</p>
         </div>
@@ -337,27 +315,6 @@ export function ChatHomePage({ mode: modeProp }: ChatHomePageProps) {
     return (
       <ChatHomeShell showModeSwitch={showModeSwitch} modeSwitchVariant={modeSwitchVariant}>
         <div className="flex flex-col items-center justify-center flex-1 gap-3">
-          <div className="w-full max-w-sm px-6">
-            <Select
-              label={t('chat.scopeLabel', '聊天作用域')}
-              value={chatScopeType === 'group' ? `group:${chatScopeId}` : 'personal'}
-              options={[
-                { value: 'personal', label: t('chat.scopePersonal', '个人空间') },
-                ...groupOptions.map((group) => ({ value: `group:${group.id}`, label: `${t('chat.scopeGroup', '群组')}: ${group.name}` })),
-              ]}
-              onChange={(event) => {
-                const value = event.target.value
-                if (value === 'personal') {
-                  setChatScopeType('personal')
-                  setChatScopeId('')
-                } else {
-                  const [, groupId] = value.split(':')
-                  setChatScopeType('group')
-                  setChatScopeId(groupId || '')
-                }
-              }}
-            />
-          </div>
           <Spinner size="lg" />
           <p className="text-sm text-gray-500">{t('chatHome.opening')}</p>
         </div>
