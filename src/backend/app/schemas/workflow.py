@@ -178,6 +178,25 @@ class WorkflowTemplateSummary(BaseModel):
     locale: str | None = None
     node_count: int = 0
     builtin: bool = True
+    visibility: str = "system"
+    author_id: str | None = None
+    author_name: str | None = None
+    use_count: int = 0
+    is_mine: bool = False
+
+
+class WorkflowMarketplaceResponse(BaseModel):
+    system: list[WorkflowTemplateSummary] = []
+    community: list[WorkflowTemplateSummary] = []
+    mine: list[WorkflowTemplateSummary] = []
+
+
+class WorkflowTemplateVisibilityUpdate(BaseModel):
+    visibility: str = Field(
+        ...,
+        pattern=r"^(private|shared|system)$",
+        description="private=only owner; shared=all users; system=featured (admin)",
+    )
 
 
 class WorkflowTemplateCreate(BaseModel):
@@ -189,6 +208,11 @@ class WorkflowTemplateCreate(BaseModel):
 
 class WorkflowSaveAsTemplateRequest(WorkflowTemplateCreate):
     """Save an existing workflow graph as a reusable template."""
+
+    visibility: str = Field(
+        default="private",
+        pattern=r"^(private|shared|system)$",
+    )
 
 
 class WorkflowCreateFromTemplateRequest(BaseModel):

@@ -18,6 +18,7 @@ import httpx
 
 from app.models.skill import Skill
 from app.models.setting import Setting
+from app.models.user import User
 from app.models.workflow import (
     SkillWorkflowApproval,
     SkillWorkflow,
@@ -38,8 +39,10 @@ from app.schemas.workflow import (
     WorkflowStepInput,
     WorkflowStepResponse,
     WorkflowStepRunResponse,
+    WorkflowMarketplaceResponse,
     WorkflowSaveAsTemplateRequest,
     WorkflowTemplateSummary,
+    WorkflowTemplateVisibilityUpdate,
     WorkflowUpdate,
 )
 from app.data.patent_workflow_showcase import (
@@ -542,7 +545,12 @@ class WorkflowService:
         }
 
     @staticmethod
-    def _template_summary_from_model(row: SkillWorkflowTemplate) -> dict[str, Any]:
+    def _template_summary_from_model(
+        row: SkillWorkflowTemplate,
+        *,
+        user_id: str | None = None,
+        author_name: str | None = None,
+    ) -> dict[str, Any]:
         return {
             "id": row.id,
             "name": row.name,
@@ -551,7 +559,29 @@ class WorkflowService:
             "locale": row.locale,
             "node_count": len((row.graph_json or {}).get("nodes") or []),
             "builtin": False,
+            "visibility": row.visibility or "private",
+            "author_id": row.user_id,
+            "author_name": author_name,
+            "use_count": int(row.use_count or 0),
+            "is_mine": user_id is not None and row.user_id == user_id,
         }
+
+    @staticmethod
+    def _locale_filter(lang: str | None, locale: str | None) -> bool:
+        if not lang or not locale:
+            return True
+        return locale == lang
+
+    @staticmethod
+    def _normalize_visibility(
+        visibility: str, *, user_role: str
+    ) -> str:
+        key = (visibility or "private").strip().lower()
+        if key == "system" and user_role != "admin":
+            return "shared"
+        if key not in ("private", "shared", "system"):
+            return "private"
+        return key
 
     async def list_templates(
         self, *, user_id: str, locale: str | None = None
@@ -570,10 +600,54 @@ class WorkflowService:
             lang = "zh" if locale.lower().startswith("zh") else "en"
         custom: list[dict[str, Any]] = []
         for row in result.scalars().all():
-            if lang and row.locale and row.locale != lang:
+            if not self._locale_filter(lang, row.locale):
                 continue
-            custom.append(self._template_summary_from_model(row))
+            custom.append(self._template_summary_from_model(row, user_id=user_id))
         return builtin + custom
+
+    async def list_marketplace(
+        self, *, user_id: str, locale: str | None = None
+    ) -> WorkflowMarketplaceResponse:
+        lang = None
+        if locale:
+            lang = "zh" if locale.lower().startswith("zh") else "en"
+        system = [
+            WorkflowTemplateSummary(
+                **self._template_summary_from_builtin(t),
+                visibility="system",
+                author_name="MChat",
+                is_mine=False,
+            )
+            for t in list_workflow_templates(locale=locale)
+        ]
+        result = await self.db.execute(
+            select(SkillWorkflowTemplate, User.display_name, User.username)
+            .join(User, User.id == SkillWorkflowTemplate.user_id)
+            .where(
+                (SkillWorkflowTemplate.user_id == user_id)
+                | (SkillWorkflowTemplate.visibility.in_(("shared", "system")))
+            )
+            .order_by(
+                SkillWorkflowTemplate.use_count.desc(),
+                SkillWorkflowTemplate.updated_at.desc(),
+            )
+        )
+        community: list[WorkflowTemplateSummary] = []
+        mine: list[WorkflowTemplateSummary] = []
+        for row, display_name, username in result.all():
+            if not self._locale_filter(lang, row.locale):
+                continue
+            author = (display_name or username or "").strip() or None
+            summary = WorkflowTemplateSummary(
+                **self._template_summary_from_model(
+                    row, user_id=user_id, author_name=author
+                )
+            )
+            if row.user_id == user_id:
+                mine.append(summary)
+            elif row.visibility in ("shared", "system"):
+                community.append(summary)
+        return WorkflowMarketplaceResponse(system=system, community=community, mine=mine)
 
     async def get_patent_showcase_config(self, *, user_id: str) -> dict[str, Any]:
         search_skill = resolve_showcase_skill_name(PATENT_SHOWCASE_SEARCH_SKILL)
@@ -621,6 +695,59 @@ class WorkflowService:
         )
         return result.scalar_one_or_none()
 
+    async def _get_accessible_user_template(
+        self, *, template_id: str, user_id: str
+    ) -> SkillWorkflowTemplate | None:
+        result = await self.db.execute(
+            select(SkillWorkflowTemplate).where(
+                SkillWorkflowTemplate.id == template_id
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        if row.user_id == user_id:
+            return row
+        if (row.visibility or "private") in ("shared", "system"):
+            return row
+        return None
+
+    async def update_template_visibility(
+        self,
+        *,
+        user_id: str,
+        user_role: str,
+        template_id: str,
+        data: WorkflowTemplateVisibilityUpdate,
+    ) -> WorkflowTemplateSummary:
+        row = await self._get_user_template(template_id=template_id, user_id=user_id)
+        if row is None and user_role == "admin":
+            result = await self.db.execute(
+                select(SkillWorkflowTemplate).where(
+                    SkillWorkflowTemplate.id == template_id
+                )
+            )
+            row = result.scalar_one_or_none()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workflow template not found",
+            )
+        if row.user_id != user_id and user_role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the template owner can change visibility",
+            )
+        row.visibility = self._normalize_visibility(data.visibility, user_role=user_role)
+        await self.db.flush()
+        user = await self.db.get(User, row.user_id)
+        author = (user.display_name or user.username) if user else None
+        return WorkflowTemplateSummary(
+            **self._template_summary_from_model(
+                row, user_id=user_id, author_name=author
+            )
+        )
+
     async def save_workflow_as_template(
         self,
         *,
@@ -649,6 +776,9 @@ class WorkflowService:
         graph = graph_for_template_export(workflow.graph_json, skill_map)
         _ensure_graph_valid(graph)
         locale = (data.locale or "").strip() or None
+        user = await self.db.get(User, user_id)
+        role = user.role if user else "user"
+        visibility = self._normalize_visibility(data.visibility, user_role=role)
         row = SkillWorkflowTemplate(
             user_id=user_id,
             name=data.name.strip(),
@@ -657,6 +787,7 @@ class WorkflowService:
             locale=locale,
             graph_json=graph,
             source_workflow_id=workflow_id,
+            visibility=visibility,
         )
         self.db.add(row)
         await self.db.flush()
@@ -700,7 +831,7 @@ class WorkflowService:
             tpl_name = tpl.get("name")
             tpl_desc = tpl.get("description")
         else:
-            user_tpl = await self._get_user_template(
+            user_tpl = await self._get_accessible_user_template(
                 template_id=template_id, user_id=user_id
             )
             if user_tpl is None:
@@ -711,6 +842,7 @@ class WorkflowService:
             graph_source = user_tpl.graph_json
             tpl_name = user_tpl.name
             tpl_desc = user_tpl.description
+            user_tpl.use_count = int(user_tpl.use_count or 0) + 1
         graph_json = await self._resolve_graph_skill_ids(
             graph_source, user_id=user_id
         )

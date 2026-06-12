@@ -14,6 +14,7 @@ from cloud.api.portal import router as portal_router
 from cloud.api.templates import router as templates_router
 from cloud.api.admin_templates import router as admin_templates_router
 from cloud.api.admin_orders import router as admin_orders_router
+from cloud.api.admin_subscriptions import router as admin_subscriptions_router
 from cloud.bot.studio_memory import register_cloud_chat_extensions
 
 register_cloud_chat_extensions()
@@ -32,6 +33,9 @@ def create_app() -> FastAPI:
     app.include_router(templates_router, prefix="/api/templates", tags=["Templates"])
     app.include_router(admin_templates_router, prefix="/api", tags=["Admin Templates"])
     app.include_router(admin_orders_router, prefix="/api", tags=["Admin Orders"])
+    app.include_router(
+        admin_subscriptions_router, prefix="/api", tags=["Admin Subscriptions"]
+    )
 
     # Seed channel templates on startup
     from collections.abc import AsyncIterator

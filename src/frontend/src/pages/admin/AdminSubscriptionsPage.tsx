@@ -1,0 +1,445 @@
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
+import api from '@/lib/api'
+import { Spinner } from '@/components/ui/Spinner'
+
+interface ChannelSubscription {
+  channel_id: string
+  channel_name: string
+  user_id: string
+  user_username: string | null
+  user_phone: string | null
+  user_display_name: string | null
+  template_id: string | null
+  template_name: string | null
+  plan: string
+  trial_ends_at: string | null
+  subscription_ends_at: string | null
+  subscription_active: boolean
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+type QuickAction =
+  | { kind: 'trial'; days: number }
+  | { kind: 'pro_days'; days: number }
+  | { kind: 'pro_months'; months: number }
+  | { kind: 'free' }
+
+function fmtDate(iso: string | null | undefined) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString()
+}
+
+function toLocalInput(iso: string | null | undefined) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function fromLocalInput(value: string): string | null {
+  if (!value) return null
+  return new Date(value).toISOString()
+}
+
+function planBadgeClass(plan: string, active: boolean) {
+  if (!active) return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+  if (plan === 'pro' || plan === 'enterprise') {
+    return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
+  }
+  if (plan === 'free_trial') {
+    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+  }
+  return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+}
+
+export function AdminSubscriptionsPage() {
+  const { t } = useTranslation()
+  const [rows, setRows] = useState<ChannelSubscription[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  const [planFilter, setPlanFilter] = useState('')
+  const [activeFilter, setActiveFilter] = useState('')
+  const [editing, setEditing] = useState<ChannelSubscription | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveOk, setSaveOk] = useState<string | null>(null)
+  const [customPlan, setCustomPlan] = useState('')
+  const [trialEndsAt, setTrialEndsAt] = useState('')
+  const [subscriptionEndsAt, setSubscriptionEndsAt] = useState('')
+  const [note, setNote] = useState('')
+
+  const load = useCallback(() => {
+    setLoading(true)
+    setError(null)
+    const params = new URLSearchParams()
+    if (q.trim()) params.set('q', q.trim())
+    if (planFilter) params.set('plan', planFilter)
+    if (activeFilter === 'active') params.set('active_only', 'true')
+    if (activeFilter === 'inactive') params.set('active_only', 'false')
+    const qs = params.toString()
+    api
+      .get<ChannelSubscription[]>(`/admin/subscriptions/channels${qs ? `?${qs}` : ''}`)
+      .then(setRows)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [q, planFilter, activeFilter])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const openEdit = (row: ChannelSubscription) => {
+    setEditing(row)
+    setCustomPlan(row.plan)
+    setTrialEndsAt(toLocalInput(row.trial_ends_at))
+    setSubscriptionEndsAt(toLocalInput(row.subscription_ends_at))
+    setNote('')
+    setSaveError(null)
+    setSaveOk(null)
+  }
+
+  const closeEdit = () => {
+    setEditing(null)
+    setSaveError(null)
+    setSaveOk(null)
+  }
+
+  const patchChannel = async (body: Record<string, unknown>) => {
+    if (!editing) return
+    setSaving(true)
+    setSaveError(null)
+    setSaveOk(null)
+    try {
+      const res = await api.patch<{ channel: ChannelSubscription; message: string }>(
+        `/admin/subscriptions/channels/${editing.channel_id}`,
+        body,
+      )
+      setRows((prev) =>
+        prev.map((r) => (r.channel_id === res.channel.channel_id ? res.channel : r)),
+      )
+      setEditing(res.channel)
+      setCustomPlan(res.channel.plan)
+      setTrialEndsAt(toLocalInput(res.channel.trial_ends_at))
+      setSubscriptionEndsAt(toLocalInput(res.channel.subscription_ends_at))
+      setSaveOk(res.message)
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const runQuick = (action: QuickAction) => {
+    if (action.kind === 'trial') {
+      void patchChannel({ grant_trial_days: action.days, note: note || undefined })
+      return
+    }
+    if (action.kind === 'pro_days') {
+      void patchChannel({ extend_pro_days: action.days, note: note || undefined })
+      return
+    }
+    if (action.kind === 'pro_months') {
+      void patchChannel({ extend_pro_months: action.months, note: note || undefined })
+      return
+    }
+    void patchChannel({
+      plan: 'free',
+      clear_trial: true,
+      clear_subscription: true,
+      note: note || undefined,
+    })
+  }
+
+  const saveCustom = () => {
+    const body: Record<string, unknown> = { note: note || undefined }
+    if (customPlan) body.plan = customPlan
+    const trial = fromLocalInput(trialEndsAt)
+    const sub = fromLocalInput(subscriptionEndsAt)
+    if (trial) body.trial_ends_at = trial
+    if (sub) body.subscription_ends_at = sub
+    if (!body.plan && !trial && !sub) {
+      setSaveError(t('adminSubscriptions.nothingToSave'))
+      return
+    }
+    void patchChannel(body)
+  }
+
+  if (loading && rows.length === 0) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner size="lg" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6 text-gray-900 dark:text-gray-200">
+      <div>
+        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+          {t('adminSubscriptions.title')}
+        </h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          {t('adminSubscriptions.subtitle')}
+        </p>
+      </div>
+
+      {error && (
+        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 text-sm text-red-600 dark:text-red-300 border border-red-200 dark:border-red-800">
+          {error}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-3 items-end">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-gray-500 dark:text-gray-400">{t('adminSubscriptions.search')}</span>
+          <input
+            className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 min-w-[200px]"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={t('adminSubscriptions.searchPlaceholder')}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-gray-500 dark:text-gray-400">{t('adminSubscriptions.planFilter')}</span>
+          <select
+            className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+            value={planFilter}
+            onChange={(e) => setPlanFilter(e.target.value)}
+          >
+            <option value="">{t('adminSubscriptions.allPlans')}</option>
+            <option value="free">free</option>
+            <option value="free_trial">free_trial</option>
+            <option value="pro">pro</option>
+            <option value="enterprise">enterprise</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-gray-500 dark:text-gray-400">{t('adminSubscriptions.statusFilter')}</span>
+          <select
+            className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+            value={activeFilter}
+            onChange={(e) => setActiveFilter(e.target.value)}
+          >
+            <option value="">{t('adminSubscriptions.allStatus')}</option>
+            <option value="active">{t('adminSubscriptions.activeOnly')}</option>
+            <option value="inactive">{t('adminSubscriptions.inactiveOnly')}</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={load}
+          className="px-4 py-2 rounded-lg bg-primary-600 text-white text-sm hover:bg-primary-700"
+        >
+          {t('common.refresh')}
+        </button>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50 dark:bg-gray-900/50 text-left text-gray-500 dark:text-gray-400">
+            <tr>
+              <th className="px-4 py-3">{t('adminSubscriptions.channel')}</th>
+              <th className="px-4 py-3">{t('adminSubscriptions.user')}</th>
+              <th className="px-4 py-3">{t('adminSubscriptions.template')}</th>
+              <th className="px-4 py-3">{t('adminSubscriptions.plan')}</th>
+              <th className="px-4 py-3">{t('adminSubscriptions.trialEnds')}</th>
+              <th className="px-4 py-3">{t('adminSubscriptions.subEnds')}</th>
+              <th className="px-4 py-3">{t('adminSubscriptions.status')}</th>
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+            {rows.map((row) => (
+              <tr key={row.channel_id}>
+                <td className="px-4 py-3 font-medium">{row.channel_name}</td>
+                <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                  {row.user_phone || row.user_display_name || row.user_username || '—'}
+                </td>
+                <td className="px-4 py-3">{row.template_name || '—'}</td>
+                <td className="px-4 py-3">
+                  <span
+                    className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${planBadgeClass(row.plan, row.subscription_active)}`}
+                  >
+                    {row.plan}
+                  </span>
+                </td>
+                <td className="px-4 py-3">{fmtDate(row.trial_ends_at)}</td>
+                <td className="px-4 py-3">{fmtDate(row.subscription_ends_at)}</td>
+                <td className="px-4 py-3">
+                  {row.subscription_active
+                    ? t('adminSubscriptions.active')
+                    : t('adminSubscriptions.expired')}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    type="button"
+                    onClick={() => openEdit(row)}
+                    className="text-primary-600 hover:underline text-sm"
+                  >
+                    {t('adminSubscriptions.manage')}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length === 0 && (
+          <p className="p-6 text-center text-gray-500 dark:text-gray-400 text-sm">
+            {t('adminSubscriptions.empty')}
+          </p>
+        )}
+      </div>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {editing.channel_name}
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  {editing.user_phone || editing.user_username}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeEdit}
+                className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                ✕
+              </button>
+            </div>
+
+            {saveError && (
+              <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 text-sm text-red-600 dark:text-red-300">
+                {saveError}
+              </div>
+            )}
+            {saveOk && (
+              <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-sm text-emerald-700 dark:text-emerald-300">
+                {saveOk}
+              </div>
+            )}
+
+            <div>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+                {t('adminSubscriptions.quickActions')}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <QuickBtn disabled={saving} onClick={() => runQuick({ kind: 'trial', days: 7 })}>
+                  {t('adminSubscriptions.grantTrial7')}
+                </QuickBtn>
+                <QuickBtn disabled={saving} onClick={() => runQuick({ kind: 'trial', days: 14 })}>
+                  {t('adminSubscriptions.grantTrial14')}
+                </QuickBtn>
+                <QuickBtn disabled={saving} onClick={() => runQuick({ kind: 'pro_days', days: 30 })}>
+                  {t('adminSubscriptions.extendPro30')}
+                </QuickBtn>
+                <QuickBtn disabled={saving} onClick={() => runQuick({ kind: 'pro_months', months: 1 })}>
+                  {t('adminSubscriptions.extendPro1m')}
+                </QuickBtn>
+                <QuickBtn disabled={saving} onClick={() => runQuick({ kind: 'pro_months', months: 12 })}>
+                  {t('adminSubscriptions.extendPro1y')}
+                </QuickBtn>
+                <QuickBtn
+                  disabled={saving}
+                  variant="danger"
+                  onClick={() => runQuick({ kind: 'free' })}
+                >
+                  {t('adminSubscriptions.resetFree')}
+                </QuickBtn>
+              </div>
+            </div>
+
+            <label className="block text-sm">
+              <span className="text-gray-500 dark:text-gray-400">{t('adminSubscriptions.note')}</span>
+              <input
+                className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder={t('adminSubscriptions.notePlaceholder')}
+              />
+            </label>
+
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-3">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                {t('adminSubscriptions.customFields')}
+              </p>
+              <label className="block text-sm">
+                <span className="text-gray-500 dark:text-gray-400">{t('adminSubscriptions.plan')}</span>
+                <select
+                  className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2"
+                  value={customPlan}
+                  onChange={(e) => setCustomPlan(e.target.value)}
+                >
+                  <option value="free">free</option>
+                  <option value="free_trial">free_trial</option>
+                  <option value="pro">pro</option>
+                  <option value="enterprise">enterprise</option>
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-gray-500 dark:text-gray-400">{t('adminSubscriptions.trialEnds')}</span>
+                <input
+                  type="datetime-local"
+                  className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2"
+                  value={trialEndsAt}
+                  onChange={(e) => setTrialEndsAt(e.target.value)}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-gray-500 dark:text-gray-400">{t('adminSubscriptions.subEnds')}</span>
+                <input
+                  type="datetime-local"
+                  className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2"
+                  value={subscriptionEndsAt}
+                  onChange={(e) => setSubscriptionEndsAt(e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={saveCustom}
+                className="w-full py-2 rounded-lg bg-primary-600 text-white text-sm hover:bg-primary-700 disabled:opacity-50"
+              >
+                {saving ? t('adminSubscriptions.saving') : t('adminSubscriptions.saveCustom')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function QuickBtn({
+  children,
+  onClick,
+  disabled,
+  variant = 'default',
+}: {
+  children: ReactNode
+  onClick: () => void
+  disabled?: boolean
+  variant?: 'default' | 'danger'
+}) {
+  const base =
+    variant === 'danger'
+      ? 'border-red-300 text-red-700 dark:border-red-700 dark:text-red-300'
+      : 'border-gray-300 text-gray-800 dark:border-gray-600 dark:text-gray-200'
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-lg border text-xs hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 ${base}`}
+    >
+      {children}
+    </button>
+  )
+}

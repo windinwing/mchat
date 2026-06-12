@@ -18,6 +18,10 @@ const ConversationsPage = lazyNamed(() => import('./pages/ConversationsPage'), '
 const KnowledgePage = lazyNamed(() => import('./pages/KnowledgePage'), 'KnowledgePage')
 const SkillsPage = lazyNamed(() => import('./pages/SkillsPage'), 'SkillsPage')
 const WorkflowsPage = lazyNamed(() => import('./pages/WorkflowsPage'), 'WorkflowsPage')
+const WorkflowCenterPage = lazyNamed(
+  () => import('./pages/WorkflowCenterPage'),
+  'WorkflowCenterPage',
+)
 const WorkspacePage = lazyNamed(() => import('./pages/WorkspacePage'), 'WorkspacePage')
 const FilesPage = lazyNamed(() => import('./pages/FilesPage'), 'FilesPage')
 const SkillSchedulesPage = lazyNamed(
@@ -44,6 +48,10 @@ const DevBridgePage = lazyNamed(() => import('./pages/DevBridgePage'), 'DevBridg
 const DevBridgeSettingsPage = lazyNamed(() => import('./pages/DevBridgeSettingsPage'), 'DevBridgeSettingsPage')
 const TemplateManagerPage = lazyNamed(() => import('./pages/admin/TemplateManagerPage'), 'TemplateManagerPage')
 const AdminOrdersPage = lazyNamed(() => import('./pages/admin/AdminOrdersPage'), 'AdminOrdersPage')
+const AdminSubscriptionsPage = lazyNamed(
+  () => import('./pages/admin/AdminSubscriptionsPage'),
+  'AdminSubscriptionsPage',
+)
 
 const RegisterPage = lazyNamed(() => import('./pages/RegisterPage'), 'RegisterPage')
 const Auth9235CallbackPage = lazyNamed(
@@ -103,6 +111,7 @@ export function CoreRoutes() {
         <Route path="/admin/knowledge" element={<AdminLayout><PageSuspense><KnowledgePage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/skills" element={<AdminLayout><PageSuspense><SkillsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/workflows" element={<AdminLayout><PageSuspense><WorkflowsPage /></PageSuspense></AdminLayout>} />
+        <Route path="/admin/workflow-center" element={<AdminLayout><PageSuspense><WorkflowCenterPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/workspace" element={<AdminLayout><PageSuspense><WorkspacePage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/files" element={<AdminLayout><PageSuspense><FilesPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/schedules" element={<AdminLayout><PageSuspense><SkillSchedulesPage /></PageSuspense></AdminLayout>} />
@@ -117,6 +126,7 @@ export function CoreRoutes() {
         <Route path="/admin/devbridge/settings" element={<AdminLayout><PageSuspense><DevBridgeSettingsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/templates" element={<AdminLayout><PageSuspense><TemplateManagerPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/orders" element={<AdminLayout><PageSuspense><AdminOrdersPage /></PageSuspense></AdminLayout>} />
+        <Route path="/admin/subscriptions" element={<AdminLayout><PageSuspense><AdminSubscriptionsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/users" element={<AdminLayout><PageSuspense><UsersPage /></PageSuspense></AdminLayout>} />
         <Route path="/chat/:conversationId" element={<PageSuspense><ChatPage /></PageSuspense>} />
         <Route path="/widget/demo" element={<PageSuspense><WidgetDemo /></PageSuspense>} />

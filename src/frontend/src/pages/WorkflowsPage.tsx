@@ -1,7 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Eye, LayoutTemplate, Network, Pencil, Play, Plus, RefreshCw, Trash2, Workflow } from 'lucide-react'
+import {
+  Eye,
+  LayoutTemplate,
+  Network,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Store,
+  Trash2,
+  Workflow,
+} from 'lucide-react'
 
 import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
@@ -122,6 +133,7 @@ export function WorkflowsPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const isPortal = location.pathname.startsWith('/portal')
+  const workflowCenterPath = isPortal ? '/portal/workflow-center' : '/admin/workflow-center'
   const entitlements = useWorkflowEntitlements()
   const uiLocale = i18n.language?.startsWith('zh') ? 'zh' : 'en'
   const [loading, setLoading] = useState(true)
@@ -148,6 +160,7 @@ export function WorkflowsPage() {
   const [saveTemplateTarget, setSaveTemplateTarget] = useState<WorkflowItem | null>(null)
   const [templateNameInput, setTemplateNameInput] = useState('')
   const [templateDescInput, setTemplateDescInput] = useState('')
+  const [shareTemplateToCenter, setShareTemplateToCenter] = useState(false)
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null)
 
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowItem | null>(null)
@@ -551,6 +564,7 @@ export function WorkflowsPage() {
     setSaveTemplateTarget(row)
     setTemplateNameInput(`${row.name} ${t('workflows.templateNameSuffix')}`)
     setTemplateDescInput(row.description || '')
+    setShareTemplateToCenter(false)
     setSaveTemplateOpen(true)
   }
 
@@ -563,6 +577,7 @@ export function WorkflowsPage() {
         description: templateDescInput.trim() || null,
         category: 'custom',
         locale: uiLocale,
+        visibility: shareTemplateToCenter ? 'shared' : 'private',
       })
       toast(t('workflows.toastTemplateSaved'), { type: 'success' })
       setSaveTemplateOpen(false)
@@ -725,6 +740,13 @@ export function WorkflowsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            leftIcon={<Store className="w-4 h-4" />}
+            onClick={() => navigate(workflowCenterPath)}
+          >
+            {t('workflowCenter.browse')}
+          </Button>
           <Button variant="secondary" leftIcon={<RefreshCw className="w-4 h-4" />} onClick={loadAll}>
             {t('common.refresh')}
           </Button>
@@ -1254,6 +1276,17 @@ export function WorkflowsPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400">{t('workflows.saveTemplateHint')}</p>
           <Input label={t('workflows.formName')} value={templateNameInput} onChange={(e) => setTemplateNameInput(e.target.value)} />
           <Input label={t('workflows.formDescription')} value={templateDescInput} onChange={(e) => setTemplateDescInput(e.target.value)} />
+          <label className="flex items-start gap-3 text-sm text-gray-600 dark:text-gray-300 cursor-pointer">
+            <Switch checked={shareTemplateToCenter} onChange={setShareTemplateToCenter} />
+            <span>
+              <span className="font-medium text-gray-800 dark:text-gray-200">
+                {t('workflowCenter.shareOnSave')}
+              </span>
+              <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {t('workflowCenter.shareOnSaveHint')}
+              </span>
+            </span>
+          </label>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setSaveTemplateOpen(false)}>{t('common.cancel')}</Button>
             <Button onClick={confirmSaveTemplate} isLoading={saving} disabled={!templateNameInput.trim()}>{t('common.save')}</Button>

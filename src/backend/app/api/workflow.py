@@ -22,8 +22,10 @@ from app.schemas.workflow import (
     WorkflowStepResponse,
     WorkflowStepsPutRequest,
     WorkflowPatentShowcaseConfig,
+    WorkflowMarketplaceResponse,
     WorkflowSaveAsTemplateRequest,
     WorkflowTemplateSummary,
+    WorkflowTemplateVisibilityUpdate,
     WorkflowUpdate,
 )
 from app.schemas.workflow_entitlements import WorkflowEntitlementsResponse
@@ -66,6 +68,18 @@ async def get_patent_showcase_config(
     return await WorkflowService(db).get_patent_showcase_config(user_id=admin.id)
 
 
+@router.get("/marketplace", response_model=WorkflowMarketplaceResponse)
+async def workflow_marketplace(
+    locale: str | None = None,
+    current_user: User = Depends(require_permission(Permission.SKILLS_READ)),
+    db: AsyncSession = Depends(get_db),
+) -> WorkflowMarketplaceResponse:
+    """Browse system, community-shared, and own workflow templates."""
+    return await WorkflowService(db).list_marketplace(
+        user_id=current_user.id, locale=locale
+    )
+
+
 @router.get("/templates", response_model=list[WorkflowTemplateSummary])
 async def list_workflow_templates(
     locale: str | None = None,
@@ -73,6 +87,24 @@ async def list_workflow_templates(
     db: AsyncSession = Depends(get_db),
 ):
     return await WorkflowService(db).list_templates(user_id=admin.id, locale=locale)
+
+
+@router.patch(
+    "/templates/{template_id}/visibility",
+    response_model=WorkflowTemplateSummary,
+)
+async def update_workflow_template_visibility(
+    template_id: str,
+    request: WorkflowTemplateVisibilityUpdate,
+    current_user: User = Depends(require_permission(Permission.SKILLS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+) -> WorkflowTemplateSummary:
+    return await WorkflowService(db).update_template_visibility(
+        user_id=current_user.id,
+        user_role=current_user.role,
+        template_id=template_id,
+        data=request,
+    )
 
 
 @router.delete("/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)

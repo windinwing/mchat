@@ -529,6 +529,21 @@ def apply_schema_patches(conn: Connection) -> list[str]:
                 )
             applied.append("groups.devbridge_project_allowlists")
 
+    if "skill_workflow_templates" in inspect(conn).get_table_names():
+        cols = _column_names(conn, "skill_workflow_templates")
+        tpl_patches = [
+            ("visibility", "VARCHAR(20) NOT NULL DEFAULT 'private'"),
+            ("use_count", "INTEGER NOT NULL DEFAULT 0"),
+        ]
+        for col_name, col_def in tpl_patches:
+            if col_name not in cols:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE skill_workflow_templates ADD COLUMN {col_name} {col_def}"
+                    )
+                )
+                applied.append(f"skill_workflow_templates.{col_name}")
+
     # Ensure any new tables from models exist
     Base.metadata.create_all(conn)
     return applied

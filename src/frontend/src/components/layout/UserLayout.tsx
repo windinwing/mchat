@@ -15,6 +15,7 @@ import {
   PanelLeftOpen,
   Workflow,
   Clock3,
+  LayoutTemplate,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import { Avatar } from '@/components/ui/Avatar'
@@ -29,6 +30,7 @@ const navItems = [
   { path: '/portal/templates', label: 'portal.templates', icon: ShoppingBag },
   { path: '/portal/channels', label: 'portal.myChannels', icon: MessageSquare },
   { path: '/portal/workflows', label: 'portal.workflowsNav', icon: Workflow },
+  { path: '/portal/workflow-center', label: 'portal.workflowCenterNav', icon: LayoutTemplate },
   { path: '/portal/schedules', label: 'portal.schedulesNav', icon: Clock3 },
   { path: '/portal/groups', label: 'portal.groups', icon: Users },
   { path: '/portal/orders', label: 'portal.orders', icon: Receipt },

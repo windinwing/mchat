@@ -63,7 +63,9 @@ api_router.include_router(wechat_public_router, prefix="/wechat", tags=["WeChat"
 try:
     from cloud.api.admin_templates import router as admin_templates_router
     from cloud.api.admin_orders import router as admin_orders_router
+    from cloud.api.admin_subscriptions import router as admin_subscriptions_router
     api_router.include_router(admin_templates_router)
     api_router.include_router(admin_orders_router)
+    api_router.include_router(admin_subscriptions_router)
 except Exception:
     pass

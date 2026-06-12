@@ -215,6 +215,13 @@ class SkillWorkflowTemplate(Base):
     source_workflow_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("skill_workflows.id"), nullable=True, index=True
     )
+    visibility: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="private",
+        comment="private | shared | system",
+    )
+    use_count: Mapped[int] = mapped_column(default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

@@ -17,8 +17,10 @@ import {
   Lock,
   Store,
   DollarSign,
+  BadgeCheck,
   Clock3,
   Workflow,
+  LayoutTemplate,
   FolderOpen,
   Container,
   Code2,
@@ -54,6 +56,7 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
     { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
     { path: '/admin/devbridge', labelKey: 'nav.devbridge', icon: Code2 },
     { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow },
+    { path: '/admin/workflow-center', labelKey: 'nav.workflowCenter', icon: LayoutTemplate },
     { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
     { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
     { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
@@ -66,6 +69,7 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
     { path: '/admin/groups', labelKey: 'nav.groups', icon: Users },
     { path: '/admin/templates', labelKey: 'nav.templates', icon: Store },
     { path: '/admin/orders', labelKey: 'nav.orders', icon: DollarSign },
+    { path: '/admin/subscriptions', labelKey: 'nav.subscriptions', icon: BadgeCheck },
   ]
 
   const agentNav = [
@@ -75,6 +79,7 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
     { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
     { path: '/admin/devbridge', labelKey: 'nav.devbridge', icon: Code2 },
     { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow },
+    { path: '/admin/workflow-center', labelKey: 'nav.workflowCenter', icon: LayoutTemplate },
     { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
     { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
     { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
