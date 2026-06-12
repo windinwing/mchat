@@ -154,8 +154,10 @@ class StorageService:
         return self._fetch_tenant_workflow_bytes(normalized)
 
     def _fetch_tenant_workflow_bytes(self, key: str) -> tuple[bytes, str] | None:
-        """Legacy workflow reports written under data/tenants/*/uploads/."""
-        if not key.startswith("workflow_reports/"):
+        """Legacy skill/tenant uploads written under data/tenants/*/uploads/.
+        Covers workflow_reports, patent-exports, trade-exports etc."""
+        allowed_prefixes = ("workflow_reports/", "patent-exports/", "trade-exports/")
+        if not any(key.startswith(p) for p in allowed_prefixes):
             return None
         try:
             from app.workspace.paths import resolve_workspace_root

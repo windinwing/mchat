@@ -42,7 +42,7 @@ def patent_link_settings_from_skills(tool_skills: list[Any]) -> dict[str, Any]:
         secrets = config.get("secrets") or config.get("env") or {}
         if not isinstance(secrets, dict):
             secrets = {}
-        enabled = _coerce_bool(
+        has_explicit = (
             secrets.get("show_external_patent_url")
             or config.get("show_external_patent_url")
         )
@@ -55,6 +55,7 @@ def patent_link_settings_from_skills(tool_skills: list[Any]) -> dict[str, Any]:
             or config.get("patent_url")
             or default_patent_portal_url_template()
         )
+        enabled = _coerce_bool(has_explicit) if has_explicit is not None else bool(template)
         return {"enabled": enabled, "template": str(template)}
     fallback = default_patent_portal_url_template()
     return {"enabled": bool(fallback), "template": fallback}
