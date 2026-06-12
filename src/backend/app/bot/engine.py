@@ -554,8 +554,10 @@ async def process_message(
             *,
             with_tools: bool,
             parts_out: list[str] | None = None,
+            process_fn = None,
         ) -> None:
             nonlocal full_response
+            all_tokens: list[str] = []
             async for chunk in provider.stream_chat(
                 messages=messages_list,
                 tools=tools if with_tools and tools else None,
@@ -570,7 +572,10 @@ async def process_message(
                     token = chunk.get("content", "")
                     if not token:
                         continue
-                    if token.startswith("Error:"):
+                    if process_fn:
+                        all_tokens.append(token)
+                        # Accumulate, will be processed and yielded at end
+                    elif token.startswith("Error:"):
                         full_response += token
                         yield token
                         if parts_out is not None:
@@ -580,6 +585,13 @@ async def process_message(
                         yield token
                         if parts_out is not None:
                             parts_out.append(token)
+            if process_fn and all_tokens:
+                processed = process_fn("".join(all_tokens))
+                full_response += processed
+                # Yield processed content as one chunk for clean display
+                yield processed
+                if parts_out is not None:
+                    parts_out.append(processed)
 
         for _tool_round in range(max_tool_rounds):
             tool_calls_map: dict[str, dict[str, Any]] = {}
@@ -711,7 +723,11 @@ async def process_message(
                     }
                 )
                 presentation_parts: list[str] = []
-                async for token in _stream_followup(with_tools=False, parts_out=presentation_parts):
+                async for token in _stream_followup(
+                    with_tools=False,
+                    parts_out=presentation_parts,
+                    process_fn=lambda t: _with_patent_links(inject_action_links(t)),
+                ):
                     yield token
                 if presentation_parts:
                     presentation_text = _with_patent_links("".join(presentation_parts))
@@ -729,7 +745,11 @@ async def process_message(
                     }
                 )
                 summary_parts: list[str] = []
-                async for token in _stream_followup(with_tools=False, parts_out=summary_parts):
+                async for token in _stream_followup(
+                    with_tools=False,
+                    parts_out=summary_parts,
+                    process_fn=lambda t: _with_patent_links(inject_action_links(t)),
+                ):
                     yield token
                 if summary_parts:
                     summary_text = _with_patent_links("".join(summary_parts))
@@ -749,7 +769,11 @@ async def process_message(
                     }
                 )
                 export_parts: list[str] = []
-                async for token in _stream_followup(with_tools=False, parts_out=export_parts):
+                async for token in _stream_followup(
+                    with_tools=False,
+                    parts_out=export_parts,
+                    process_fn=lambda t: _with_patent_links(inject_action_links(t)),
+                ):
                     yield token
                 if export_parts:
                     export_text = "".join(export_parts)
@@ -770,7 +794,9 @@ async def process_message(
             )
             synthesis_parts: list[str] = []
             async for token in _stream_followup(
-                with_tools=False, parts_out=synthesis_parts
+                with_tools=False,
+                parts_out=synthesis_parts,
+                process_fn=lambda t: _with_patent_links(inject_action_links(t)),
             ):
                 yield token
             if synthesis_parts:
