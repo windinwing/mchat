@@ -140,17 +140,21 @@ export function prepareAssistantMarkdown(content: string): string {
  * Idempotent - skips text that already contains action links.
  */
 export function injectActionLinksInMarkdown(content: string): string {
-  if (!content || content.includes('](action:')) return content
-  // Match lines that look like dot-separated quick actions (at least 3 items)
+  if (!content) return content
+  // Already processed
+  if (content.includes('](action:')) return content
+  // Find any line with at least 2 middle-dot separators (3+ items)
+  // Use \u00b7 for the middle dot character
   return content.replace(
-    /(^|\n)\s*([^\n·]+(?:·[^\n·]+){2,})\s*(\n|$)/gm,
-    (_, before, ops, after) => {
-      const items = ops.split(/·/).map((s: string) => s.trim()).filter(Boolean)
-      if (items.length < 3) return before + ops + after
+    /(^|\n)([^\n\u00b7]*(?:\u00b7[^\n\u00b7]*){2,})(?=\n|$)/gm,
+    (_full: string, _before: string, ops: string) => {
+      const items = ops.split('\u00b7').map((s: string) => s.trim()).filter(Boolean)
+      if (items.length < 3) return _full
       const linked = items
         .filter((item: string) => !item.includes(']('))
         .map((item: string) => `[${item}](action:${item})`)
-      return before + linked.join(' · ') + after
+      if (linked.length < 3) return _full
+      return _before + linked.join(' · ')
     },
   )
 }

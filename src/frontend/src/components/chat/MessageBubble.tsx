@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
@@ -10,8 +10,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { createMarkdownComponents } from './markdownComponents'
 import { useThrottledValue } from '@/hooks/useThrottledValue'
 import { resolveUploadUrl } from '@/lib/mediaUrl'
-import { prepareAssistantMarkdown } from '@/lib/patentMessage'
-import { injectActionLinksInMarkdown } from '@/lib/patentMessage'
+import { injectActionLinksInMarkdown, prepareAssistantMarkdown } from '@/lib/patentMessage'
 import { rewriteMiniProgramLinksInMarkdown } from '@/lib/wechatMiniProgram'
 
 import { SkillDraftCard, SkillDraftExtra } from './SkillDraftCard'
@@ -105,6 +104,15 @@ export function MessageBubble({
   const markdownSanitizeSchema = {
     ...defaultSchema,
     tagNames: [...(defaultSchema.tagNames || []), 'details', 'summary'],
+    protocols: {
+      ...defaultSchema.protocols,
+      href: [...(defaultSchema.protocols?.href ?? []), 'action'],
+    },
+  }
+
+  const allowActionUrlTransform = (url: string) => {
+    if (url.startsWith('action:')) return url
+    return defaultUrlTransform(url)
   }
   const knowledgeHitLabels = useMemo(() => {
     const seen = new Set<string>()
@@ -269,6 +277,7 @@ export function MessageBubble({
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema]]}
+              urlTransform={allowActionUrlTransform}
               components={markdownComponents}
             >
               {assistantText}
