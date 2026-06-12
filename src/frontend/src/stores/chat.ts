@@ -479,6 +479,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const conversation_id =
         message.conversation_id || state.messages[0]?.conversation_id || ''
 
+      // Keep existing message content if already set from stream:end
+      const existing = state.messages.find((m) => m.id === id)
+      if (existing && existing.role === 'assistant') {
+        if (!existing.content.trim() && content) {
+          return {
+            messages: state.messages.map((m) =>
+              m.id === id ? { ...m, content } : m
+            ),
+            isStreaming: false,
+            streamingContent: '',
+          }
+        }
+        return { isStreaming: false, streamingContent: '' }
+      }
+
       const withoutDupes = state.messages.filter((m) => m.id !== id)
 
       const final: Message = {
