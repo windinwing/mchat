@@ -141,16 +141,16 @@ export function prepareAssistantMarkdown(content: string): string {
  */
 export function injectActionLinksInMarkdown(content: string): string {
   if (!content || content.includes('](action:')) return content
+  // Match lines that look like dot-separated quick actions (at least 3 items)
   return content.replace(
-    /(?:^|\n)([^·\n]+(?:·[^·\n]+){2,})/gm,
-    (_, ops: string) => {
-      const items = ops.split(/·/).map(s => s.trim()).filter(Boolean)
-      if (items.length <= 1) return _
+    /(^|\n)\s*([^\n·]+(?:·[^\n·]+){2,})\s*(\n|$)/gm,
+    (_, before, ops, after) => {
+      const items = ops.split(/·/).map((s: string) => s.trim()).filter(Boolean)
+      if (items.length < 3) return before + ops + after
       const linked = items
-        .filter(item => !item.includes(']('))
-        .map(item => `[${item}](action:${item})`)
-      if (!linked.length) return _
-      return linked.join(' · ')
+        .filter((item: string) => !item.includes(']('))
+        .map((item: string) => `[${item}](action:${item})`)
+      return before + linked.join(' · ') + after
     },
   )
 }
