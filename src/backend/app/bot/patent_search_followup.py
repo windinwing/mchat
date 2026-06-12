@@ -131,7 +131,7 @@ def append_patent_tool_hints(system_prompt: str, tool_skills: list[Skill]) -> st
 def is_patent_search_success(
     tool_name: str, command: str, tool_display: str
 ) -> bool:
-    if tool_name != "patent-search" or command != "search":
+    if tool_name != "patent-search" or command not in ("search", "export"):
         return False
     if not tool_display or tool_display.lstrip().startswith("❌"):
         return False

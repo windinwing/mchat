@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.logging import logger
+from loguru import logger
 
 _MODEL_CONTEXT_LIMITS: dict[str, int] = {
     "deepseek-v4-flash": 131072,

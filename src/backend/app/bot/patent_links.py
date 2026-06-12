@@ -55,8 +55,11 @@ def patent_link_settings_from_skills(tool_skills: list[Any]) -> dict[str, Any]:
             or config.get("patent_url")
             or default_patent_portal_url_template()
         )
-        enabled = _coerce_bool(has_explicit) if has_explicit is not None else bool(template)
-        return {"enabled": enabled, "template": str(template)}
+        template_raw = str(template)
+        if "{patent_id}" not in template_raw:
+            template_raw = template_raw.rstrip("/") + "/{patent_id}.html"
+        enabled = _coerce_bool(has_explicit) if has_explicit is not None else bool(template_raw)
+        return {"enabled": enabled, "template": template_raw}
     fallback = default_patent_portal_url_template()
     return {"enabled": bool(fallback), "template": fallback}
 

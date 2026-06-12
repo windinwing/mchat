@@ -684,8 +684,12 @@ async def process_message(
                     patent_search_ok = is_patent_search_success(
                         tool_name, cmd, tool_display
                     )
+                    is_export = cmd == "export"
                     if patent_search_enable_presentation(patent_skill) and patent_search_ok:
                         patent_search_for_presentation = True
+                    elif is_export:
+                        # Export: skip raw display, let AI summarize
+                        full_response += tool_display
                     else:
                         full_response += tool_display
                         yield tool_display

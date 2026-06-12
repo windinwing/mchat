@@ -1,0 +1,78 @@
+# GameCenter 试玩反代（xyx.9235.net → 10.98.8.15:5099）
+# 注意：Cocos web-mobile 的 index.js 路径固定、无 content-hash，不能设 30d immutable，
+# 否则改版本编译后浏览器/CDN 仍长期命中旧包。
+#
+# 部署：sudo cp 到 /etc/nginx/conf.d/xyx.9235.net.conf 后 sudo nginx -t && sudo systemctl reload nginx
+
+server {
+    listen 80;
+    server_name xyx.9235.net;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name xyx.9235.net;
+
+    ssl_certificate /etc/nginx/conf.d/https/9235.net.pem;
+    ssl_certificate_key /etc/nginx/conf.d/https/9235.net.key;
+    ssl_session_timeout 5m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    client_max_body_size 256m;
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain application/javascript application/json text/css image/svg+xml application/octet-stream;
+
+    # HTML：不缓存
+    location ~* \.html$ {
+        proxy_pass http://10.98.8.15:5099;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        expires -1;
+        add_header Cache-Control "no-cache, must-revalidate" always;
+    }
+
+    # JS/JSON（试玩 bundle）：禁止长期缓存 — 编译后必须能立即刷到新版本
+    location ~* \.(js|json)$ {
+        proxy_pass http://10.98.8.15:5099;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        expires -1;
+        add_header Cache-Control "no-cache, must-revalidate" always;
+    }
+
+    # 图片/字体等可短缓存（可选 1 小时）
+    location ~* \.(css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|wasm|bin)$ {
+        proxy_pass http://10.98.8.15:5099;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        expires 1h;
+        add_header Cache-Control "public, max-age=3600, must-revalidate" always;
+    }
+
+    location / {
+        proxy_pass http://10.98.8.15:5099;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_read_timeout 300;
+        proxy_send_timeout 300;
+    }
+}
