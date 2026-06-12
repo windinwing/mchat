@@ -815,7 +815,6 @@ async def process_message(
 
         if full_response:
             full_response = _with_patent_links(full_response)
-            full_response = inject_action_links(full_response)
             # Fix AI-generated download URLs that use wrong domain
             full_response = full_response.replace(
                 "https://www.9235.net/uploads/", "/uploads/"

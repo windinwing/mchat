@@ -226,7 +226,6 @@ async def on_message_created(
             template = default_patent_portal_url_template()
             if template:
                 full_content = linkify_patent_ids(full_content, enabled=True, template=template)
-            full_content = inject_action_links(full_content)
 
             # Signal stream end (include DB id so UI can dedupe)
             await ws_manager.send_to_conversation(

@@ -89,12 +89,16 @@ def linkify_patent_ids(text: str, *, enabled: bool, template: str) -> str:
 def inject_action_links(text: str) -> str:
     """Auto-wrap common operation text as [label](action:command) links.
     Works around LLMs stripping unknown protocols from markdown links."""
+    # Skip if text already contains action links (idempotent)
+    if '](action:' in text:
+        return text
     # Single-line operation pills: "下一页 · 排序 · 导出Excel"
     def _wrap_ops(match: re.Match) -> str:
         items = [i.strip() for i in re.split(r'\s*[·|]\s*', match.group(1)) if i.strip()]
         if len(items) <= 1:
             return match.group(0)
-        linked = [f'[{item}](action:{item})' for item in items]
+        # Skip items that are already markdown links
+        linked = [f'[{item}](action:{item})' if '](' not in item else item for item in items]
         return ' · '.join(linked)
 
     text = re.sub(
@@ -107,6 +111,8 @@ def inject_action_links(text: str) -> str:
     def _link_ops(match: re.Match) -> str:
         label = match.group(1)
         cmd = match.group(2)
+        if '](' in label:
+            return match.group(0)
         return f'- [{label}](action:{cmd})'
 
     text = re.sub(
