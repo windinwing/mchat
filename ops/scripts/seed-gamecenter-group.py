@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Register gamecenter-dev-agent and bind it to a group's default_skill_ids."""
+"""Register DevBridge dev skills and bind them to a group's default_skill_ids."""
 
 from __future__ import annotations
 
@@ -19,8 +19,20 @@ from app.models.group import Group
 from app.models.user import User
 from app.services.skill_service import SkillService
 
+DEFAULT_DEV_SKILLS = (
+    "gamecenter-dev-agent",
+    "dev-assistant",
+    "git-commit-writer",
+    "code-reviewer",
+)
 
-async def main(username: str, group_name: str | None, project_slugs: list[str]) -> None:
+
+async def main(
+    username: str,
+    group_name: str | None,
+    project_slugs: list[str],
+    skill_names: list[str],
+) -> None:
     async with async_session_factory() as db:
         user = (
             await db.execute(select(User).where(User.username == username))
@@ -32,9 +44,12 @@ async def main(username: str, group_name: str | None, project_slugs: list[str]) 
         svc = SkillService(db)
         await svc.reload_skills(user.id)
         skills = await svc.list_skills(user.id)
-        skill = next((s for s in skills if s.name == "gamecenter-dev-agent"), None)
-        if skill is None:
-            print("❌ gamecenter-dev-agent not found after reload; sync skills/gamecenter-dev-agent first")
+        by_name = {s.name: s for s in skills}
+
+        missing = [name for name in skill_names if name not in by_name]
+        if missing:
+            print(f"❌ Skills not found after reload: {', '.join(missing)}")
+            print("   Ensure skills/ contains them, then retry.")
             sys.exit(1)
 
         query = select(Group).order_by(Group.created_at.asc())
@@ -46,16 +61,18 @@ async def main(username: str, group_name: str | None, project_slugs: list[str]) 
             sys.exit(1)
 
         ids = list(group.default_skill_ids or [])
-        if skill.id not in ids:
-            ids.append(skill.id)
+        for name in skill_names:
+            skill = by_name[name]
+            if skill.id not in ids:
+                ids.append(skill.id)
         group.default_skill_ids = ids
         if project_slugs:
             group.devbridge_project_allowlists = {"gamecenter": project_slugs}
             group.gamecenter_project_allowlist = None
         await db.commit()
-        print(f"✅ Group {group.name!r} default_skill_ids includes gamecenter-dev-agent ({skill.id})")
+        print(f"✅ Group {group.name!r} default skills: {', '.join(skill_names)}")
         if project_slugs:
-            print(f"✅ Group {group.name!r} devbridge_project_allowlists.gamecenter = {project_slugs}")
+            print(f"✅ devbridge_project_allowlists.gamecenter = {project_slugs}")
 
 
 if __name__ == "__main__":
@@ -64,9 +81,15 @@ if __name__ == "__main__":
     parser.add_argument("--group", default=None, help="Group name (default: first group)")
     parser.add_argument(
         "--projects",
-        default="cat,pkg0175,pkg0202-creator,pkg0002-3-x-3-8-3ts",
+        default="",
         help="Comma-separated GameCenter project slugs for allowlist (empty = skip)",
+    )
+    parser.add_argument(
+        "--skills",
+        default=",".join(DEFAULT_DEV_SKILLS),
+        help=f"Comma-separated skill names (default: {','.join(DEFAULT_DEV_SKILLS)})",
     )
     args = parser.parse_args()
     slugs = [s.strip() for s in (args.projects or "").split(",") if s.strip()]
-    asyncio.run(main(args.user, args.group, slugs))
+    skill_names = [s.strip() for s in (args.skills or "").split(",") if s.strip()]
+    asyncio.run(main(args.user, args.group, slugs, skill_names))

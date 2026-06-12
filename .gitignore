@@ -8,6 +8,7 @@ venv/
 .venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -65,6 +66,14 @@ skills/*
 !skills/mchat-ops/**
 !skills/mchat-notify/
 !skills/mchat-notify/**
+!skills/gamecenter-dev-agent/
+!skills/gamecenter-dev-agent/**
+!skills/dev-assistant/
+!skills/dev-assistant/**
+!skills/git-commit-writer/
+!skills/git-commit-writer/**
+!skills/code-reviewer/
+!skills/code-reviewer/**
 skills/mchat-notify/providers/*.py
 !skills/mchat-notify/providers/README.md
 src/backend/skills/*

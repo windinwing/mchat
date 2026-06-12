@@ -34,10 +34,11 @@ def _customer(**kwargs) -> CustomerConfig:
     return CustomerConfig(**defaults)
 
 
-def test_free_plan_allows_explicit_container_override():
+def test_free_plan_blocks_explicit_container_override():
     customer = _customer(plan="free", workspace_mode="container")
-    validate_channel_workspace_mode(customer, "container")
-    assert channel_container_entitled(customer) is True
+    with pytest.raises(ValueError, match="container_not_allowed_for_plan"):
+        validate_channel_workspace_mode(customer, "container")
+    assert channel_container_entitled(customer) is False
 
 
 def test_pro_active_allows_container():

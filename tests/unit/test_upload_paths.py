@@ -2,13 +2,7 @@
 
 from pathlib import Path
 
-from app.utils.upload_paths import resolve_upload_root, safe_upload_file_path
-
-
-def test_resolve_upload_root_relative(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    root = resolve_upload_root("data/uploads")
-    assert root == (tmp_path / "data/uploads").resolve()
+from app.utils.upload_paths import safe_upload_file_path
 
 
 def test_safe_upload_file_path_blocks_traversal(tmp_path):

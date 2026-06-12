@@ -113,6 +113,8 @@ sync_skill_dir mchat-ops
 sync_skill_dir mchat-notify
 sync_skill_dir dev-assistant
 sync_skill_dir gamecenter-dev-agent
+sync_skill_dir git-commit-writer
+sync_skill_dir code-reviewer
 sync_skill_dir wheelchair-advisor
 for patent_dir in "$PROJECT_DIR"/skills/patent-*; do
   [ -d "$patent_dir" ] || continue

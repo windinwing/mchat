@@ -133,6 +133,8 @@ sync_skill_dir mchat-help
 sync_skill_dir mchat-ops
 sync_skill_dir dev-assistant
 sync_skill_dir gamecenter-dev-agent
+sync_skill_dir git-commit-writer
+sync_skill_dir code-reviewer
 sync_skill_dir wheelchair-advisor
 for patent_skill in patent-search patent-transaction patent-disclosure patent-report; do
   sync_skill_dir "$patent_skill"

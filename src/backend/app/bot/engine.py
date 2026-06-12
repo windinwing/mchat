@@ -109,6 +109,8 @@ _TOOL_FRIENDLY_LABELS: dict[str, str] = {
     "mchat-notify": "通知",
     "dev-assistant": "开发助手",
     "gamecenter-dev-agent": "游戏开发",
+    "git-commit-writer": "Git 提交",
+    "code-reviewer": "代码审查",
 }
 
 

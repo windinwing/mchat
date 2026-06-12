@@ -2,6 +2,24 @@
 
 All notable changes to mchat will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Cloud SaaS landing**: marketplace-focused hero, showcase navigation, ICP/copyright footer.
+- **Portal subscriptions**: admin grant/provision without checkout; workflow marketplace and free-template activation.
+- **Frontend resilience**: auto-reload when lazy route chunks are stale after deploy.
+
+### Changed
+- Free channel plans no longer allow explicit `container` workspace override without pro/enterprise subscription.
+- Cloud landing CTA uses `ctaShowcase` (removed duplicate `landingCloud.ctaWidget` i18n key).
+
+### Removed
+- Redundant KB test suite (`test_local_knowledge_base.py`); embedding config covered by `test_rag_config.py`.
+- Brittle wheelchair skill content test (`test_skill_context.py`).
+
+### Tests
+- Align channel plan, patent-report bundle, and upload path tests with current behavior.
+
 ## [Unreleased] - 2026-05-30
 
 ### Added

@@ -8,7 +8,7 @@ FIND_PYTHON := bash ops/scripts/find-python.sh
 DOCKER_COMPOSE := $(shell if [ -x ops/scripts/docker-compose-cmd.sh ] 2>/dev/null || [ -f ops/scripts/docker-compose-cmd.sh ]; then echo 'bash ops/scripts/docker-compose-cmd.sh'; elif docker info >/dev/null 2>&1; then echo 'docker compose'; else echo 'sudo docker compose'; fi)
 DOCKER_LITE_ENV := -f ops/docker/docker-compose.lite.yml --env-file ops/docker/.env
 
-.PHONY: help install setup install-git-hooks dev dev-worker dev-stop cloud cloud-stop worker dev-backend deploy-core deploy-cloud dev-frontend build start docker-up docker-down docker-build clean reset-fresh test lint coverage db-init db-seed fmt patent-skills-env patent-skills-reload patent-skills-prune test-patent-showcase env-hint
+.PHONY: help install setup install-git-hooks dev dev-worker dev-stop cloud cloud-stop worker dev-backend deploy-core deploy-cloud dev-frontend build start docker-up docker-down docker-build clean reset-fresh test lint coverage db-init db-seed fmt patent-skills-env patent-skills-reload patent-skills-prune test-patent-showcase seed-devbridge-group env-hint
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -159,3 +159,6 @@ patent-skills-reload: ## Reload skills from SKILLS_DIR + EXTRA_SKILLS_DIRS into 
 
 test-patent-showcase: ## Run patent workflow + report unit tests
 	cd $(BACKEND_DIR) && EXTRA_SKILLS_DIRS="$(PATENT_SKILLS_DIR)" PYTHONPATH=. $(WITH_VENV) python -m pytest ../../tests/unit/test_patent_workflow_showcase.py ../../tests/unit/test_patent_report_skill.py ../../tests/unit/test_workflow_graph.py -q
+
+seed-devbridge-group: ## Bind DevBridge dev skills to a group (ARGS='--group 开发组 --projects slug1')
+	cd $(BACKEND_DIR) && $(WITH_VENV) python ../../ops/scripts/seed-gamecenter-group.py $(ARGS)

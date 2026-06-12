@@ -255,7 +255,6 @@ mchat/
 │           ├── i18n/     # 中英文 (react-i18next)
 │           └── pages/    # 落地页 + 管理后台
 ├── skills/               # 技能包目录
-├── channel_templates/    # 垂直通道模板（专利查新、医疗咨询等）
 ├── docs/                 # 架构、API、部署、路线图
 ├── ops/docker/           # Docker Compose
 └── Makefile

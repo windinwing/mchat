@@ -114,15 +114,28 @@ export function LandingPage() {
               </>
             )}
             {cloud && (
-              <Link to="/portal/templates" className="hover:text-primary-600 transition-colors">
-                {t('portal.templates')}
-              </Link>
+              <>
+                <Link to="/portal/templates" className="hover:text-primary-600 transition-colors">
+                  {t('portal.templates')}
+                </Link>
+                <Link to="/showcase" className="hover:text-primary-600 transition-colors">
+                  {t('landing.navShowcase')}
+                </Link>
+              </>
             )}
           </nav>
           <div className="flex items-center gap-3">
             <LanguageSwitcher />
             <ThemeToggle />
             {!cloud && (
+              <Link
+                to="/showcase"
+                className="hidden sm:inline-flex text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+              >
+                {t('landing.navShowcase')}
+              </Link>
+            )}
+            {cloud && (
               <Link
                 to="/showcase"
                 className="hidden sm:inline-flex text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
@@ -191,11 +204,11 @@ export function LandingPage() {
                   {lp('ctaTemplates')}
                 </Link>
                 <Link
-                  to="/widget/demo"
+                  to="/showcase"
                   className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white/90 dark:bg-gray-900/80 text-base font-medium text-gray-700 dark:text-gray-300 hover:border-primary-400 transition-all"
                 >
-                  <Zap className="w-5 h-5 text-primary-600" />
-                  {lp('ctaWidget')}
+                  <MessageCircle className="w-5 h-5 text-primary-600" />
+                  {lp('ctaShowcase')}
                 </Link>
               </>
             ) : (
@@ -449,6 +462,9 @@ docker compose -f ops/docker/docker-compose.lite.yml up -d
                 )}
                 <Link to="/portal/templates" className="hover:text-primary-600">
                   {lp('footerTemplates')}
+                </Link>
+                <Link to="/showcase" className="hover:text-primary-600">
+                  {t('landing.navShowcase')}
                 </Link>
                 <Link to={adminTarget} className="hover:text-primary-600">
                   {lp('ctaLogin')}

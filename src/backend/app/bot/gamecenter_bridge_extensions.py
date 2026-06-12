@@ -275,6 +275,7 @@ from app.bot import chat_extensions
 from app.bot.tool_runtime import (
     get_bot_conversation,
     get_bot_db,
+    get_bot_group_devbridge_allowlists,
     get_bot_group_member_role,
     get_bot_platform_user_role,
     get_bot_user_id,
@@ -283,7 +284,43 @@ from app.core.config import settings
 from app.models.conversation import Conversation
 from app.services.devbridge_admin_settings import resolved_gamecenter_settings
 from app.models.user import User
-from app.services.gamecenter_provider import create_gamecenter_bridge_service
+from app.services.devbridge_registry import get_devbridge_provider, list_devbridge_providers
+
+_PROVIDER_PROPERTY: dict[str, Any] = {
+    "type": "string",
+    "description": "DevBridge provider key (default: gamecenter).",
+}
+
+
+def _enabled_providers() -> list[Any]:
+    return [item for item in list_devbridge_providers() if item.enabled]
+
+
+def _any_bridge_enabled() -> bool:
+    return bool(_enabled_providers())
+
+
+def _provider_write_enabled(provider_key: str) -> bool:
+    provider = get_devbridge_provider(provider_key.strip().lower())
+    return provider.enabled and "file:patch" in provider.capabilities
+
+
+def _any_bridge_write_enabled() -> bool:
+    return any(_provider_write_enabled(item.key) for item in _enabled_providers())
+
+
+def _resolve_bridge_service(provider_key: str | None = None):
+    key = (provider_key or "gamecenter").strip().lower()
+    provider = get_devbridge_provider(key)
+    if not provider.enabled:
+        raise HTTPException(status_code=503, detail=f"DevBridge provider {key!r} is disabled")
+    allowlists = get_bot_group_devbridge_allowlists()
+    override = None
+    if allowlists and key in allowlists:
+        slugs = allowlists[key]
+        if slugs:
+            override = slugs
+    return provider.service_factory(project_allowlist_override=override)
 
 _READ_TOOLS = [
     {
@@ -783,7 +820,7 @@ async def _bridge_read_allowed(conversation: Conversation | None = None) -> bool
     """Group members may query progress; write ops still require staff."""
     db = get_bot_db()
     user_id = get_bot_user_id()
-    if db is None or not user_id or not _gc_settings().get("enabled"):
+    if db is None or not user_id or not _any_bridge_enabled():
         return False
     if conversation is not None and not conversation_allows_bridge(conversation):
         return False
@@ -801,7 +838,7 @@ def devbridge_write_allowed() -> bool:
 
 
 async def _bridge_write_allowed(conversation: Conversation | None = None) -> bool:
-    if not _gc_settings().get("enabled"):
+    if not _any_bridge_enabled():
         return False
     if conversation is not None and not conversation_allows_bridge(conversation):
         return False
@@ -836,9 +873,9 @@ async def _bridge_write_allowed(conversation: Conversation | None = None) -> boo
 
 
 def conversation_allows_bridge(conversation: Conversation) -> bool:
-    """Whether GameCenter bridge tools should be exposed in this chat (group-only by default)."""
+    """Whether DevBridge tools should be exposed in this chat (group-only by default)."""
     cfg = _gc_settings()
-    if not cfg.get("enabled"):
+    if not _any_bridge_enabled():
         return False
     if not conversation.user_id:
         return False
@@ -856,10 +893,11 @@ def _extra_tools(conversation: Conversation, _ctx: Any) -> list[dict[str, Any]]:
     if not devbridge_write_allowed():
         return tools
     cfg = _gc_settings()
-    if cfg.get("write_enabled"):
+    if cfg.get("enabled") and cfg.get("write_enabled"):
         tools.extend(_WRITE_TOOLS)
+    if _any_bridge_write_enabled():
         tools.extend(_NEW_WRITE_TOOLS)
-    if cfg.get("publish_enabled"):
+    if cfg.get("enabled") and cfg.get("publish_enabled"):
         tools.extend(_PUBLISH_TOOLS)
     return tools
 
@@ -882,7 +920,15 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
             ),
         }
 
-    service = create_gamecenter_bridge_service()
+    provider_key = (
+        "gamecenter"
+        if name.startswith("gamecenter_")
+        else str(args.get("provider") or "gamecenter").strip().lower()
+    )
+    try:
+        service = _resolve_bridge_service(provider_key)
+    except HTTPException as exc:
+        return {"ok": False, "error": str(exc.detail), "content": f"❌ {exc.detail}"}
     user_id = get_bot_user_id() or "system"
 
     if name == "list_gamecenter_projects":
@@ -1153,15 +1199,30 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
     # ── new generic devbridge tools ──
 
     if name == "list_devbridge_projects":
-        items = [item.model_dump() for item in service.list_projects()]
-        slugs = [str(item.get("slug") or "") for item in items if item.get("slug")]
+        all_items: list[dict[str, Any]] = []
+        provider_keys: list[str] = []
+        for provider in _enabled_providers():
+            try:
+                svc = _resolve_bridge_service(provider.key)
+            except HTTPException:
+                continue
+            for item in svc.list_projects():
+                row = item.model_dump()
+                row["provider"] = provider.key
+                all_items.append(row)
+            provider_keys.append(provider.key)
+        slugs = [str(item.get("slug") or "") for item in all_items if item.get("slug")]
         preview = ", ".join(slugs[:15])
         if len(slugs) > 15:
             preview += f", …（共 {len(slugs)} 个）"
         return {
             "ok": True,
-            "content": f"可访问 {len(items)} 个项目：{preview}",
-            "projects": items,
+            "content": (
+                f"可访问 {len(all_items)} 个项目"
+                + (f"（providers: {', '.join(provider_keys)}）" if provider_keys else "")
+                + (f"：{preview}" if preview else "")
+            ),
+            "projects": all_items,
         }
 
     if name == "get_devbridge_project_status":
@@ -1281,8 +1342,10 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
     if name == "create_devbridge_project":
         slug = str(args.get("slug") or "")
         template = str(args.get("template") or "")
+        provider_key = str(args.get("provider") or "gamecenter").strip().lower()
         try:
-            result = service.create_project(slug, template)
+            project_service = _resolve_bridge_service(provider_key)
+            result = project_service.create_project(slug, template)
         except HTTPException as exc:
             return {"ok": False, "error": str(exc.detail), "content": f"❌ {exc.detail}"}
         # Auto-add to group allowlist if running in group context
@@ -1296,10 +1359,10 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
                     group = (await db.execute(select(Group).where(Group.id == conv.scope_id))).scalar_one_or_none()
                     if group:
                         allowlists = dict(group.devbridge_project_allowlists or {})
-                        gc_list = list(allowlists.get("gamecenter") or [])
-                        if slug not in gc_list:
-                            gc_list.append(slug)
-                            allowlists["gamecenter"] = gc_list
+                        provider_list = list(allowlists.get(provider_key) or [])
+                        if slug not in provider_list:
+                            provider_list.append(slug)
+                            allowlists[provider_key] = provider_list
                             group.devbridge_project_allowlists = allowlists
                             await db.commit()
             except Exception:

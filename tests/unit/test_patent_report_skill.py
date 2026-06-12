@@ -128,5 +128,7 @@ def test_run_all_bundle(tmp_path, monkeypatch, patent_report_dir: Path):
         filename="test-report",
     )
     assert result["ok"] is True
-    formats = {f["format"] for f in result["files"]}
-    assert {"png", "xlsx", "docx", "pptx"}.issubset(formats)
+    file_formats = {f["format"] for f in result["files"]}
+    assert {"xlsx", "docx", "pptx"}.issubset(file_formats)
+    chart_formats = {c["format"] for c in result.get("charts") or []}
+    assert "png" in chart_formats

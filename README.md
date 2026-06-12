@@ -252,7 +252,6 @@ mchat/
 │           ├── i18n/     # zh / en (react-i18next)
 │           └── pages/    # Landing + admin console
 ├── skills/               # Skill packages
-├── channel_templates/    # Vertical channel templates (patent, medical, etc.)
 ├── docs/                 # Architecture, API, deployment, roadmap
 ├── ops/docker/           # Docker Compose
 └── Makefile
