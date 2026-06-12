@@ -15,15 +15,16 @@ class CreateCheckoutRequest(BaseModel):
 
 
 class CheckoutResponse(BaseModel):
-    order_id: str
-    order_no: str
+    order_id: str = ""
+    order_no: str = ""
     amount_cents: int
     subject: str
     payment_method: str
-    qr_content: str
+    qr_content: str = ""
     status: str
     is_renewal: bool = False
     channel_id: str | None = None
+    instant: bool = False
 
 
 class OrderStatusResponse(BaseModel):

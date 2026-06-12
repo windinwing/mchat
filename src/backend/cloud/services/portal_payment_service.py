@@ -85,16 +85,26 @@ class PortalPaymentService:
 
         template = await self._get_template(template_id)
         amount = _amount_for_template(template, billing_period)
-        if amount <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Template is free; use direct rent",
-            )
 
         renewal_channel: CustomerConfig | None = None
         if channel_id:
             renewal_channel = await self._resolve_renewal_channel(
                 user, channel_id, template_id
+            )
+
+        if amount <= 0:
+            if renewal_channel:
+                return await self._instant_automation_renewal(
+                    renewal_channel,
+                    template,
+                    billing_period=billing_period,
+                )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "free_template_checkout",
+                    "message": "该模板无需支付，请联系管理员开通工作流权益",
+                },
             )
 
         dup_query = select(PortalOrder).where(
@@ -293,6 +303,42 @@ class PortalPaymentService:
         await self.db.flush()
         await self._fulfill(order)
         return order
+
+    async def _instant_automation_renewal(
+        self,
+        channel: CustomerConfig,
+        template: ChannelTemplate,
+        *,
+        billing_period: str,
+    ) -> dict:
+        """Free-template workspace: grant Pro for automation without payment."""
+        sub_end = extend_subscription_end(
+            channel.subscription_ends_at, billing_period
+        )
+        channel.plan = "pro"
+        channel.subscription_ends_at = sub_end
+        channel.trial_ends_at = None
+        channel.enabled = True
+        await self.db.flush()
+        period_label = "年付" if billing_period == "yearly" else "月付"
+        logger.info(
+            "instant automation upgrade channel={} template={} until={}",
+            channel.id,
+            template.id,
+            sub_end.isoformat(),
+        )
+        return {
+            "instant": True,
+            "order_id": "",
+            "order_no": "",
+            "amount_cents": 0,
+            "subject": f"工作流编排已开通 · {channel.name} ({period_label})",
+            "payment_method": "instant",
+            "qr_content": "",
+            "status": "paid",
+            "is_renewal": True,
+            "channel_id": channel.id,
+        }
 
     async def _extend_channel_subscription(
         self, order: PortalOrder

@@ -23,4 +23,8 @@ class WorkflowEntitlementsResponse(BaseModel):
     upgrade_required: bool = False
     upgrade_template_id: str | None = None
     upgrade_channel_id: str | None = None
+    upgrade_template_name: str | None = None
+    upgrade_amount_cents: int | None = None
+    upgrade_instant: bool = False
+    upgrade_purpose: str = "automation"
     plan_label: str = ""

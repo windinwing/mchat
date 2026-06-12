@@ -10,7 +10,8 @@ from app.models.ai_config import AIConfig
 from app.schemas.agent import AIConfigCreate, AIConfigUpdate
 from app.services.agent_service import AgentService
 from app.services.maintenance_gate import ensure_public_api_available
-from app.services.skill_filter import filter_skill_ids_global
+from app.services.skill_filter import filter_skill_ids_global, filter_tenant_skill_ids
+from app.services.skill_service import SkillService
 from app.services.llm_credentials import is_usable_api_key, resolve_api_key
 from app.models.channel_template import ChannelTemplate
 from app.models.skill import Skill
@@ -259,7 +260,39 @@ class PortalService:
         self.db.add(config)
         await self.db.flush()
         await self.db.refresh(config)
+        await self._ensure_workspace_skills(user, config, template)
         return await self._to_channel_response(config)
+
+    async def _ensure_workspace_skills(
+        self,
+        user: User,
+        config: CustomerConfig,
+        template: ChannelTemplate,
+    ) -> None:
+        """Sync platform skills into user DB and bind patent tools to the channel."""
+        await SkillService(self.db).reload_skills(user.id)
+
+        extra_names: list[str] = []
+        if (template.category or "") == "patent_rag":
+            extra_names = ["patent-search", "patent-report", "patent-disclosure"]
+
+        skill_ids = list(config.skill_ids or [])
+        if extra_names:
+            result = await self.db.execute(
+                select(Skill).where(
+                    Skill.user_id == user.id,
+                    Skill.name.in_(extra_names),
+                )
+            )
+            for skill in result.scalars().all():
+                if skill.id not in skill_ids:
+                    skill_ids.append(skill.id)
+
+        if skill_ids:
+            config.skill_ids = await filter_tenant_skill_ids(
+                self.db, user.id, skill_ids
+            )
+            await self.db.flush()
 
     # ── My channels ─────────────────────────────────────────────────
 

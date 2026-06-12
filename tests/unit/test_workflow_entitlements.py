@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
+from app.models.channel_template import ChannelTemplate
 from app.models.customer import CustomerConfig
 from app.models.user import User
 from app.services.workflow_entitlements import (
@@ -30,14 +31,33 @@ def test_limits_for_plan_pro_allows_automation():
     assert limits.dag_enabled is True
 
 
-def test_pick_upgrade_target_prefers_channel_with_template():
+@pytest.mark.asyncio
+async def test_pick_upgrade_target_prefers_patent_channel(db_session):
+    db_session.add(
+        ChannelTemplate(
+            id="tpl-cs",
+            name="AI 智能客服 (基础版)",
+            category="customer_service",
+            price_monthly_cents=0,
+        )
+    )
+    db_session.add(
+        ChannelTemplate(
+            id="tpl-patent",
+            name="专利查新助手",
+            category="patent_rag",
+            price_monthly_cents=2900,
+        )
+    )
     channels = [
-        CustomerConfig(id="ch-1", name="A", user_id="u1", template_id=None, plan="free"),
-        CustomerConfig(id="ch-2", name="B", user_id="u1", template_id="tpl-1", plan="free"),
+        CustomerConfig(id="ch-1", name="A", user_id="u1", template_id="tpl-cs", plan="free"),
+        CustomerConfig(id="ch-2", name="B", user_id="u1", template_id="tpl-patent", plan="free"),
     ]
-    ch_id, tpl_id = _pick_upgrade_target(channels, "free")
+    ch_id, tpl_id, name, cents = await _pick_upgrade_target(db_session, channels, "free")
     assert ch_id == "ch-2"
-    assert tpl_id == "tpl-1"
+    assert tpl_id == "tpl-patent"
+    assert name == "专利查新助手"
+    assert cents == 2900
 
 
 @pytest.mark.asyncio
@@ -60,10 +80,32 @@ async def test_portal_user_free_cannot_create_workflow(db_session):
     db_session.add(user)
     await db_session.flush()
 
+    db_session.add(
+        ChannelTemplate(
+            id="tpl-free",
+            name="AI 智能客服 (基础版)",
+            category="customer_service",
+            price_monthly_cents=0,
+        )
+    )
+    db_session.add(
+        CustomerConfig(
+            id="ch-free",
+            name="Free channel",
+            user_id=user.id,
+            plan="free",
+            template_id="tpl-free",
+            enabled=True,
+        )
+    )
+    await db_session.flush()
+
     ent = await get_workflow_entitlements(db_session, user)
     assert ent.plan == "free"
     assert ent.can_create_workflow is False
     assert ent.upgrade_required is True
+    assert ent.upgrade_instant is True
+    assert ent.upgrade_amount_cents == 0
 
     with pytest.raises(HTTPException) as exc:
         await ensure_can_create_workflow(db_session, user)

@@ -70,6 +70,10 @@ export interface WorkflowEntitlements {
   upgrade_required: boolean
   upgrade_template_id: string | null
   upgrade_channel_id: string | null
+  upgrade_template_name: string | null
+  upgrade_amount_cents: number | null
+  upgrade_instant: boolean
+  upgrade_purpose: string
   plan_label: string
 }
 
@@ -102,6 +106,9 @@ export interface CheckoutResult {
   payment_method: string
   qr_content: string
   status: string
+  is_renewal?: boolean
+  channel_id?: string | null
+  instant?: boolean
 }
 
 export interface SkillIntegrationField {

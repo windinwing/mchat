@@ -375,10 +375,20 @@ class WorkflowService:
         user_id: str,
         require_enabled: bool = False,
     ) -> Skill | None:
-        result = await self.db.execute(
-            select(Skill).where(Skill.name == skill_name, Skill.user_id == user_id)
-        )
-        skill = result.scalar_one_or_none()
+        async def _lookup() -> Skill | None:
+            result = await self.db.execute(
+                select(Skill).where(
+                    Skill.name == skill_name, Skill.user_id == user_id
+                )
+            )
+            return result.scalar_one_or_none()
+
+        skill = await _lookup()
+        if skill is None:
+            from app.services.skill_service import SkillService
+
+            await SkillService(self.db).reload_skills(user_id)
+            skill = await _lookup()
         if skill is not None and require_enabled and not skill.enabled:
             raise RuntimeError(f"skill '{skill.name}' is disabled")
         return skill

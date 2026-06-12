@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Sparkles, Workflow } from 'lucide-react'
 import { portalApi, type WorkflowEntitlements } from '@/lib/portalApi'
@@ -10,9 +10,12 @@ import { Spinner } from '@/components/ui/Spinner'
 
 export function WorkflowEntitlementBanner() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const [ent, setEnt] = useState<WorkflowEntitlements | null>(null)
   const [loading, setLoading] = useState(true)
+  const [activating, setActivating] = useState(false)
+  const [activateError, setActivateError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -57,10 +60,35 @@ export function WorkflowEntitlementBanner() {
       : String(ent.max_runs_month)
 
   const checkoutPath = ent.upgrade_template_id
-    ? `/portal/checkout?template=${ent.upgrade_template_id}&period=monthly${
+    ? `/portal/checkout?template=${ent.upgrade_template_id}&period=monthly&purpose=automation${
         ent.upgrade_channel_id ? `&channel=${ent.upgrade_channel_id}` : ''
       }`
     : '/portal/templates'
+
+  const handleInstantActivate = async () => {
+    if (!ent.upgrade_template_id) return
+    setActivating(true)
+    setActivateError(null)
+    try {
+      const checkout = await portalApi.createCheckout({
+        template_id: ent.upgrade_template_id,
+        billing_period: 'monthly',
+        channel_id: ent.upgrade_channel_id || undefined,
+        payment_method: 'alipay',
+      })
+      if (checkout.instant) {
+        navigate('/portal/workflows', { replace: true })
+        window.location.reload()
+        return
+      }
+      navigate(checkoutPath)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : t('portal.payFailed')
+      setActivateError(msg)
+    } finally {
+      setActivating(false)
+    }
+  }
 
   return (
     <div className="mb-6 rounded-2xl border border-primary-200 dark:border-primary-800/50 bg-primary-50/60 dark:bg-primary-950/30 p-4 sm:p-5">
@@ -91,14 +119,36 @@ export function WorkflowEntitlementBanner() {
                 {t('portal.automationFreeHint')}
               </p>
             )}
+            {ent.upgrade_required && user?.role === 'user' && (
+              <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
+                {t('portal.automationUpgradeHint')}
+              </p>
+            )}
+            {activateError && (
+              <p className="text-xs text-red-600 dark:text-red-400 mt-2">{activateError}</p>
+            )}
           </div>
         </div>
         {ent.upgrade_required && user?.role === 'user' && (
-          <Link to={checkoutPath} className="shrink-0">
-            <Button type="button" size="sm" leftIcon={<Sparkles className="w-4 h-4" />}>
-              {t('portal.automationUpgradePro')}
-            </Button>
-          </Link>
+          <div className="shrink-0">
+            {ent.upgrade_instant ? (
+              <Button
+                type="button"
+                size="sm"
+                isLoading={activating}
+                leftIcon={<Sparkles className="w-4 h-4" />}
+                onClick={handleInstantActivate}
+              >
+                {t('portal.automationActivateFree')}
+              </Button>
+            ) : (
+              <Link to={checkoutPath}>
+                <Button type="button" size="sm" leftIcon={<Sparkles className="w-4 h-4" />}>
+                  {t('portal.automationUpgradePro')}
+                </Button>
+              </Link>
+            )}
+          </div>
         )}
       </div>
     </div>

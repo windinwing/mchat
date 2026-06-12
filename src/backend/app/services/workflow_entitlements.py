@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.channel_template import ChannelTemplate
 from app.models.customer import CustomerConfig
 from app.models.user import User
 from app.models.skill_schedule import SkillSchedule
@@ -107,18 +108,51 @@ async def effective_automation_plan(
     return best, channels
 
 
-def _pick_upgrade_target(
-    channels: list[CustomerConfig], plan: str
-) -> tuple[str | None, str | None]:
-    """Channel + template for checkout when user needs Pro automation."""
+async def _pick_upgrade_target(
+    db: AsyncSession,
+    channels: list[CustomerConfig],
+    plan: str,
+) -> tuple[str | None, str | None, str | None, int | None]:
+    """Channel + template for automation checkout (renew user's workspace plan)."""
     if plan in ("pro", "enterprise"):
-        return None, None
+        return None, None, None, None
+    if not channels:
+        return None, None, None, None
+
+    template_ids = {ch.template_id for ch in channels if ch.template_id}
+    templates: dict[str, ChannelTemplate] = {}
+    if template_ids:
+        t_result = await db.execute(
+            select(ChannelTemplate).where(ChannelTemplate.id.in_(template_ids))
+        )
+        templates = {t.id: t for t in t_result.scalars().all()}
+
+    def _tpl_price(tpl: ChannelTemplate | None) -> int:
+        if tpl is None:
+            return 0
+        return int(tpl.price_monthly_cents or 0)
+
+    ranked: list[tuple[CustomerConfig, ChannelTemplate | None, int]] = []
     for ch in channels:
-        if ch.template_id:
-            return ch.id, ch.template_id
-    if channels:
-        return channels[0].id, channels[0].template_id
-    return None, None
+        tpl = templates.get(ch.template_id) if ch.template_id else None
+        ranked.append((ch, tpl, _tpl_price(tpl)))
+
+    patent = [
+        (ch, tpl, price)
+        for ch, tpl, price in ranked
+        if tpl and (tpl.category or "") == "patent_rag"
+    ]
+    if patent:
+        ch, tpl, price = patent[0]
+        return ch.id, ch.template_id, tpl.name if tpl else None, price
+
+    paid = [(ch, tpl, price) for ch, tpl, price in ranked if price > 0]
+    if paid:
+        ch, tpl, price = max(paid, key=lambda x: x[2])
+        return ch.id, ch.template_id, tpl.name if tpl else None, price
+
+    ch, tpl, price = ranked[0]
+    return ch.id, ch.template_id, tpl.name if tpl else None, price
 
 
 def _under_cap(current: int, cap: int | None) -> bool:
@@ -165,10 +199,17 @@ async def get_workflow_entitlements(
     wf_count = await _count_workflows(db, user.id)
     sched_count = await _count_schedules(db, user.id)
     runs_month = await _count_runs_this_month(db, user.id)
-    upgrade_ch, upgrade_tpl = _pick_upgrade_target(channels, plan)
+    upgrade_ch, upgrade_tpl, upgrade_name, upgrade_cents = await _pick_upgrade_target(
+        db, channels, plan
+    )
     upgrade_required = plan in ("free",) or (
         plan == "free_trial"
         and not _under_cap(wf_count, limits.max_workflows)
+    )
+    upgrade_instant = bool(
+        upgrade_required
+        and upgrade_ch
+        and (upgrade_cents is None or upgrade_cents <= 0)
     )
     return WorkflowEntitlementsResponse(
         plan=plan,
@@ -194,6 +235,10 @@ async def get_workflow_entitlements(
         upgrade_required=upgrade_required and user.role == "user",
         upgrade_template_id=upgrade_tpl,
         upgrade_channel_id=upgrade_ch,
+        upgrade_template_name=upgrade_name,
+        upgrade_amount_cents=upgrade_cents,
+        upgrade_instant=upgrade_instant,
+        upgrade_purpose="automation",
         plan_label=PLAN_LABELS.get(plan, plan),
     )
 
@@ -223,7 +268,7 @@ async def ensure_can_create_workflow(db: AsyncSession, user: User) -> None:
     if ent.max_workflows == 0:
         raise _limit_error(
             code="workflow_plan_required",
-            message="工作流编排需 Pro 套餐，请升级频道订阅后使用",
+            message="工作流编排需开通试用或 Pro 权益，请在工作流页点击「开通工作流编排」",
             ent=ent,
         )
     raise _limit_error(
