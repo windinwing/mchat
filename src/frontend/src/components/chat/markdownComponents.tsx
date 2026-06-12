@@ -117,6 +117,25 @@ export function createMarkdownComponents(
       )
     },
     a({ href, children }) {
+      const rawHref = href || ''
+      // Action links: [下一页](action:下一页) → clickable button that sends a chat message
+      if (rawHref.startsWith('action:')) {
+        const actionText = rawHref.slice('action:'.length)
+        const label = typeof children === 'string' ? children : actionText
+        const handleAction = (e: React.MouseEvent) => {
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent('mchat:action', { detail: actionText }))
+        }
+        return (
+          <button
+            type="button"
+            onClick={handleAction}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300 border border-primary-200 dark:border-primary-700 hover:bg-primary-100 dark:hover:bg-primary-900/50 transition-colors cursor-pointer mx-0.5"
+          >
+            {label}
+          </button>
+        )
+      }
       const label = typeof children === 'string' ? children : undefined
       const normalized = href ? normalizeMiniProgramHref(href, label) : { href: href || '', isMp: false }
       const linkHref = normalized.href

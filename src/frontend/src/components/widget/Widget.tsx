@@ -109,6 +109,18 @@ export function Widget({
   const preChatStorageKey = `${PRECHAT_KEY_PREFIX}${agentId}${skillId ? `:${skillId}` : ''}`
   const [preChatDone, setPreChatDone] = useState(true)
 
+  // Listen for action links in chat messages
+  React.useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as string
+      if (detail && !chat.isStreaming && !chat.isLoading) {
+        chat.sendMessage(detail)
+      }
+    }
+    window.addEventListener('mchat:action', handler)
+    return () => window.removeEventListener('mchat:action', handler)
+  }, [chat.sendMessage, chat.isStreaming, chat.isLoading])
+
   React.useEffect(() => {
     if (!preChatFields.length) {
       setPreChatDone(true)

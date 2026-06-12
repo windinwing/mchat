@@ -489,14 +489,14 @@ def apply_schema_patches(conn: Connection) -> list[str]:
             if dialect == "mysql":
                 conn.execute(
                     text(
-                        "ALTER TABLE groups "
+                        "ALTER TABLE `groups` "
                         "ADD COLUMN gamecenter_project_allowlist JSON NULL"
                     )
                 )
             else:
                 conn.execute(
                     text(
-                        "ALTER TABLE groups "
+                        "ALTER TABLE `groups` "
                         "ADD COLUMN gamecenter_project_allowlist TEXT NULL"
                     )
                 )
@@ -505,14 +505,14 @@ def apply_schema_patches(conn: Connection) -> list[str]:
             if dialect == "mysql":
                 conn.execute(
                     text(
-                        "ALTER TABLE groups "
+                        "ALTER TABLE `groups` "
                         "ADD COLUMN devbridge_project_allowlists JSON NULL"
                     )
                 )
             else:
                 conn.execute(
                     text(
-                        "ALTER TABLE groups "
+                        "ALTER TABLE `groups` "
                         "ADD COLUMN devbridge_project_allowlists TEXT NULL"
                     )
                 )

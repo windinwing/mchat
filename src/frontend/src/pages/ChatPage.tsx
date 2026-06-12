@@ -100,6 +100,18 @@ export function ChatPage() {
       .catch(() => setGroupOptions([]))
   }, [])
 
+  // Listen for action links in chat messages (generic, not skill-specific)
+  React.useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as string
+      if (detail && conversationId) {
+        handleSend(detail)
+      }
+    }
+    window.addEventListener('mchat:action', handler)
+    return () => window.removeEventListener('mchat:action', handler)
+  }, [conversationId, chat.isStreaming])
+
   const handleSend = (content: string, options?: ChatSendOptions) => {
     if (conversationId) {
       chat.sendMessage(conversationId, content, options)
