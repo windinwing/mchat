@@ -23,7 +23,6 @@ import { Spinner } from '@/components/ui/Spinner'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { ThemeToggle } from '@/components/common/ThemeToggle'
 import { AppModeSwitch } from '@/components/common/AppModeSwitch'
-import { SiteCopyrightFooter } from '@/components/common/SiteCopyrightFooter'
 import { useState } from 'react'
 
 const navItems = [
@@ -219,10 +218,7 @@ export function UserLayout({ children }: { children: ReactNode }) {
           <div className="hidden lg:flex items-center gap-3 px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
             <AppModeSwitch variant="portal" active="portal" />
           </div>
-          <div className="flex-1 overflow-y-auto p-4 lg:p-6">
-            {children}
-            <SiteCopyrightFooter className="mt-8 pt-4 border-t border-gray-200 dark:border-gray-700 text-center" />
-          </div>
+          <div className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</div>
         </main>
       </div>
     </div>

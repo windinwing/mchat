@@ -10,7 +10,6 @@ import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { ThemeToggle } from '@/components/common/ThemeToggle'
 import { isCloudEdition, isSignupEnabled } from '@/lib/edition'
 import { preferredStaffPath } from '@/lib/appPreferences'
-import { SiteCopyrightFooter } from '@/components/common/SiteCopyrightFooter'
 
 type LoginMode = 'phone' | 'password'
 
@@ -324,9 +323,6 @@ export function LoginForm() {
             </>
           )}
         </div>
-      </div>
-      <div className="absolute bottom-4 left-0 right-0 px-4">
-        <SiteCopyrightFooter className="text-center" />
       </div>
     </div>
   )
