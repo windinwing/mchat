@@ -1675,12 +1675,27 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                         ) : null}
                         {selectedNodeType === 'condition' ? (
                           <div className="space-y-2">
-                            <Input label={t('workflows.graphConditionLeft')} value={String(selectedNodeConfig.left || '')} onChange={(e) => updateNodeConfig('left', e.target.value)} />
-                            <select className="block w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100" value={String(selectedNodeConfig.op || '==')} onChange={(e) => updateNodeConfig('op', e.target.value)}>
-                              <option value="==">==</option>
-                              <option value="!=">!=</option>
+                            <div>
+                              <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{t('workflows.graphConditionLeft')}</label>
+                              <input value={String(selectedNodeConfig.left || '')} onChange={(e) => updateNodeConfig('left', e.target.value)} placeholder="input.keyword 或 nodes.x.result.field" className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                            <select className="block w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100" value={String(selectedNodeConfig.op || '==')} onChange={(e) => updateNodeConfig('op', e.target.value)}>
+                              <option value="==">== (等于)</option>
+                              <option value="!=">!= (不等于)</option>
+                              <option value=">">&gt; (大于)</option>
+                              <option value="<">&lt; (小于)</option>
+                              <option value=">=">&gt;= (大于等于)</option>
+                              <option value="<=">&lt;= (小于等于)</option>
+                              <option value="contains">contains (包含)</option>
+                              <option value="not_contains">not_contains (不包含)</option>
+                              <option value="startswith">startswith (前缀)</option>
+                              <option value="endswith">endswith (后缀)</option>
                             </select>
-                            <Input label={t('workflows.graphConditionRight')} value={String(selectedNodeConfig.right ?? '')} onChange={(e) => updateNodeConfig('right', e.target.value)} />
+                            <div>
+                              <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{t('workflows.graphConditionRight')}</label>
+                              <input value={String(selectedNodeConfig.right ?? '')} onChange={(e) => updateNodeConfig('right', e.target.value)} placeholder="静态值 或 ${nodes.x.result.field}" className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                            <p className="text-[10px] text-gray-400">支持 ${'{' + 'input.xxx}'}/{'}{'}nodes.xxx.result{'}'}, right 也支持模板变量</p>
                           </div>
                         ) : null}
                         {selectedNodeType === 'approval' ? (

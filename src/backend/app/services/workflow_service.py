@@ -270,9 +270,51 @@ def _resolve_path(path: str, context: dict[str, Any]) -> Any:
             continue
         if isinstance(current, dict):
             current = current.get(key)
+        elif isinstance(current, list) and key.lstrip("-").isdigit():
+            # Support list index: nodes.x.results.0.title
+            try:
+                current = current[int(key)]
+            except (IndexError, ValueError):
+                return None
         else:
             return None
     return current
+
+
+def _eval_condition(left: Any, op: str, right: Any) -> bool:
+    """Evaluate a condition node's comparison with type coercion."""
+    if op == "==":
+        return left == right
+    if op == "!=":
+        return left != right
+    # Try numeric comparison for >, <, >=, <=
+    try:
+        ln = float(left) if left is not None else None
+        rn = float(right) if right is not None else None
+        if ln is not None and rn is not None:
+            if op == ">":
+                return ln > rn
+            if op == "<":
+                return ln < rn
+            if op == ">=":
+                return ln >= rn
+            if op == "<=":
+                return ln <= rn
+    except (TypeError, ValueError):
+        pass
+    # String operators
+    ls = str(left) if left is not None else ""
+    rs = str(right) if right is not None else ""
+    if op == "contains":
+        return rs in ls
+    if op == "not_contains":
+        return rs not in ls
+    if op == "startswith":
+        return ls.startswith(rs)
+    if op == "endswith":
+        return ls.endswith(rs)
+    # Unknown op: default to equality
+    return left == right
 
 
 _PATENT_REPORT_COMMANDS = frozenset({"chart", "excel", "word", "ppt", "all"})
@@ -1104,15 +1146,25 @@ class WorkflowService:
                     record["status"] = "success"
                     return node_id, record
                 if node.type == "start":
+                    # Validate required input_fields
+                    for field in (cfg.get("input_fields") or []):
+                        if isinstance(field, dict) and field.get("required"):
+                            fkey = str(field.get("key") or "").strip()
+                            if fkey and not str(outputs.get("input", {}).get(fkey) or "").strip():
+                                raise RuntimeError(
+                                    f"Missing required input field: {field.get('label') or fkey}"
+                                )
                     record["result"] = outputs.get("input") or {}
                     record["status"] = "success"
                     return node_id, record
                 if node.type == "condition":
                     left_path = str((cfg.get("left") or "")).strip()
-                    op = str((cfg.get("op") or "==")).strip()
-                    right = cfg.get("right")
+                    op = str((cfg.get("op") or "==")).strip().lower()
+                    right_raw = cfg.get("right")
                     left = _resolve_path(left_path, outputs) if left_path else None
-                    ok = (left == right) if op == "==" else (left != right)
+                    # right 也支持模板渲染，允许动态比较
+                    right = _render_template(right_raw, outputs) if right_raw is not None else None
+                    ok = _eval_condition(left, op, right)
                     record["result"] = {"condition": ok, "left": left, "right": right, "op": op}
                     record["status"] = "success"
                     return node_id, record
