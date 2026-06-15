@@ -1,10 +1,12 @@
 """Agent service - business logic for AI config and customer config management."""
 
-from sqlalchemy import select, delete
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai_config import AIConfig
+from app.models.conversation import Conversation
 from app.models.customer import CustomerConfig
+from app.models.group import Group
 from app.models.user import User
 from app.schemas.agent import (
     AIConfigCreate,
@@ -155,6 +157,20 @@ class AgentService:
         config = result.scalar_one_or_none()
         if config is None:
             return False
+        # Null out dangling foreign-key references so conversations, groups,
+        # customer configs and channel templates don't point at a deleted row.
+        await self.db.execute(
+            update(Conversation).where(Conversation.ai_config_id == config_id)
+            .values(ai_config_id=None)
+        )
+        await self.db.execute(
+            update(CustomerConfig).where(CustomerConfig.ai_config_id == config_id)
+            .values(ai_config_id=None)
+        )
+        await self.db.execute(
+            update(Group).where(Group.ai_config_id == config_id)
+            .values(ai_config_id=None)
+        )
         await self.db.delete(config)
         await self.db.flush()
         return True

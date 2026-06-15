@@ -105,7 +105,9 @@ export function ChatPage() {
   React.useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as string
-      if (detail && conversationId) {
+      // Don't let an action link interrupt an in-progress reply (it would
+      // clear streamingContent and lose the current response). Mirrors Widget.
+      if (detail && conversationId && !chat.isStreaming && !chat.isLoading) {
         handleSend(detail)
       }
     }

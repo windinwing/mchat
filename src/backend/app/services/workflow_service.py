@@ -141,6 +141,39 @@ async def _execute_skill_for_user(
         return await execute_skill(skill, payload)
 
 
+async def _resolve_workflow_skill(
+    db: AsyncSession,
+    *,
+    skill_id: str,
+    skill_name: str,
+    user_id: str,
+    require_enabled: bool = False,
+) -> Skill | None:
+    """Resolve a skill by id or name on the given session (concurrency-safe)."""
+    skill: Skill | None = None
+    if skill_id:
+        result = await db.execute(
+            select(Skill).where(Skill.id == skill_id, Skill.user_id == user_id)
+        )
+        skill = result.scalar_one_or_none()
+    elif skill_name:
+        result = await db.execute(
+            select(Skill).where(Skill.name == skill_name, Skill.user_id == user_id)
+        )
+        skill = result.scalar_one_or_none()
+        if skill is None:
+            from app.services.skill_service import SkillService
+
+            await SkillService(db).reload_skills(user_id)
+            result = await db.execute(
+                select(Skill).where(Skill.name == skill_name, Skill.user_id == user_id)
+            )
+            skill = result.scalar_one_or_none()
+    if skill is not None and require_enabled and not skill.enabled:
+        return None
+    return skill
+
+
 def graph_for_template_export(
     graph_json: dict | None, skill_id_to_name: dict[str, str] | None = None
 ) -> dict:
@@ -1183,7 +1216,7 @@ class WorkflowService:
                             sorted_children = [n.id for n in child_nodes]
                         child_node_map = {n.id: n for n in child_nodes}
 
-                        async def _run_batch_child(item_idx: int, item: Any) -> dict:
+                        async def _run_batch_child(item_idx: int, item: Any, child_db: AsyncSession) -> dict:
                             local_outputs = {
                                 "input": dict(outputs.get("input") or {}),
                                 "nodes": dict(outputs.get("nodes") or {}),
@@ -1199,11 +1232,13 @@ class WorkflowService:
                                     continue
                                 child_skill_name = str((cn.config or {}).get("skill_name") or "").strip()
                                 child_skill_id = str((cn.config or {}).get("skill_id") or "").strip()
-                                skill: Skill | None = None
-                                if child_skill_id:
-                                    skill = await self._get_skill(skill_id=child_skill_id, user_id=workflow.user_id, require_enabled=True)
-                                elif child_skill_name:
-                                    skill = await self._get_skill_by_name(skill_name=child_skill_name, user_id=workflow.user_id, require_enabled=True)
+                                skill = await _resolve_workflow_skill(
+                                    child_db,
+                                    skill_id=child_skill_id,
+                                    skill_name=child_skill_name,
+                                    user_id=workflow.user_id,
+                                    require_enabled=True,
+                                )
                                 if skill is None:
                                     node_results[cid] = {"result": {"error": f"Skill not found: {child_skill_name or child_skill_id}"}, "status": "failed"}
                                     local_outputs["nodes"][cid] = node_results[cid]
@@ -1215,7 +1250,7 @@ class WorkflowService:
                                 else:
                                     payload = _strip_blank_skill_params(payload)
                                 try:
-                                    raw = await _execute_skill_for_user(self.db, workflow.user_id, skill, payload, tenant_facing=tenant_facing)
+                                    raw = await _execute_skill_for_user(child_db, workflow.user_id, skill, payload, tenant_facing=tenant_facing)
                                     result = _to_result_dict(raw)
                                     node_results[cid] = {"result": result, "status": "success"}
                                 except Exception as exc:
@@ -1226,7 +1261,12 @@ class WorkflowService:
                         sem = asyncio.Semaphore(max_concurrent)
                         async def _bounded(item_idx: int, item: Any) -> dict:
                             async with sem:
-                                return await _run_batch_child(item_idx, item)
+                                # Each concurrent batch child gets its own session.
+                                # Sharing self.db across asyncio.gather coroutines
+                                # triggers "this session is already handling a
+                                # request" when max_concurrent > 1.
+                                async with async_session_factory() as child_db:
+                                    return await _run_batch_child(item_idx, item, child_db)
                         tasks = [_bounded(i, it) for i, it in enumerate(items)]
                         batch_results = list(await asyncio.gather(*tasks))
                         record["result"] = {"items": batch_results, "count": len(items), "children": [n.id for n in child_nodes]}
@@ -1301,70 +1341,57 @@ class WorkflowService:
 
                 # skill node
                 skill_id = str((cfg.get("skill_id") or "")).strip()
-                skill: Skill | None = None
-                if skill_id:
-                    skill = await self._get_skill(
+                skill_name = str((cfg.get("skill_name") or "")).strip()
+                # Use a dedicated session so that parallel graph branches
+                # (asyncio.gather at the top level) don't share self.db.
+                async with async_session_factory() as node_db:
+                    skill = await _resolve_workflow_skill(
+                        node_db,
                         skill_id=skill_id,
+                        skill_name=skill_name,
                         user_id=workflow.user_id,
                         require_enabled=True,
                     )
-                else:
-                    skill_name = str((cfg.get("skill_name") or "")).strip()
-                    if skill_name:
-                        skill = await self._get_skill_by_name(
-                            skill_name=skill_name,
-                            user_id=workflow.user_id,
-                            require_enabled=True,
+                    if skill is None:
+                        raise RuntimeError(
+                            "skill node requires config.skill_id or resolvable config.skill_name"
                         )
-                if skill is None:
-                    raise RuntimeError(
-                        "skill node requires config.skill_id or resolvable config.skill_name"
-                    )
-                payload_template = cfg.get("payload_template") or {}
-                payload = _render_template(payload_template, outputs)
-                if not isinstance(payload, dict):
-                    payload = {"value": payload}
-                else:
-                    payload = _strip_blank_skill_params(payload)
-                if skill.name == "patent-report":
-                    payload = _apply_patent_report_input(
-                        payload,
-                        outputs.get("input") or {},
-                        locale=run_locale,
-                    )
-                retry_count = int(cfg.get("retry_count") or 0)
-                timeout_s = int(cfg.get("timeout_seconds") or 0)
-                last_error: Exception | None = None
-                for _attempt in range(retry_count + 1):
-                    try:
-                        if timeout_s > 0:
+                    payload_template = cfg.get("payload_template") or {}
+                    payload = _render_template(payload_template, outputs)
+                    if not isinstance(payload, dict):
+                        payload = {"value": payload}
+                    else:
+                        payload = _strip_blank_skill_params(payload)
+                    if skill.name == "patent-report":
+                        payload = _apply_patent_report_input(
+                            payload,
+                            outputs.get("input") or {},
+                            locale=run_locale,
+                        )
+                    retry_count = int(cfg.get("retry_count") or 0)
+                    timeout_s = int(cfg.get("timeout_seconds") or 0)
+                    last_error: Exception | None = None
+                    for _attempt in range(retry_count + 1):
+                        try:
                             raw = await _execute_skill_for_user(
-                                self.db,
+                                node_db,
                                 workflow.user_id,
                                 skill,
                                 payload,
                                 timeout_s=timeout_s,
                                 tenant_facing=tenant_facing,
                             )
-                        else:
-                            raw = await _execute_skill_for_user(
-                                self.db,
-                                workflow.user_id,
-                                skill,
-                                payload,
-                                tenant_facing=tenant_facing,
-                            )
-                        result = _to_result_dict(raw)
-                        has_error = bool(isinstance(raw, dict) and raw.get("error"))
-                        if has_error:
-                            raise RuntimeError(str(result.get("error")))
-                        record["payload"] = payload
-                        record["result"] = result
-                        record["status"] = "success"
-                        return node_id, record
-                    except Exception as e:
-                        last_error = e
-                raise RuntimeError(str(last_error) if last_error else "skill execution failed")
+                            result = _to_result_dict(raw)
+                            has_error = bool(isinstance(raw, dict) and raw.get("error"))
+                            if has_error:
+                                raise RuntimeError(str(result.get("error")))
+                            record["payload"] = payload
+                            record["result"] = result
+                            record["status"] = "success"
+                            return node_id, record
+                        except Exception as e:
+                            last_error = e
+                    raise RuntimeError(str(last_error) if last_error else "skill execution failed")
             except Exception as e:
                 record["status"] = "failed"
                 record["error"] = str(e)

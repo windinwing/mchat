@@ -21,6 +21,10 @@ export interface ChatSendOptions {
 
 let streamSafetyTimer: ReturnType<typeof setTimeout> | null = null
 
+// Monotonic counter so a stale fetchMessages response (from a conversation the
+// user already switched away from) cannot overwrite the current conversation.
+let _fetchSeq = 0
+
 function scheduleStreamSafetyTimeout(
   conversationId: string,
   shouldStream: boolean,
@@ -31,6 +35,9 @@ function scheduleStreamSafetyTimeout(
     streamSafetyTimer = null
     const s = useChatStore.getState()
     if (!s.isStreaming) return
+    // The user may have switched to a different conversation since this timer
+    // was scheduled; only finalize if we are still on the same conversation.
+    if (s.currentConversation?.id && s.currentConversation.id !== conversationId) return
     const lastUser = [...s.messages].reverse().find((m) => m.role === 'user')
     const lastAssistant = [...s.messages]
       .reverse()
@@ -224,10 +231,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ? {}
         : { messages: [], currentConversation: null }),
     })
+    const mySeq = ++_fetchSeq
     try {
       const resp = await api.get<Conversation & { messages?: Message[] }>(
         `/chat/conversations/${conversationId}`,
       )
+      // A newer fetchMessages may have started while we awaited; discard this
+      // stale response so it cannot overwrite the now-current conversation.
+      if (_fetchSeq !== mySeq) return
       const serverMsgs = dedupeMessages(
         (resp.messages || []).map(normalizeMessageMedia),
       )
@@ -240,6 +251,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         isLoading: false,
       })
     } catch (err: any) {
+      if (_fetchSeq !== mySeq) return
       set({ error: err.message, isLoading: false })
     }
   },
@@ -438,6 +450,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         (resp.messages || []).map(normalizeMessageMedia),
       )
       set((state) => {
+        // If the user has switched to a different conversation since this sync
+        // was scheduled (e.g. the post-send 2s timer), discard the stale data
+        // so it cannot replace the current conversation's messages.
+        const currentId = state.currentConversation?.id
+        if (currentId && currentId !== conversationId) {
+          return state
+        }
         if (!state.isStreaming) {
           return { messages: mergeServerMessagesWithLocal(serverMsgs, state.messages) }
         }

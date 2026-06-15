@@ -33,20 +33,20 @@ export function useChat(conversationId?: string) {
       }
 
       if (data.type === 'chat:stream') {
-        if (!data.conversation_id || data.conversation_id === conversationId) {
+        if (data.conversation_id === conversationId) {
           appendToStream(data.content || '')
         }
         return
       }
 
       if (data.type === 'chat:stream:end') {
-        if (!data.conversation_id || data.conversation_id === conversationId) {
+        if (data.conversation_id === conversationId) {
           const messageId = data.id || data.message_id
           const live = useChatStore.getState().streamingContent
           const content = data.content || live
           finalizeStream({
             id: messageId,
-            conversation_id: data.conversation_id || conversationId,
+            conversation_id: data.conversation_id,
             content,
           })
           if (
@@ -66,11 +66,11 @@ export function useChat(conversationId?: string) {
         const msg = data.message || data
         if (
           msg.role === 'assistant' &&
-          (!msg.conversation_id || msg.conversation_id === conversationId)
+          msg.conversation_id === conversationId
         ) {
           finalizeStream({
             id: msg.id,
-            conversation_id: msg.conversation_id || conversationId,
+            conversation_id: msg.conversation_id,
             content: msg.content,
           })
           if (

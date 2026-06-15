@@ -34,7 +34,11 @@ class ConnectionManager:
 
     async def send_to_conversation(self, conversation_id: str, message: dict[str, Any]) -> None:
         """Send a JSON message to all connections subscribed to a conversation."""
-        connections = self._conversation_connections.get(conversation_id, [])
+        # Snapshot the list: a concurrent disconnect (e.g. from another
+        # send_to_conversation or the route's finally block) can mutate the
+        # underlying list while we await send_json below, which would skip
+        # subscribers or raise "list changed size during iteration".
+        connections = list(self._conversation_connections.get(conversation_id, []))
         stale = []
         for ws in connections:
             try:

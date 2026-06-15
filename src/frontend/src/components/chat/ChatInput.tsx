@@ -61,6 +61,21 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Create the preview object URL once per selectedFile (not on every render)
+  // and revoke the previous one when it changes or the component unmounts,
+  // otherwise each keystroke-triggered re-render leaks a blob URL.
+  const filePreviewUrl = useMemo(
+    () =>
+      selectedFile && selectedFile.type.startsWith('image/')
+        ? URL.createObjectURL(selectedFile)
+        : null,
+    [selectedFile],
+  )
+  useEffect(() => {
+    return () => {
+      if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl)
+    }
+  }, [filePreviewUrl])
   /** 开始录音前的输入框内容，避免预览与最终写入叠加重复 */
   const speechBaseRef = useRef('')
   const wasListeningRef = useRef(false)
@@ -292,10 +307,9 @@ export function ChatInput({
         <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-gray-50 dark:bg-gray-700 rounded-lg">
           {selectedFile.type.startsWith('image/') ? (
             <img
-              src={URL.createObjectURL(selectedFile)}
+              src={filePreviewUrl || undefined}
               alt=""
               className="w-10 h-10 rounded object-cover shrink-0"
-              onLoad={(e) => URL.revokeObjectURL((e.target as HTMLImageElement).src)}
             />
           ) : (
             <Paperclip className="w-4 h-4 text-gray-400 shrink-0" />
