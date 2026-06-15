@@ -460,15 +460,6 @@
     "saving": "保存中…",
     "nothingToSave": "请修改方案或到期时间"
   },
-  "adminOrders": {
-    "title": "订单与收益",
-    "subtitle": "Cloud 门户支付订单与收入汇总",
-    "totalRevenue": "累计收入",
-    "monthRevenue": "本月收入",
-    "paidCount": "已支付订单",
-    "pendingCount": "待支付",
-    "buyer": "用户"
-  },
   "roles": {
     "pageTitle": "角色权限管理"
   },
@@ -1159,10 +1150,6 @@
     "selectAll": "全选",
     "toastBatchDeleted": "已删除 {{count}} 条记录",
     "toastRunDeleted": "运行记录已删除",
-    "batchDelete": "批量删除",
-    "batchDeleteRunConfirm": "确定删除选中的 {{count}} 条运行记录？",
-    "selectAll": "全选",
-    "toastBatchDeleted": "已删除 {{count}} 条记录",
     "toastRunDeleteFailed": "删除运行记录失败",
     "toastRunAlreadyRunning": "该记录正在执行中，请稍后再试",
     "updatedAt": "更新时间",
@@ -1380,7 +1367,19 @@
     "toastLoadRunDetailFailed": "加载运行详情失败",
     "contentPreview": "内容预览",
     "deleteConfirm": "确定删除工作流「{{name}}」？",
-    "graphDialogTitle": "图形编排（Beta）"
+    "graphDialogTitle": "图形编排（Beta）",
+    "sidebarNodes": "节点",
+    "sidebarTemplates": "模板",
+    "sidebarHistory": "历史",
+    "sidebarResults": "结果",
+    "searchNodes": "搜索节点...",
+    "controlNodes": "控制节点",
+    "customSkill": "自定义",
+    "noSkillsFound": "未找到技能",
+    "noTemplates": "暂无模板",
+    "noResults": "暂无结果",
+    "applyTemplate": "应用",
+    "nodeOutputs": "节点输出"
   },
   "workflowCenter": {
     "title": "工作流方案中心",
@@ -2136,8 +2135,8 @@
     "channelSettings": "工作空间设置",
     "welcomeMessageLabel": "欢迎语",
     "manageKnowledge": "知识库与文档",
-    "monthly": "/月",
-    "yearly": "/年",
+    "monthly": "月付",
+    "yearly": "年付",
     "tryFree": "免费试用",
     "trialDays": "{{days}} 天免费试用",
     "noTrial": "无需试用",
@@ -2237,8 +2236,6 @@
     "templateLabel": "方案模板",
     "assistantLabel": "助手",
     "billingPeriod": "计费周期",
-    "monthly": "月付",
-    "yearly": "年付",
     "paymentMethod": "支付方式",
     "tradeNo": "支付流水号",
     "integrationsTitle": "第三方集成配置",

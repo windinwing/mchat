@@ -1437,7 +1437,7 @@ export function WorkflowsPage() {
         bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
       >
         {graphDraft && (
-          <WorkflowGraphEditor value={graphDraft} skills={skills} onSave={saveGraph} />
+          <WorkflowGraphEditor value={graphDraft} skills={skills} onSave={saveGraph} workflowId={selectedWorkflow?.id} />
         )}
       </Dialog>
     </div>

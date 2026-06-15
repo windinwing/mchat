@@ -460,15 +460,6 @@
     "saving": "Saving…",
     "nothingToSave": "Change plan or end dates"
   },
-  "adminOrders": {
-    "title": "Orders & revenue",
-    "subtitle": "Portal checkout orders and revenue summary",
-    "totalRevenue": "Total revenue",
-    "monthRevenue": "This month",
-    "paidCount": "Paid orders",
-    "pendingCount": "Pending",
-    "buyer": "User"
-  },
   "roles": {
     "pageTitle": "Roles & Permissions"
   },
@@ -1377,7 +1368,19 @@
     "toastLoadRunDetailFailed": "Failed to load run detail",
     "contentPreview": "Content preview",
     "deleteConfirm": "Delete workflow \"{{name}}\"?",
-    "graphDialogTitle": "Graph orchestration (Beta)"
+    "graphDialogTitle": "Graph orchestration (Beta)",
+    "sidebarNodes": "Nodes",
+    "sidebarTemplates": "Templates",
+    "sidebarHistory": "History",
+    "sidebarResults": "Results",
+    "searchNodes": "Search nodes...",
+    "controlNodes": "Control",
+    "customSkill": "Custom",
+    "noSkillsFound": "No skills found",
+    "noTemplates": "No templates",
+    "noResults": "No results yet",
+    "applyTemplate": "Apply",
+    "nodeOutputs": "Node Outputs"
   },
   "workflowCenter": {
     "title": "Workflow template hub",
@@ -1739,7 +1742,6 @@
     "wechatAgentHint": "Incoming messages use this agent's model, skills, and knowledge base.",
     "wechatActivePushHint": "Uses active customer-message push (access_token) by default; replies are converted to plain text to avoid passive timeout issues.",
     "webhookUrlLabel": "Server URL (WeChat Official Account console)",
-    "bindWorkflows": "Bind workflows",
     "bindWorkflows": "Bind workflows",
     "bindWorkflowsHint": "Trigger workflows from this channel by message rules.",
     "workflowRulesTitle": "Workflow trigger rules",
@@ -2133,8 +2135,8 @@
     "widgetSettings": "Widget Settings",
     "channelSettings": "Workspace Settings",
     "welcomeMessageLabel": "Welcome message",
-    "monthly": "/mo",
-    "yearly": "/yr",
+    "monthly": "Monthly",
+    "yearly": "Yearly",
     "tryFree": "Try Free",
     "trialDays": "{{days}}-day free trial",
     "noTrial": "Free forever",
@@ -2234,8 +2236,6 @@
     "templateLabel": "Template",
     "assistantLabel": "Assistant",
     "billingPeriod": "Billing period",
-    "monthly": "Monthly",
-    "yearly": "Yearly",
     "paymentMethod": "Payment method",
     "tradeNo": "Transaction ID",
     "integrationsTitle": "Integrations",

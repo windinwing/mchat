@@ -65,6 +65,7 @@ import {
   type GraphContextMenuState,
 } from '@/components/workflow/WorkflowGraphContextMenu'
 import { WorkflowCanvasToolHint } from '@/components/workflow/WorkflowCanvasToolHint'
+import { WorkflowSidebar } from '@/components/workflow/WorkflowSidebar'
 import { useWorkflowGraphHistory } from '@/hooks/useWorkflowGraphHistory'
 
 export type { GraphNodeType }
@@ -114,6 +115,7 @@ interface Props {
   value?: WorkflowGraphValue | null
   skills: WorkflowSkillOption[]
   onSave: (value: WorkflowGraphValue) => void
+  workflowId?: string
 }
 
 function isDarkMode() {
@@ -340,7 +342,7 @@ export function WorkflowGraphEditor(props: Props) {
   )
 }
 
-function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
+function WorkflowGraphEditorInner({ value, skills, onSave, workflowId }: Props) {
   const { t, i18n } = useTranslation()
   const uiLocale = i18n.language || 'zh'
   const { screenToFlowPosition, zoomIn, zoomOut, fitView, getViewport, setViewport } = useReactFlow()
@@ -970,6 +972,18 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
     else await el.requestFullscreen()
   }
 
+  const applyTemplate = (graph: import('@/components/workflow/WorkflowSidebar').WorkflowGraphValue) => {
+    pushHistory()
+    const tplNodes = (graph.nodes || []).map((n) => ({ ...n, type: n.type as GraphNodeType }))
+    const tplEdges = (graph.edges || []).map((e) => ({ ...e }))
+    setNodes(toFlowNodes(tplNodes, skills, uiLocale, t))
+    setEdges(toFlowEdges(tplEdges))
+    setPropsOpen(false)
+    setSelectedNodeId(null)
+    setSelectedEdgeId(null)
+    setTimeout(() => fitView({ padding: 0.2 }), 100)
+  }
+
   const saveGraph = () => {
     onSave({
       version: 1,
@@ -1062,147 +1076,20 @@ function WorkflowGraphEditorInner({ value, skills, onSave }: Props) {
         ) : null}
 
         {paletteOpen ? (
-          <aside className="flex w-56 shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 dark:border-gray-800">
             <div className="flex items-center justify-between border-b border-gray-200 px-2 py-1.5 dark:border-gray-800">
               <span className="text-xs font-medium">{t('workflows.graphNodeLibrary')}</span>
-              <button type="button" title={t('workflows.graphHideLeft')} aria-label={t('workflows.graphHideLeft')} onClick={() => setPaletteOpen(false)} className="rounded p-0.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800">
+              <button type="button" title={t('workflows.graphHideLeft')} aria-label={t('workflows.graphHideLeft')} onClick={() => setPaletteOpen(false)} className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800">
                 <ChevronLeft className="h-4 w-4" />
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-2 space-y-3">
-              <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">{t('workflows.paletteControl')}</p>
-                <div className="flex flex-col gap-1">
-                  {CONTROL_NODE_TYPES.map((nodeType) => (
-                    <div
-                      key={nodeType}
-                      draggable
-                      onDragStart={(e) => beginControlNodeDrag(e, nodeType)}
-                      onClick={() => addControlNode(nodeType)}
-                      title={t('workflows.dragSkillHint')}
-                      className="flex cursor-grab items-start gap-1.5 rounded-md border border-gray-200 px-2 py-1.5 text-left text-xs active:cursor-grabbing hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
-                      style={{ borderLeftWidth: 3, borderLeftColor: NODE_COLORS[nodeType] }}
-                    >
-                      <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-40" />
-                      <span className="truncate">{nodeTypeLabel(nodeType)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {showcaseConfig?.enabled !== false ? (
-              <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                  {t('workflows.palettePatentPresets')}
-                </p>
-                <p className="mb-2 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">
-                  {t('workflows.palettePatentPresetsHint')}
-                </p>
-                {showcaseConfig && !showcaseConfig.ready ? (
-                  <p className="mb-2 text-[10px] leading-relaxed text-amber-600 dark:text-amber-400">
-                    {t('workflows.patentShowcaseNotReady')}
-                  </p>
-                ) : null}
-                <div className="flex flex-col gap-1">
-                  {patentPresets.map((preset) => {
-                    const missing = !skills.some((s) => s.name === preset.skillName)
-                    return (
-                      <div
-                        key={preset.id}
-                        draggable
-                        onDragStart={(e) => beginPresetDrag(e, preset.id)}
-                        title={t('workflows.dragPresetHint')}
-                        className="flex cursor-grab items-start gap-1.5 rounded-md border border-gray-200 px-2 py-1.5 active:cursor-grabbing hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
-                        style={{
-                          borderLeftWidth: 3,
-                          borderLeftColor: NODE_COLORS.skill,
-                        }}
-                      >
-                        <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-40" />
-                        <div className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-medium">
-                            {getPatentPresetTitle(preset, uiLocale)}
-                          </span>
-                          <span className="block truncate text-[10px] text-gray-400">
-                            {getPatentPresetDescription(preset, uiLocale)}
-                          </span>
-                          {missing ? (
-                            <span className="text-[10px] text-amber-600 dark:text-amber-400">⚠</span>
-                          ) : null}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-              ) : null}
-
-              <div>
-                <div className="mb-1 flex items-center justify-between gap-1">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                    {t('workflows.paletteSkills')}
-                  </p>
-                  <Link to="/admin/skills" className="text-[10px] text-primary-600 hover:underline dark:text-primary-400">
-                    {t('workflows.manageSkills')}
-                  </Link>
-                </div>
-                <p className="mb-2 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">
-                  {t('workflows.paletteSkillsHint')}
-                </p>
-                <input
-                  type="search"
-                  value={skillSearch}
-                  onChange={(e) => setSkillSearch(e.target.value)}
-                  placeholder={t('workflows.paletteSkillSearch')}
-                  className="mb-2 w-full rounded border border-gray-200 bg-white px-2 py-1 text-xs dark:border-gray-700 dark:bg-gray-800"
-                />
-                <div
-                  draggable
-                  onDragStart={beginEmptySkillDrag}
-                  className="mb-2 flex cursor-grab items-center gap-1.5 rounded-md border border-dashed border-gray-300 px-2 py-1.5 text-xs text-gray-600 active:cursor-grabbing dark:border-gray-600 dark:text-gray-300"
-                >
-                  <GripVertical className="h-3.5 w-3.5 shrink-0 opacity-50" />
-                  {t('workflows.dragEmptySkill')}
-                </div>
-                {skills.length === 0 ? (
-                  <p className="text-xs text-amber-600 dark:text-amber-400">{t('workflows.paletteNoSkills')}</p>
-                ) : filteredSkills.length === 0 ? (
-                  <p className="text-xs text-gray-500">{t('common.noData')}</p>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {CATEGORY_ORDER.map((cat) => {
-                      const catSkills = filteredSkills.filter((s) => inferSkillCategory(s) === cat)
-                      if (catSkills.length === 0) return null
-                      return (
-                        <div key={cat}>
-                          <p className="mb-1 text-[10px] font-semibold uppercase text-gray-400">
-                            {t(`workflows.skillCategory.${cat}`)}
-                          </p>
-                          <div className="flex flex-col gap-1">
-                            {catSkills.map((skill) => (
-                              <div
-                                key={skill.id}
-                                draggable
-                                onDragStart={(e) => beginSkillDrag(e, skill)}
-                                title={t('workflows.dragSkillHint')}
-                                className="flex cursor-grab items-start gap-1.5 rounded-md border border-gray-200 px-2 py-1.5 active:cursor-grabbing hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
-                                style={{ borderLeftWidth: 3, borderLeftColor: NODE_COLORS.skill }}
-                              >
-                                <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-40" />
-                                <div className="min-w-0 flex-1">
-                                  <span className="block truncate text-xs font-medium">{getSkillDisplayName(skill, uiLocale)}</span>
-                                  <span className="block truncate text-[10px] text-gray-400">{skill.name}</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
+            <WorkflowSidebar
+              skills={skills}
+              locale={uiLocale}
+              workflowId={workflowId}
+              onAddControlNode={(nt) => addControlNode(nt)}
+              onApplyTemplate={(g) => applyTemplate(g)}
+            />
           </aside>
         ) : null}
 
