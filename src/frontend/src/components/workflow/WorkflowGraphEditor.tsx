@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import {
+  ArrowLeft,
   ChevronLeft,
   ChevronRight,
   GripVertical,
@@ -65,7 +66,8 @@ import {
   type GraphContextMenuState,
 } from '@/components/workflow/WorkflowGraphContextMenu'
 import { WorkflowCanvasToolHint } from '@/components/workflow/WorkflowCanvasToolHint'
-import { WorkflowSidebar } from '@/components/workflow/WorkflowSidebar'
+import { WorkflowSidebar, type PresetItem } from '@/components/workflow/WorkflowSidebar'
+import { WorkflowNodeSearch } from '@/components/workflow/WorkflowNodeSearch'
 import { useWorkflowGraphHistory } from '@/hooks/useWorkflowGraphHistory'
 
 export type { GraphNodeType }
@@ -116,6 +118,10 @@ interface Props {
   skills: WorkflowSkillOption[]
   onSave: (value: WorkflowGraphValue) => void
   workflowId?: string
+  workflowName?: string
+  onBack?: () => void
+  headerExtra?: React.ReactNode
+  presets?: PresetItem[]
 }
 
 function isDarkMode() {
@@ -342,7 +348,7 @@ export function WorkflowGraphEditor(props: Props) {
   )
 }
 
-function WorkflowGraphEditorInner({ value, skills, onSave, workflowId }: Props) {
+function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowName, onBack, headerExtra, presets }: Props) {
   const { t, i18n } = useTranslation()
   const uiLocale = i18n.language || 'zh'
   const { screenToFlowPosition, zoomIn, zoomOut, fitView, getViewport, setViewport } = useReactFlow()
@@ -369,6 +375,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId }: Props) 
   const [jsonError, setJsonError] = useState('')
   const [skillSearch, setSkillSearch] = useState('')
   const [contextMenu, setContextMenu] = useState<GraphContextMenuState>(null)
+  const [nodeSearch, setNodeSearch] = useState<{ open: boolean; pos: { x: number; y: number } | null }>({ open: false, pos: null })
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('pointer')
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [showMinimap, setShowMinimap] = useState(true)
@@ -972,10 +979,10 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId }: Props) 
     else await el.requestFullscreen()
   }
 
-  const applyTemplate = (graph: import('@/components/workflow/WorkflowSidebar').WorkflowGraphValue) => {
+  const applyTemplate = (graph: WorkflowGraphValue) => {
     pushHistory()
-    const tplNodes = (graph.nodes || []).map((n) => ({ ...n, type: n.type as GraphNodeType }))
-    const tplEdges = (graph.edges || []).map((e) => ({ ...e }))
+    const tplNodes = (graph.nodes || []).map((n: WorkflowGraphValue['nodes'][number]) => ({ ...n, type: n.type as GraphNodeType }))
+    const tplEdges = (graph.edges || []).map((e: WorkflowGraphValue['edges'][number]) => ({ ...e }))
     setNodes(toFlowNodes(tplNodes, skills, uiLocale, t))
     setEdges(toFlowEdges(tplEdges))
     setPropsOpen(false)
@@ -1053,20 +1060,42 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId }: Props) 
     }
   }
 
+  const handleNodeSearchSelect = (rawPayload: string) => {
+    if (!nodeSearch.pos) return
+    const flowPos = screenToFlowPosition({ x: nodeSearch.pos.x, y: nodeSearch.pos.y })
+    let payload: { kind: string; nodeType?: string; skillId?: string }
+    try { payload = JSON.parse(rawPayload) } catch { return }
+    if (payload.kind === 'control' && payload.nodeType) {
+      addControlNode(payload.nodeType as GraphNodeType, flowPos)
+    } else if (payload.kind === 'skill' && payload.skillId) {
+      const skill = skills.find((s) => s.id === payload.skillId)
+      if (skill) addSkillNodeAt(skill, flowPos)
+    } else if (payload.kind === 'skill-empty') {
+      addEmptySkillNodeAt(flowPos)
+    }
+    setNodeSearch({ open: false, pos: null })
+  }
+
   return (
     <div ref={containerRef} className="flex h-full min-h-0 flex-col bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-2 py-1.5 dark:border-gray-800">
-        <p className="truncate text-xs font-medium text-gray-600 dark:text-gray-300">{t('workflows.graphEditorTitle')}</p>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-2 py-1 dark:border-gray-800">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {onBack && (
+            <button type="button" onClick={onBack} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" title={t('common.back', 'Back')}>
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+          )}
+          <p className="truncate text-xs font-semibold text-gray-700 dark:text-gray-200">{workflowName || t('workflows.graphEditorTitle')}</p>
+        </div>
         <div className="flex items-center gap-1">
-          <IconToolButton title={fullScreen ? t('workflows.graphExitFullscreen') : t('workflows.graphFullscreen')} onClick={toggleFullscreen}>
-            {fullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </IconToolButton>
+          {headerExtra}
           <IconToolButton title={t('workflows.graphDeleteSelected')} onClick={removeSelected} disabled={!selectedNodeId && !selectedEdgeId} className="text-red-600 dark:text-red-400">
             <Trash2 className="h-4 w-4" />
           </IconToolButton>
-          <IconToolButton title={t('workflows.graphSave')} onClick={saveGraph}>
-            <Save className="h-4 w-4" />
-          </IconToolButton>
+          <button type="button" onClick={saveGraph} className="flex items-center gap-1 rounded-md bg-primary-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-primary-700">
+            <Save className="h-3.5 w-3.5" />
+            {t('workflows.graphSave')}
+          </button>
         </div>
       </div>
 
@@ -1086,9 +1115,8 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId }: Props) 
             <WorkflowSidebar
               skills={skills}
               locale={uiLocale}
-              workflowId={workflowId}
               onAddControlNode={(nt) => addControlNode(nt)}
-              onApplyTemplate={(g) => applyTemplate(g)}
+              presets={presets}
             />
           </aside>
         ) : null}
@@ -1237,7 +1265,12 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId }: Props) 
               const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
               setContextMenu({ kind: 'pane', x: e.clientX, y: e.clientY, flowX: position.x, flowY: position.y })
             }}
-            onPaneClick={() => setContextMenu(null)}
+            onDoubleClick={(e) => {
+              // ComfyUI-style: double-click empty canvas → node search popup
+              if (e.target instanceof HTMLElement && e.target.closest('.react-flow__node')) return
+              setNodeSearch({ open: true, pos: { x: e.clientX, y: e.clientY } })
+            }}
+            onPaneClick={() => { setContextMenu(null); setNodeSearch({ open: false, pos: null }) }}
             colorMode={dark ? 'dark' : 'light'}
           >
             <Background gap={20} size={1} />
@@ -1549,6 +1582,16 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId }: Props) 
           </aside>
         ) : null}
       </div>
+
+      {/* ComfyUI-style double-click node search */}
+      <WorkflowNodeSearch
+        open={nodeSearch.open}
+        position={nodeSearch.pos}
+        skills={skills}
+        locale={uiLocale}
+        onSelect={handleNodeSearchSelect}
+        onClose={() => setNodeSearch({ open: false, pos: null })}
+      />
     </div>
   )
 }

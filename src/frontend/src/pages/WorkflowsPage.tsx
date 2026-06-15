@@ -690,9 +690,7 @@ export function WorkflowsPage() {
   const myTemplates = templates.filter((t) => t.builtin === false)
 
   const openGraphEditor = (row: WorkflowItem) => {
-    setSelectedWorkflow(row)
-    setGraphDraft(row.graph_json || { version: 1, nodes: [], edges: [] })
-    setGraphOpen(true)
+    navigate(`${isPortal ? '/portal' : '/admin'}/workflows/${row.id}/graph`)
   }
 
   const saveGraph = async (graph: WorkflowGraphValue) => {

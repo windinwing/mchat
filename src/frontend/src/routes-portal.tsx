@@ -41,6 +41,7 @@ const PortalAccountPage = lazyNamed(
   'PortalAccountPage',
 )
 const WorkflowsPage = lazyNamed(() => import('./pages/WorkflowsPage'), 'WorkflowsPage')
+const WorkflowGraphPage = lazyNamed(() => import('./pages/WorkflowGraphPage'), 'WorkflowGraphPage')
 const WorkflowCenterPage = lazyNamed(
   () => import('./pages/WorkflowCenterPage'),
   'WorkflowCenterPage',
@@ -121,6 +122,10 @@ export function PortalRoutes() {
       <Route
         path="/portal/workflows"
         element={<UserLayout><PageSuspense><WorkflowsPage /></PageSuspense></UserLayout>}
+      />
+      <Route
+        path="/portal/workflows/:workflowId/graph"
+        element={<PageSuspense><WorkflowGraphPage /></PageSuspense>}
       />
       <Route
         path="/portal/workflow-center"
