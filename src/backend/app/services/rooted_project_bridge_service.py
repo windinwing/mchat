@@ -17,6 +17,7 @@ import uuid
 
 from fastapi import HTTPException
 
+from app.data.devbridge_templates import DEVBRIDGE_TEMPLATES
 from app.schemas.gamecenter_bridge import (
     GamecenterFileEntry,
     GamecenterFileListResponse,
@@ -971,42 +972,7 @@ class RootedProjectBridgeService:
 
     # ── create project ──
 
-    _TEMPLATES: dict[str, dict] = {
-        "cocos-simple-game": {
-            "files": {
-                "package.json": '{"name":"game","version":"1.0.0","creator":{"version":"3.8.8"},"description":"Cocos Creator game"}\n',
-                "project.json": '{"engine":"cocos2d-js","version":"3.8.8","modules":["2d","ui","animation","audio"],"hasPreloadScript":true,"useWebGPU":false}\n',
-                "tsconfig.json": '{"compilerOptions":{"target":"ES2015","module":"ES2015","strict":true,"types":["cc"]},"include":["assets/**/*.ts"]}\n',
-                "assets/scripts/Game.ts": 'import { _decorator, Component, Node, director } from \'cc\';\nconst { ccclass, property } = _decorator;\n\n@ccclass(\'Game\')\nexport class Game extends Component {\n  @property(Node) uiRoot: Node | null = null;\n\n  onLoad() {\n    console.log(\'Game started\');\n  }\n\n  start() {\n    // TODO: init game logic\n  }\n\n  update(dt: number) {\n    // TODO: game loop\n  }\n}\n',
-                "assets/scripts/UIController.ts": 'import { _decorator, Component, Label } from \'cc\';\nconst { ccclass, property } = _decorator;\n\n@ccclass(\'UIController\')\nexport class UIController extends Component {\n  @property(Label) scoreLabel: Label | null = null;\n  @property(Label) titleLabel: Label | null = null;\n\n  onLoad() {\n    if (this.titleLabel) this.titleLabel.string = \'My Game\';\n    if (this.scoreLabel) this.scoreLabel.string = \'Score: 0\';\n  }\n\n  setScore(score: number) {\n    if (this.scoreLabel) this.scoreLabel.string = `Score: ${score}`;\n  }\n}\n',
-            },
-            "description": "Cocos Creator simple game with Canvas, Game.ts, UIController.ts",
-        },
-        "cocos-empty": {
-            "files": {
-                "package.json": '{"name":"game","version":"1.0.0","creator":{"version":"3.8.8"}}\n',
-                "project.json": '{"engine":"cocos2d-js","version":"3.8.8","modules":["2d","ui"],"useWebGPU":false}\n',
-                "tsconfig.json": '{"compilerOptions":{"target":"ES2015","module":"ES2015","strict":true,"types":["cc"]},"include":["assets/**/*.ts"]}\n',
-            },
-            "description": "Minimal Cocos Creator project with no scripts or scenes",
-        },
-        "web-frontend": {
-            "files": {
-                "index.html": '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>My App</title>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <div id="app"></div>\n  <script src="main.js"></script>\n</body>\n</html>\n',
-                "style.css": "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }\nbody { font-family: system-ui, sans-serif; min-height: 100vh; }\n",
-                "main.js": "'use strict';\n\ndocument.addEventListener(\'DOMContentLoaded\', () => {\n  console.log(\'App ready\');\n});\n",
-            },
-            "description": "Basic HTML/CSS/JS frontend project",
-        },
-        "node-backend": {
-            "files": {
-                "package.json": '{"name":"my-backend","version":"1.0.0","private":true,"scripts":{"dev":"ts-node src/index.ts","build":"tsc"},"dependencies":{},"devDependencies":{"typescript":"^5.0","ts-node":"^10.0","@types/node":"^20.0"}}\n',
-                "tsconfig.json": '{"compilerOptions":{"target":"ES2020","module":"commonjs","strict":true,"esModuleInterop":true,"outDir":"dist","rootDir":"src"},"include":["src/**/*.ts"]}\n',
-                "src/index.ts": 'import http from \'http\';\n\nconst PORT = process.env.PORT || 3000;\n\nconst server = http.createServer((_req, res) => {\n  res.writeHead(200, { \'Content-Type\': \'application/json\' });\n  res.end(JSON.stringify({ ok: true }));\n});\n\nserver.listen(PORT, () => console.log(`Listening on :${PORT}`));\n',
-            },
-            "description": "Node.js TypeScript backend scaffold",
-        },
-    }
+    _TEMPLATES = DEVBRIDGE_TEMPLATES
 
     def create_project(self, slug: str, template: str, *, provider_key: str | None = None) -> dict:
         slug_safe = _validate_slug(slug)
@@ -1026,28 +992,12 @@ class RootedProjectBridgeService:
             target = project_dir / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             if content is not None:
-                target.write_text(content, encoding="utf-8")
+                # Inject slug into template content
+                rendered = content.replace("{slug}", slug_safe)
+                target.write_text(rendered, encoding="utf-8")
             else:
                 target.touch()
             created.append(rel)
-
-        if template == "cocos-simple-game":
-            scene_path = project_dir / "assets" / "scenes" / "start.scene"
-            scene_path.parent.mkdir(parents=True, exist_ok=True)
-            scene_path.write_text(
-                json.dumps(
-                    [
-                        {"__type__": "cc.SceneAsset", "_name": "start", "_objFlags": 0, "_native": "", "scene": {"__id__": 1}},
-                        {"__type__": "cc.Scene", "_name": "start", "_objFlags": 0, "_children": [], "_active": True, "autoReleaseAssets": False, "_globals": {"__id__": 2}},
-                        {"__type__": "cc.Node", "_name": "Canvas", "_objFlags": 0, "_parent": {"__id__": 1}, "_children": [], "_active": True, "_components": [{"__id__": 3}, {"__id__": 4}], "_prefab": None, "_lpos": {"__type__": "cc.Vec3", "x": 640, "y": 360, "z": 0}, "_lrot": {"__type__": "cc.Quat", "x": 0, "y": 0, "z": 0, "w": 1}, "_lscale": {"__type__": "cc.Vec3", "x": 1, "y": 1, "z": 1}},
-                        {"__type__": "cc.Canvas", "_name": "", "_objFlags": 0, "node": {"__id__": 2}, "_enabled": True, "__prefab": None, "cameraComponent": {"__id__": 5}, "alignCanvasWithScreen": True},
-                        {"__type__": "cc.UITransform", "_name": "", "_objFlags": 0, "node": {"__id__": 2}, "_enabled": True, "__prefab": None, "contentSize": {"__type__": "cc.Size", "width": 1280, "height": 720}, "anchorPoint": {"__type__": "cc.Vec2", "x": 0.5, "y": 0.5}},
-                        {"__type__": "cc.Camera", "_name": "Camera", "_objFlags": 0, "node": {"__id__": 2}, "_enabled": True, "__prefab": None, "projection": 0, "clearFlags": 7, "backgroundColor": {"__type__": "cc.Color", "r": 0, "g": 0, "b": 0, "a": 255}, "depth": -1, "zoomRatio": 1, "visibility": -1},
-                    ],
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
 
         self._auto_allowlist_slug(slug_safe, actual_provider)
 
