@@ -357,7 +357,7 @@ export function ChatInput({
 
       {allowOutboundLinks && linkEditorOpen && (
         <div className="mb-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-3 space-y-2">
-          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto] gap-2 items-center">
+          <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto] gap-2 items-center">
             <input
               type="url"
               value={linkUrl}
@@ -425,7 +425,7 @@ export function ChatInput({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled}
-              className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+              className="p-2.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
               title={t('chat.uploadAttachment')}
             >
               <Paperclip className="w-5 h-5" />
@@ -469,7 +469,7 @@ export function ChatInput({
                   : t('chat.voiceInput')
             }
             className={cn(
-              'p-2 rounded-lg transition-colors disabled:opacity-50 touch-none select-none',
+              'p-2.5 rounded-lg transition-colors disabled:opacity-50 touch-none select-none',
               speech.isListening
                 ? 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 animate-pulse'
                 : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-700',
@@ -497,7 +497,7 @@ export function ChatInput({
               disabled={disabled}
               title={t('chat.inputHistoryHint')}
               className={cn(
-                'block w-full h-10 rounded-xl border border-gray-300 bg-gray-50 px-4 text-sm',
+                'block w-full h-11 rounded-xl border border-gray-300 bg-gray-50 px-4 text-sm',
                 'placeholder:text-gray-400',
                 'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
@@ -518,7 +518,7 @@ export function ChatInput({
               title={t('chat.inputHistoryHint')}
               rows={1}
               className={cn(
-                'block w-full min-h-[42px] h-auto resize-none rounded-xl border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm',
+                'block w-full min-h-[44px] h-auto resize-none rounded-xl border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm',
                 'placeholder:text-gray-400',
                 'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500',
                 'disabled:opacity-50 disabled:cursor-not-allowed',

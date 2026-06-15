@@ -224,7 +224,7 @@ export function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
             {t('users.title')}
@@ -233,7 +233,7 @@ export function UsersPage() {
             {t('users.subtitle')}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button
             variant="secondary"
             leftIcon={<KeyRound className="w-4 h-4" />}
@@ -244,7 +244,6 @@ export function UsersPage() {
           <Button
             leftIcon={<Plus className="w-4 h-4" />}
             onClick={() => setShowCreate((v) => !v)}
-            className="w-[150px]"
           >
             {t('users.createUser')}
           </Button>

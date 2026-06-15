@@ -479,7 +479,7 @@ export function DevBridgePage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-6 xl:grid-cols-12 gap-4">
           <Card className="xl:col-span-2 min-w-0">
             <CardHeader className="pb-2 space-y-2 px-3 py-2">
               <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t('devbridge.projects')}</div>

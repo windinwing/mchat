@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -13,6 +14,8 @@ import {
   Shield,
   Cpu,
   ArrowRight,
+  Menu,
+  X,
 } from 'lucide-react'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 
@@ -20,6 +23,7 @@ const GITHUB_URL = 'https://github.com/windinwing/mchat'
 
 export function HelpPage() {
   const { t } = useTranslation()
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   return (
     <div className="min-h-screen bg-[#fafbfc] dark:bg-gray-950 text-gray-900 dark:text-gray-100">
@@ -44,6 +48,28 @@ export function HelpPage() {
               GitHub
             </a>
           </nav>
+          {/* Mobile hamburger */}
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen((v) => !v)}
+            className="sm:hidden p-2.5 -mr-2 rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+            aria-label="Toggle navigation"
+          >
+            {mobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+          {mobileNavOpen && (
+            <div className="sm:hidden absolute top-16 left-0 right-0 z-40 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 px-4 py-3 space-y-1 shadow-lg">
+              <Link to="/" onClick={() => setMobileNavOpen(false)} className="block py-2 text-sm text-gray-700 dark:text-gray-300 hover:text-primary-600">
+                {t('help.backHome')}
+              </Link>
+              <Link to="/showcase" onClick={() => setMobileNavOpen(false)} className="block py-2 text-sm text-gray-700 dark:text-gray-300 hover:text-primary-600">
+                {t('landing.navShowcase')}
+              </Link>
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="block py-2 text-sm text-gray-700 dark:text-gray-300 hover:text-primary-600">
+                GitHub
+              </a>
+            </div>
+          )}
           <div className="flex items-center gap-3">
             <LanguageSwitcher />
             <Link to="/admin/login" className="text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">

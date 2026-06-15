@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { Menu, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { AppModeSwitch } from '@/components/common/AppModeSwitch'
@@ -42,6 +43,12 @@ export function ChatPage() {
   const chat = useChat(conversationId)
   const [startingNewChat, setStartingNewChat] = useState(false)
   const [groupOptions, setGroupOptions] = useState<GroupOption[]>([])
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+
+  // Close mobile drawer when switching conversations
+  React.useEffect(() => {
+    setMobileSidebarOpen(false)
+  }, [conversationId])
 
   const channelFromUrl =
     searchParams.get('channel') || readChannelIdFromUrl() || undefined
@@ -186,29 +193,83 @@ export function ChatPage() {
   return (
     <div className="h-screen flex bg-gray-50 dark:bg-gray-900">
       {showStudioChat && (
-        <AssistantChatSidebar
-          channelId={channelId}
-          activeConversationId={conversationId}
-          channelName={title}
-          chatBasePath="/chat"
-          scopeType={scopeType}
-          scopeId={scopeId}
-          scopeOptions={[
-            { value: 'personal', label: t('chat.scopePersonal', '个人空间') },
-            ...groupOptions.map((group) => ({
-              value: `group:${group.id}`,
-              label: `${t('chat.scopeGroup', '群组')}: ${group.name}`,
-            })),
-          ]}
-          scopeValue={
-            scopeType === 'group' && scopeId ? `group:${scopeId}` : 'personal'
-          }
-          onScopeChange={handleScopeChange}
-        />
+        <>
+          {/* Desktop: persistent sidebar */}
+          <div className="hidden lg:flex">
+            <AssistantChatSidebar
+              channelId={channelId}
+              activeConversationId={conversationId}
+              channelName={title}
+              chatBasePath="/chat"
+              scopeType={scopeType}
+              scopeId={scopeId}
+              scopeOptions={[
+                { value: 'personal', label: t('chat.scopePersonal', '个人空间') },
+                ...groupOptions.map((group) => ({
+                  value: `group:${group.id}`,
+                  label: `${t('chat.scopeGroup', '群组')}: ${group.name}`,
+                })),
+              ]}
+              scopeValue={
+                scopeType === 'group' && scopeId ? `group:${scopeId}` : 'personal'
+              }
+              onScopeChange={handleScopeChange}
+            />
+          </div>
+
+          {/* Mobile: drawer overlay */}
+          {mobileSidebarOpen && (
+            <div className="lg:hidden fixed inset-0 z-50 flex">
+              <div
+                className="fixed inset-0 bg-black/50"
+                onClick={() => setMobileSidebarOpen(false)}
+              />
+              <div className="relative w-72 max-w-[85vw] h-full shadow-xl">
+                <AssistantChatSidebar
+                  channelId={channelId}
+                  activeConversationId={conversationId}
+                  channelName={title}
+                  chatBasePath="/chat"
+                  scopeType={scopeType}
+                  scopeId={scopeId}
+                  scopeOptions={[
+                    { value: 'personal', label: t('chat.scopePersonal', '个人空间') },
+                    ...groupOptions.map((group) => ({
+                      value: `group:${group.id}`,
+                      label: `${t('chat.scopeGroup', '群组')}: ${group.name}`,
+                    })),
+                  ]}
+                  scopeValue={
+                    scopeType === 'group' && scopeId ? `group:${scopeId}` : 'personal'
+                  }
+                  onScopeChange={handleScopeChange}
+                />
+                <button
+                  type="button"
+                  onClick={() => setMobileSidebarOpen(false)}
+                  className="absolute top-2 right-2 p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-700"
+                  aria-label="Close sidebar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <header className="shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center gap-3">
+          {showStudioChat && (
+            <button
+              type="button"
+              onClick={() => setMobileSidebarOpen(true)}
+              className="lg:hidden p-2.5 -ml-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-700"
+              aria-label="Open chat history"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
           {showModeSwitch && (
             <div className="shrink-0">
               <AppModeSwitch

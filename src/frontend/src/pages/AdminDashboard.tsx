@@ -244,7 +244,7 @@ export function AdminDashboard() {
       {setupStatus && (!setupStatus.ai_ready || !setupStatus.has_assistant) && (
         <SetupGuide status={setupStatus} compact />
       )}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
             {t('dashboard.title')}

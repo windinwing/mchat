@@ -94,7 +94,7 @@ export function AdminLayout({ children }: AdminLayoutProps) {
               onClick={() => setSidebarOpen(true)}
               aria-label="Menu"
               title="Menu"
-              className="lg:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 shrink-0"
+              className="lg:hidden p-2.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 shrink-0"
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -105,24 +105,25 @@ export function AdminLayout({ children }: AdminLayoutProps) {
 
           <div className="flex-1" />
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <LanguageSwitcher className="shrink-0" />
             <ThemeToggle className="shrink-0" />
-            <div className="flex items-center gap-3 px-4 py-1.5 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/50 text-sm text-right">
+            <div className="hidden sm:flex items-center gap-3 px-4 py-1.5 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/50 text-sm text-right">
               <Avatar
                 src={user?.avatar_url || undefined}
                 name={user?.display_name || user?.username || t('common.admin')}
                 size="sm"
               />
-              <p className="font-medium text-gray-900 dark:text-gray-100 leading-tight">
+              <p className="font-medium text-gray-900 dark:text-gray-100 leading-tight max-w-[8rem] truncate">
                 {user?.display_name || user?.username || t('common.admin')}
               </p>
             </div>
             <button
               onClick={logout}
-              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors shrink-0"
             >
-              {t('common.logout')}
+              <span className="hidden sm:inline">{t('common.logout')}</span>
+              <span className="sm:hidden">⏻</span>
             </button>
           </div>
         </header>
