@@ -1601,9 +1601,18 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                               <p className="text-xs text-cyan-700 dark:text-cyan-300 font-medium mb-1">{t('workflows.batchHowTo')}</p>
                               <p className="text-xs text-cyan-600 dark:text-cyan-400">{t('workflows.batchHowToDesc')}</p>
                             </div>
-                            <Input label={t('workflows.batchListPath')} placeholder="input.urls 或 nodes.fetch.result.links" value={String(selectedNodeConfig.list_path || '')} onChange={(e) => updateNodeConfig('list_path', e.target.value)} />
-                            <Input label={t('workflows.batchItemKey')} placeholder="line / url（列表中每项的 key）" value={String(selectedNodeConfig.item_key || '')} onChange={(e) => updateNodeConfig('item_key', e.target.value)} />
-                            <Input label={t('workflows.graphRetryCount')} type="number" value={String(selectedNodeConfig.max_concurrent ?? 3)} onChange={(e) => updateNodeConfig('max_concurrent', toSafeInt(e.target.value, 3))} />
+                            <div>
+                              <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{t('workflows.batchListPath')}</label>
+                              <input placeholder="input.urls 或 nodes.fetch.result.links" value={String(selectedNodeConfig.list_path || '')} onChange={(e) => updateNodeConfig('list_path', e.target.value)} className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{t('workflows.batchItemKey')}</label>
+                              <input placeholder="line / url" value={String(selectedNodeConfig.item_key || '')} onChange={(e) => updateNodeConfig('item_key', e.target.value)} className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{t('workflows.graphMaxConcurrent', '并发数')}</label>
+                              <input type="number" value={String(selectedNodeConfig.max_concurrent ?? 3)} onChange={(e) => updateNodeConfig('max_concurrent', toSafeInt(e.target.value, 3))} className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
                           </div>
                         ) : null}
                         {selectedNodeType === 'skill' ? (
@@ -1642,8 +1651,14 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                               ))}
                             </select>
                             <div className="grid grid-cols-2 gap-2">
-                              <Input label={t('workflows.graphRetryCount')} type="number" value={String(selectedNodeConfig.retry_count ?? 0)} onChange={(e) => updateNodeConfig('retry_count', toSafeInt(e.target.value, 0))} />
-                              <Input label={t('workflows.graphTimeoutSec')} type="number" value={String(selectedNodeConfig.timeout_seconds ?? 0)} onChange={(e) => updateNodeConfig('timeout_seconds', toSafeInt(e.target.value, 0))} />
+                              <div>
+                                <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{t('workflows.graphRetryCount')}</label>
+                                <input type="number" value={String(selectedNodeConfig.retry_count ?? 0)} onChange={(e) => updateNodeConfig('retry_count', toSafeInt(e.target.value, 0))} className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200" />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{t('workflows.graphTimeoutSec')}</label>
+                                <input type="number" value={String(selectedNodeConfig.timeout_seconds ?? 0)} onChange={(e) => updateNodeConfig('timeout_seconds', toSafeInt(e.target.value, 0))} className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200" />
+                              </div>
                             </div>
                             {(() => {
                             const selSkill = skills.find((s) => s.name === String(selectedNodeConfig.skill_name || ''))
@@ -1661,7 +1676,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                         {selectedNodeType === 'condition' ? (
                           <div className="space-y-2">
                             <Input label={t('workflows.graphConditionLeft')} value={String(selectedNodeConfig.left || '')} onChange={(e) => updateNodeConfig('left', e.target.value)} />
-                            <select className="block w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-600 dark:bg-gray-800" value={String(selectedNodeConfig.op || '==')} onChange={(e) => updateNodeConfig('op', e.target.value)}>
+                            <select className="block w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100" value={String(selectedNodeConfig.op || '==')} onChange={(e) => updateNodeConfig('op', e.target.value)}>
                               <option value="==">==</option>
                               <option value="!=">!=</option>
                             </select>
@@ -1697,7 +1712,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                     {selectedEdge ? (
                       <div className="space-y-2">
                         <select
-                          className="block w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-600 dark:bg-gray-800"
+                          className="block w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                           value={typeof selectedEdge.label === 'string' ? selectedEdge.label : ''}
                           onChange={(e) => setEdges((prev) => prev.map((edge) => (edge.id === selectedEdge.id ? { ...edge, label: e.target.value } : edge)))}
                         >
@@ -1709,7 +1724,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                     ) : null}
                   </TabPanel>
                   <TabPanel id="json" activeTab={selectedTab}>
-                    <textarea className="mt-2 h-72 w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-gray-600 dark:bg-gray-800" value={jsonDraft} onChange={(e) => setJsonDraft(e.target.value)} />
+                    <textarea className="mt-2 h-72 w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100" value={jsonDraft} onChange={(e) => setJsonDraft(e.target.value)} />
                     {jsonError ? <p className="text-xs text-red-600">{jsonError}</p> : null}
                     <div className="mt-2 flex justify-end">
                       <Button size="sm" variant="secondary" onClick={applyJsonDraft}>{t('workflows.graphApplyJson')}</Button>
