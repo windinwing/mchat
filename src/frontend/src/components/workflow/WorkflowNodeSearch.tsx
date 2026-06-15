@@ -54,6 +54,7 @@ export function WorkflowNodeSearch({ open, position, skills, locale, onSelect, o
         approval: t('workflows.graphNodeApproval'),
         merge: t('workflows.graphNodeMerge'),
         batch: t('workflows.graphNodeBatch'),
+        group: t('workflows.graphNodeGroup', 'Group'),
         end: t('workflows.graphNodeEnd'),
       }
       return {

@@ -17,6 +17,8 @@ interface Props {
   onSetEdgeCondition: (edgeId: string, condition: string) => void
   onAddControlAt: (nodeType: string, position: { x: number; y: number }) => void
   onAddSkillAt: (skill: WorkflowSkillOption, position: { x: number; y: number }) => void
+  onGroupSelected?: () => void
+  selectedCount?: number
   skills: WorkflowSkillOption[]
 }
 
@@ -29,6 +31,8 @@ export function WorkflowGraphContextMenu({
   onSetEdgeCondition,
   onAddControlAt,
   onAddSkillAt,
+  onGroupSelected,
+  selectedCount,
   skills,
 }: Props) {
   const { t } = useTranslation()
@@ -89,6 +93,14 @@ export function WorkflowGraphContextMenu({
       ) : null}
       {menu.kind === 'pane' ? (
         <>
+          {onGroupSelected && (selectedCount || 0) >= 2 && (
+            <>
+              <button type="button" className={itemClass} onClick={() => { onGroupSelected(); onClose() }}>
+                {t('workflows.ctxGroupSelected', 'Group Selected')} ({selectedCount})
+              </button>
+              <div className="mx-2 my-1 border-t border-gray-100 dark:border-gray-800" />
+            </>
+          )}
           <p className="px-3 py-1 text-[10px] font-semibold uppercase text-gray-400">{t('workflows.ctxAddNode')}</p>
           {(
             [

@@ -9,7 +9,7 @@ export interface WorkflowSkillOption {
   config?: Record<string, unknown> | null
 }
 
-export type GraphNodeType = 'start' | 'skill' | 'condition' | 'end' | 'approval' | 'merge' | 'batch'
+export type GraphNodeType = 'start' | 'skill' | 'condition' | 'end' | 'approval' | 'merge' | 'batch' | 'group'
 
 export const NODE_COLORS: Record<GraphNodeType, string> = {
   start: '#22c55e',
@@ -19,6 +19,7 @@ export const NODE_COLORS: Record<GraphNodeType, string> = {
   approval: '#ef4444',
   merge: '#6366f1',
   batch: '#06b6d4',
+  group: '#64748b',
 }
 
 export const CONTROL_NODE_TYPES: GraphNodeType[] = ['start', 'condition', 'approval', 'merge', 'batch', 'end']

@@ -1098,6 +1098,11 @@ class WorkflowService:
             }
             cfg = node.config or {}
             try:
+                # 'group' nodes are visual-only containers; skip during execution
+                if node.type == "group":
+                    record["result"] = {}
+                    record["status"] = "success"
+                    return node_id, record
                 if node.type == "start":
                     record["result"] = outputs.get("input") or {}
                     record["status"] = "success"

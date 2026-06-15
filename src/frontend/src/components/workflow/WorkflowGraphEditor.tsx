@@ -61,6 +61,7 @@ import api from '@/lib/api'
 import { PayloadMapper } from '@/components/workflow/PayloadMapper'
 import { WorkflowCanvasToolbar, type CanvasTool } from '@/components/workflow/WorkflowCanvasToolbar'
 import { workflowNodeTypes } from '@/components/workflow/WorkflowCanvasNode'
+import { groupNodeTypes, computeGroupBounds } from '@/components/workflow/WorkflowGroupNode'
 import {
   WorkflowGraphContextMenu,
   type GraphContextMenuState,
@@ -220,16 +221,21 @@ function toFlowNodes(
     const batchListPath = node.type === 'batch' ? String(config.list_path || '') : ''
     const batchChildCount = node.type === 'batch' ? (parentIds.get(node.id) || 0) : 0
     const batchChildLabels = node.type === 'batch' ? (parentChildNames.get(node.id) || []) : []
+    const isGroup = node.type === 'group'
+    const groupChildCount = isGroup ? (parentIds.get(node.id) || 0) : 0
+    const groupW = isGroup ? Number(config.width) || 280 : undefined
+    const groupH = isGroup ? Number(config.height) || 160 : undefined
     return {
       id: node.id,
-      type: 'workflowNode',
+      type: isGroup ? 'workflowGroup' : 'workflowNode',
       position: node.position || { x: 100, y: 100 },
-      style: node.parentId ? undefined : (node.type === 'batch' ? { width: 320, height: 240 } : undefined),
-      width: node.type === 'batch' && !node.parentId ? 320 : undefined,
-      height: node.type === 'batch' && !node.parentId ? 240 : undefined,
-      measured: node.type === 'batch' && !node.parentId ? { width: 320, height: 240 } : undefined,
+      style: node.parentId ? undefined : (node.type === 'batch' ? { width: 320, height: 240 } : isGroup ? { width: groupW, height: groupH } : undefined),
+      width: (node.type === 'batch' && !node.parentId) ? 320 : isGroup ? groupW : undefined,
+      height: (node.type === 'batch' && !node.parentId) ? 240 : isGroup ? groupH : undefined,
+      measured: (node.type === 'batch' && !node.parentId) ? { width: 320, height: 240 } : isGroup ? { width: groupW, height: groupH } : undefined,
       parentId: node.parentId || undefined,
       extent: node.parentId ? 'parent' : undefined,
+      hidden: isGroup && config.collapsed ? false : undefined,
       data: {
         label: node.name || node.id,
         nodeType: node.type,
@@ -240,6 +246,7 @@ function toFlowNodes(
         batchListPath,
         batchChildCount,
         batchChildLabels,
+        groupChildCount,
       },
     }
   })
@@ -528,6 +535,9 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
         selectCanvasTool('pointer')
       } else if (e.key === 'h' || e.key === 'H') {
         selectCanvasTool('pan')
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G')) {
+        e.preventDefault()
+        createGroupFromSelected()
       } else if (e.key === '=' || e.key === '+') {
         e.preventDefault()
         zoomIn({ duration: 120 })
@@ -627,6 +637,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
       approval: t('workflows.graphNodeApproval'),
       merge: t('workflows.graphNodeMerge'),
       batch: t('workflows.graphNodeBatch'),
+      group: t('workflows.graphNodeGroup', 'Group'),
       end: t('workflows.graphNodeEnd'),
     }
     const config: Record<string, unknown> =
@@ -800,8 +811,23 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
     pushHistory()
     const target = nodes.find((n) => n.id === nodeId)
     const parentId = target?.parentId || undefined
+    const isGroup = (target?.data as any)?.nodeType === 'group'
     setNodes((prev) => {
-      const filtered = prev.filter((n) => n.id !== nodeId)
+      let filtered = prev.filter((n) => n.id !== nodeId)
+      // When deleting a group, unparent its children (convert to absolute coords)
+      if (isGroup && target) {
+        filtered = filtered.map((n) => {
+          if (n.parentId === nodeId) {
+            return {
+              ...n,
+              parentId: undefined,
+              extent: undefined,
+              position: { x: n.position.x + target.position.x, y: n.position.y + target.position.y },
+            }
+          }
+          return n
+        })
+      }
       return parentId ? recomputeBatchChildrenMeta(filtered, parentId) : filtered
     })
     setEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId))
@@ -828,6 +854,97 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
     setSelectedNodeId(copy.id)
     setPropsOpen(true)
   }
+
+  const createGroupFromSelected = useCallback(() => {
+    const selected = nodes.filter((n) => n.selected && (n.data as any)?.nodeType !== 'group' && !n.parentId)
+    if (selected.length === 0) return
+    pushHistory()
+    const bounds = computeGroupBounds(selected)
+    const groupId = `group_${Date.now()}`
+    const groupNode: Node = {
+      id: groupId,
+      type: 'workflowGroup',
+      position: { x: bounds.x, y: bounds.y },
+      style: { width: bounds.width, height: bounds.height },
+      width: bounds.width,
+      height: bounds.height,
+      measured: { width: bounds.width, height: bounds.height },
+      data: {
+        label: t('workflows.groupDefaultName', 'Group'),
+        nodeType: 'group',
+        config: { color: '#64748b', collapsed: false },
+        groupChildCount: selected.length,
+      },
+    }
+    setNodes((prev) => {
+      let updated = [...prev.filter((n) => !n.selected), groupNode]
+      // Reparent selected nodes into the group
+      updated = updated.map((n) => {
+        if (selected.some((s) => s.id === n.id)) {
+          return {
+            ...n,
+            parentId: groupId,
+            extent: 'parent' as const,
+            position: { x: n.position.x - bounds.x, y: n.position.y - bounds.y },
+            selected: false,
+          }
+        }
+        return n
+      })
+      return updated
+    })
+  }, [nodes, pushHistory, setNodes, t])
+
+  // Listen for group node events (toggle collapse, rename, color change)
+  useEffect(() => {
+    const onToggle = (e: Event) => {
+      const { groupId } = (e as CustomEvent).detail
+      setNodes((prev) => prev.map((n) => {
+        if (n.id !== groupId) return n
+        const cfg = (n.data as any)?.config || {}
+        const collapsed = !cfg.collapsed
+        return {
+          ...n,
+          data: { ...n.data, config: { ...cfg, collapsed } },
+          // Hide/show children
+        }
+      }))
+      // Toggle children visibility
+      setNodes((prev) => {
+        const group = prev.find((n) => n.id === groupId)
+        const collapsed = (group?.data as any)?.config?.collapsed
+        if (collapsed === undefined) return prev
+        return prev.map((n) => {
+          if (n.parentId === groupId) {
+            return { ...n, hidden: collapsed }
+          }
+          return n
+        })
+      })
+    }
+    const onRename = (e: Event) => {
+      const { groupId, label } = (e as CustomEvent).detail
+      setNodes((prev) => prev.map((n) =>
+        n.id === groupId ? { ...n, data: { ...n.data, label } } : n,
+      ))
+    }
+    const onColor = (e: Event) => {
+      const { groupId, color } = (e as CustomEvent).detail
+      setNodes((prev) => prev.map((n) => {
+        if (n.id !== groupId) return n
+        const cfg = (n.data as any)?.config || {}
+        return { ...n, data: { ...n.data, config: { ...cfg, color } } }
+      }))
+    }
+    window.addEventListener('mchat-group-toggle', onToggle)
+    window.addEventListener('mchat-group-rename', onRename)
+    window.addEventListener('mchat-group-color', onColor)
+    return () => {
+      window.removeEventListener('mchat-group-toggle', onToggle)
+      window.removeEventListener('mchat-group-rename', onRename)
+      window.removeEventListener('mchat-group-color', onColor)
+    }
+  }, [setNodes])
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault()
@@ -998,6 +1115,11 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
         const nodeType = ((n.data as any)?.nodeType || 'skill') as GraphNodeType
         const rawConfig = ((n.data as any)?.config || {}) as Record<string, unknown>
         const config = nodeType === 'skill' ? enrichSkillConfig(rawConfig, skills) : rawConfig
+        // Persist group dimensions so they survive save/reload
+        if (nodeType === 'group') {
+          config.width = n.width || (n.style as any)?.width || 280
+          config.height = n.height || (n.style as any)?.height || 160
+        }
         return {
           id: n.id,
           type: nodeType,
@@ -1027,6 +1149,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
       approval: t('workflows.graphNodeApproval'),
       merge: t('workflows.graphNodeMerge'),
       batch: t('workflows.graphNodeBatch'),
+      group: t('workflows.graphNodeGroup', 'Group'),
       end: t('workflows.graphNodeEnd'),
     }
     return map[type]
@@ -1147,7 +1270,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
         >
           <ReactFlow
             className="h-full w-full"
-            nodeTypes={workflowNodeTypes}
+            nodeTypes={{ ...workflowNodeTypes, ...groupNodeTypes }}
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChangeWrapped}
@@ -1318,6 +1441,8 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
           }}
           onAddControlAt={(nodeType, position) => addControlNode(nodeType as GraphNodeType, position)}
           onAddSkillAt={(skill, position) => addSkillNodeAt(skill, position)}
+          onGroupSelected={createGroupFromSelected}
+          selectedCount={nodes.filter((n) => n.selected).length}
           skills={filteredSkills}
         />
 

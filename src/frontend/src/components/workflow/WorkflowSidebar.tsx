@@ -127,6 +127,7 @@ export function WorkflowSidebar({ skills, locale, onAddControlNode, presets }: W
       approval: t('workflows.graphNodeApproval'),
       merge: t('workflows.graphNodeMerge'),
       batch: t('workflows.graphNodeBatch'),
+      group: t('workflows.graphNodeGroup', 'Group'),
       end: t('workflows.graphNodeEnd'),
     }
     return map[nt] || nt
