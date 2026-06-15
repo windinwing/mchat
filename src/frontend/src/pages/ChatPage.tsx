@@ -47,11 +47,6 @@ export function ChatPage() {
     searchParams.get('channel') || readChannelIdFromUrl() || undefined
   const channelFromStore =
     typeof window !== 'undefined' ? readStoredChannelId(user?.role) : undefined
-  const channelId =
-    channelFromUrl ||
-    chat.currentConversation?.customer_id ||
-    channelFromStore ||
-    undefined
   const scopeFromUrl = searchParams.get('scope') || undefined
   const groupFromUrl = searchParams.get('group') || undefined
   const storedScope = readStoredChatScope(user?.role)
@@ -66,12 +61,18 @@ export function ChatPage() {
     chat.currentConversation?.scope_id ||
     storedScope.groupId ||
     undefined
+  const isGroupChat = scopeType === 'group' && Boolean(scopeId)
+  // Group conversations never carry a customer_id. A stale personal channel
+  // lingering in sessionStorage must not leak into the group sidebar query,
+  // otherwise the backend filters out every group conversation (customer_id IS NULL).
+  const channelId = isGroupChat
+    ? undefined
+    : channelFromUrl || chat.currentConversation?.customer_id || channelFromStore || undefined
 
   if (channelId) writeStoredChannelId(user?.role, channelId)
 
   const isPortalUser = user?.role === 'user'
   const hasChannel = Boolean(channelId)
-  const isGroupChat = scopeType === 'group' && Boolean(scopeId)
   const showStudioChat = hasChannel || isGroupChat
   const groupName =
     isGroupChat && scopeId

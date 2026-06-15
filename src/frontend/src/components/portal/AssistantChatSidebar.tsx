@@ -35,7 +35,8 @@ function buildChatUrl(
   scopeId?: string,
 ): string {
   const params = new URLSearchParams()
-  if (channelId) params.set('channel', channelId)
+  // Group conversations have no channel; never append a stale channel param.
+  if (channelId && scopeType !== 'group') params.set('channel', channelId)
   if (scopeType === 'group' && scopeId) {
     params.set('scope', 'group')
     params.set('group', scopeId)
@@ -70,7 +71,9 @@ export function AssistantChatSidebar({
           limit: '200',
           scope_type: scopeType,
           ...(scopeId ? { scope_id: scopeId } : {}),
-          ...(channelId ? { customer_id: channelId } : {}),
+          // Group conversations have customer_id = NULL; sending a stale
+          // channel id here would filter them all out of the sidebar.
+          ...(channelId && scopeType !== 'group' ? { customer_id: channelId } : {}),
         },
       )
       setItems(data.items || [])
