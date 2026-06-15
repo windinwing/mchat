@@ -777,7 +777,11 @@ class ChatService:
                 detail="Group not found",
             )
 
-        ai_config = await self._resolve_platform_ai_config()
+        ai_config: AIConfig | None = None
+        if group.ai_config_id:
+            ai_config = await self.db.get(AIConfig, group.ai_config_id)
+        if ai_config is None:
+            ai_config = await self._resolve_platform_ai_config()
         if ai_config is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -813,6 +817,10 @@ class ChatService:
             )
             existing = result.scalar_one_or_none()
             if existing is not None:
+                if group.ai_config_id and existing.ai_config_id != group.ai_config_id:
+                    existing.ai_config_id = group.ai_config_id
+                    existing.updated_at = datetime.now(timezone.utc)
+                    await self.db.flush()
                 loaded = await self.get_conversation(existing.id, user_id=user_id)
                 if loaded is not None:
                     return loaded

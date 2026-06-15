@@ -21,6 +21,7 @@ interface GroupRow {
   member_count: number
   current_user_role?: string | null
   default_skill_ids?: string[] | null
+  ai_config_id?: string | null
   devbridge_project_allowlists?: Record<string, string[]> | null
 }
 
@@ -81,6 +82,11 @@ interface SkillOption {
   description?: string | null
 }
 
+interface AiConfigOption {
+  id: string
+  name: string
+}
+
 interface ProjectOption {
   slug: string
   name: string
@@ -109,6 +115,8 @@ export function GroupsPage() {
   const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', description: '' })
   const [skillOptions, setSkillOptions] = useState<SkillOption[]>([])
+  const [aiConfigOptions, setAiConfigOptions] = useState<AiConfigOption[]>([])
+  const [selectedAiConfigId, setSelectedAiConfigId] = useState<string>('')
   const [providerOptions, setProviderOptions] = useState<DevBridgeProviderOption[]>([])
   const [selectedProviderKey, setSelectedProviderKey] = useState('')
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
@@ -181,14 +189,17 @@ export function GroupsPage() {
   const openSettings = async (group: GroupRow) => {
     setSettingsDialogGroup(group)
     setSelectedSkillIds(group.default_skill_ids || [])
+    setSelectedAiConfigId(group.ai_config_id || '')
     setAllowlistsByProvider(resolveGroupAllowlists(group))
     setSettingsLoading(true)
     try {
-      const [skills, providers] = await Promise.all([
+      const [skills, providers, aiConfigs] = await Promise.all([
         api.get<SkillOption[]>('/skills'),
         api.get<DevBridgeProviderOption[]>('/devbridge/providers'),
+        api.get<AiConfigOption[]>('/agents/ai-configs'),
       ])
       setSkillOptions(skills || [])
+      setAiConfigOptions(aiConfigs || [])
       const enabledProviders = (providers || []).filter((item) => item.enabled)
       setProviderOptions(enabledProviders)
       const firstProvider = enabledProviders[0]?.key || ''
@@ -254,6 +265,7 @@ export function GroupsPage() {
       const hasAllowlistConfig = Object.keys(allowlistsByProvider).length > 0
       await api.patch(`/groups/${settingsDialogGroup.id}`, {
         default_skill_ids: selectedSkillIds,
+        ai_config_id: selectedAiConfigId || null,
         devbridge_project_allowlists: hasAllowlistConfig ? allowlistsByProvider : null,
       })
       toast(t('groups.settingsSaved'), { type: 'success' })
@@ -414,6 +426,11 @@ export function GroupsPage() {
                           {t('groups.defaultSkillsCount', { count: group.default_skill_ids?.length || 0 })}
                         </span>
                       )}
+                      {group.ai_config_id && (
+                        <span className="text-xs text-cyan-600 dark:text-cyan-400">
+                          {aiConfigOptions.find((c) => c.id === group.ai_config_id)?.name || t('groups.aiModelBound')}
+                        </span>
+                      )}
                       {countAllowlistedProjects(group.devbridge_project_allowlists) > 0 && (
                         <span className="text-xs text-amber-700 dark:text-amber-300">
                           {t('groups.projectAllowlistCount', { count: countAllowlistedProjects(group.devbridge_project_allowlists) })}
@@ -503,6 +520,19 @@ export function GroupsPage() {
                   ))
                 )}
               </div>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">{t('groups.bindAiModel')}</h4>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{t('groups.bindAiModelHint')}</p>
+              <Select
+                value={selectedAiConfigId}
+                options={[
+                  { value: '', label: t('groups.useDefaultModel') },
+                  ...aiConfigOptions.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+                onChange={(e) => setSelectedAiConfigId(e.target.value)}
+              />
             </div>
 
             <div>

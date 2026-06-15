@@ -21,6 +21,7 @@ class GroupResponse(BaseModel):
     description: str | None = None
     owner_user_id: str
     default_skill_ids: list[str] | None = None
+    ai_config_id: str | None = None
     devbridge_project_allowlists: dict[str, list[str]] | None = None
     created_at: datetime
     updated_at: datetime
@@ -33,6 +34,7 @@ class GroupCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     description: str | None = Field(None, max_length=2000)
     default_skill_ids: list[str] | None = None
+    ai_config_id: str | None = None
     devbridge_project_allowlists: dict[str, list[str]] | None = None
 
 
@@ -40,6 +42,7 @@ class GroupUpdateRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=120)
     description: str | None = Field(None, max_length=2000)
     default_skill_ids: list[str] | None = None
+    ai_config_id: str | None = None
     devbridge_project_allowlists: dict[str, list[str]] | None = None
 
 

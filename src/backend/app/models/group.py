@@ -21,6 +21,9 @@ class Group(Base):
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
     default_skill_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    ai_config_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("ai_configs.id"), nullable=True
+    )
     gamecenter_project_allowlist: Mapped[list | None] = mapped_column(JSON, nullable=True)
     devbridge_project_allowlists: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

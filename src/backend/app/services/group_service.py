@@ -46,6 +46,7 @@ def _group_response(group: Group, **extra) -> GroupResponse:
         description=group.description,
         owner_user_id=group.owner_user_id,
         default_skill_ids=group.default_skill_ids,
+        ai_config_id=group.ai_config_id,
         devbridge_project_allowlists=resolve_devbridge_project_allowlists(group),
         created_at=group.created_at,
         updated_at=group.updated_at,
@@ -150,6 +151,7 @@ class GroupService:
             description=(data.description or "").strip() or None,
             owner_user_id=actor_id,
             default_skill_ids=data.default_skill_ids,
+            ai_config_id=data.ai_config_id or None,
             devbridge_project_allowlists=data.devbridge_project_allowlists,
         )
         self.db.add(group)
@@ -171,6 +173,8 @@ class GroupService:
             group.description = (str(fields["description"] or "").strip() or None)
         if "default_skill_ids" in fields:
             group.default_skill_ids = fields["default_skill_ids"]
+        if "ai_config_id" in fields:
+            group.ai_config_id = fields["ai_config_id"] or None
         if "devbridge_project_allowlists" in fields:
             group.devbridge_project_allowlists = fields["devbridge_project_allowlists"]
             group.gamecenter_project_allowlist = None

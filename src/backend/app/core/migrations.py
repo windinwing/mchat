@@ -190,6 +190,10 @@ def apply_schema_patches(conn: Connection) -> list[str]:
             ("chunk_parent_enabled", "BOOLEAN NOT NULL DEFAULT 1" if dialect == "mysql" else "BOOLEAN NOT NULL DEFAULT TRUE"),
             ("indexed_embedding_key", "VARCHAR(255) NULL"),
             ("reindex_status", "VARCHAR(20) NOT NULL DEFAULT 'idle'"),
+            ("retrieval_stop_words", "TEXT NULL"),
+            ("retrieval_query_suffix_chars", "VARCHAR(200) NULL"),
+            ("retrieval_user_dict", "TEXT NULL"),
+            ("retrieval_keyword_backend", "VARCHAR(20) NOT NULL DEFAULT 'local'"),
         ]
         for col_name, col_def in kb_patches:
             if col_name not in cols:
@@ -528,6 +532,14 @@ def apply_schema_patches(conn: Connection) -> list[str]:
                     )
                 )
             applied.append("groups.devbridge_project_allowlists")
+        if "ai_config_id" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE `groups` "
+                    "ADD COLUMN ai_config_id VARCHAR(36) NULL"
+                )
+            )
+            applied.append("groups.ai_config_id")
 
     if "skill_workflow_templates" in inspect(conn).get_table_names():
         cols = _column_names(conn, "skill_workflow_templates")
