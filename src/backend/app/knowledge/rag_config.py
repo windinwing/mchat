@@ -8,8 +8,10 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.knowledge.chunking import ChunkConfig, ChunkStrategy
+from app.knowledge.tokenize import TokenizeConfig
 
 RetrievalMode = Literal["vector", "keyword", "hybrid"]
+KeywordBackend = Literal["local", "elasticsearch"]
 
 
 class EmbeddingConfig(BaseModel):
@@ -56,6 +58,9 @@ class RetrievalConfig(BaseModel):
     query_rewrite_count: int = Field(3, ge=1, le=5)
     # Parent-child retrieval
     parent_enabled: bool = True
+    # Keyword tokenization (per-KB; empty fields use built-in defaults)
+    tokenize: TokenizeConfig = Field(default_factory=TokenizeConfig)
+    keyword_backend: KeywordBackend = "local"
 
 
 class KnowledgeBaseRagSettings(BaseModel):
@@ -81,6 +86,11 @@ class KnowledgeBaseRagSettings(BaseModel):
     rerank_model: str | None = None
     retrieval_query_rewrite_enabled: bool = False
     retrieval_query_rewrite_count: int = 3
+    retrieval_stop_words: str | None = None
+    retrieval_query_suffix_chars: str | None = None
+    retrieval_user_dict: str | None = None
+    retrieval_keyword_backend: str = "local"
+    knowledge_base_id: str | None = None
 
     def chunk_config(self) -> ChunkConfig:
         return ChunkConfig(
@@ -100,6 +110,22 @@ class KnowledgeBaseRagSettings(BaseModel):
             dimension=self.embedding_dimension,
         )
 
+    def _resolved_tokenize_config(self) -> TokenizeConfig:
+        from app.knowledge.tokenizer_files import resolve_tokenizer_texts
+
+        class _KbShim:
+            id = self.knowledge_base_id
+            retrieval_stop_words = self.retrieval_stop_words
+            retrieval_query_suffix_chars = self.retrieval_query_suffix_chars
+            retrieval_user_dict = self.retrieval_user_dict
+
+        stop_words, suffix_chars, user_dict = resolve_tokenizer_texts(_KbShim)
+        return TokenizeConfig.from_kb_fields(
+            stop_words_text=stop_words,
+            query_suffix_chars_text=suffix_chars,
+            user_dict_text=user_dict,
+        )
+
     def retrieval_config(self) -> RetrievalConfig:
         return RetrievalConfig(
             mode=self.retrieval_mode,
@@ -115,6 +141,13 @@ class KnowledgeBaseRagSettings(BaseModel):
             query_rewrite_enabled=self.retrieval_query_rewrite_enabled,
             query_rewrite_count=self.retrieval_query_rewrite_count,
             parent_enabled=self.chunk_parent_enabled,
+            tokenize=self._resolved_tokenize_config(),
+            keyword_backend=(
+                "elasticsearch"
+                if (self.retrieval_keyword_backend or "local").strip().lower()
+                == "elasticsearch"
+                else "local"
+            ),
         )
 
 
@@ -149,4 +182,9 @@ def rag_settings_from_kb(kb: Any | None) -> KnowledgeBaseRagSettings:
         rerank_model=getattr(kb, "rerank_model", None),
         retrieval_query_rewrite_enabled=bool(getattr(kb, "retrieval_query_rewrite_enabled", False)),
         retrieval_query_rewrite_count=int(getattr(kb, "retrieval_query_rewrite_count", None) or 3),
+        retrieval_stop_words=getattr(kb, "retrieval_stop_words", None),
+        retrieval_query_suffix_chars=getattr(kb, "retrieval_query_suffix_chars", None),
+        retrieval_user_dict=getattr(kb, "retrieval_user_dict", None),
+        retrieval_keyword_backend=getattr(kb, "retrieval_keyword_backend", None) or "local",
+        knowledge_base_id=str(getattr(kb, "id", "") or "") or None,
     )

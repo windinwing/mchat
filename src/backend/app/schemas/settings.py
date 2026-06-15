@@ -21,6 +21,8 @@ class AppSettingsResponse(BaseModel):
     milvus_enabled: bool = False
     milvus_host: str = "localhost"
     milvus_port: int = 19530
+    elasticsearch_enabled: bool = False
+    elasticsearch_url: str = ""
     embedding_provider: str = "ollama"
     embedding_model: str = "nomic-embed-text"
     embedding_api_base: str = "http://localhost:11434"
@@ -69,6 +71,8 @@ class AppSettingsUpdate(BaseModel):
     milvus_enabled: bool | None = None
     milvus_host: str | None = None
     milvus_port: int | None = None
+    elasticsearch_enabled: bool | None = None
+    elasticsearch_url: str | None = None
     embedding_provider: str | None = None
     embedding_model: str | None = None
     embedding_api_base: str | None = None

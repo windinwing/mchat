@@ -454,11 +454,288 @@ NOTIFY_PING_TEST_EN: dict[str, Any] = {
     },
 }
 
+WEB_FETCH_ZH: dict[str, Any] = {
+    "id": "web_fetch",
+    "locale": "zh",
+    "name": "网页内容抓取",
+    "description": "输入网站 URL，抓取并展示网页标题、正文等内容，支持代理和正则提取。",
+    "category": "general",
+    "graph_json": {
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": "输入网站 URL",
+                "position": {"x": 40, "y": 120},
+                "config": {
+                    "input_fields": [
+                        {
+                            "key": "url",
+                            "label": "网站 URL",
+                            "placeholder": "https://example.com",
+                            "required": True,
+                        },
+                        {
+                            "key": "proxy",
+                            "label": "使用代理",
+                            "placeholder": "true / false",
+                            "required": False,
+                        },
+                        {
+                            "key": "format",
+                            "label": "输出格式",
+                            "placeholder": "markdown / text / json / html",
+                            "required": False,
+                        },
+                    ],
+                },
+            },
+            {
+                "id": "fetch",
+                "type": "skill",
+                "name": "抓取网页",
+                "position": {"x": 320, "y": 120},
+                "config": {
+                    "skill_name": "web-fetch",
+                    "workflow_role": "search",
+                    "payload_template": {
+                        "command": "fetch",
+                        "url": "${input.url}",
+                        "proxy": "${input.proxy}",
+                        "format": "${input.format}",
+                    },
+                },
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "完成",
+                "position": {"x": 560, "y": 120},
+                "config": {},
+            },
+        ],
+        "edges": [
+            {"id": "e_start_fetch", "source": "start", "target": "fetch"},
+            {"id": "e_fetch_end", "source": "fetch", "target": "end"},
+        ],
+    },
+}
+
+WEB_FETCH_EN: dict[str, Any] = {
+    "id": "web_fetch_en",
+    "locale": "en",
+    "name": "Web Page Fetcher",
+    "description": "Enter a URL to fetch and display page content, with proxy and regex support.",
+    "category": "general",
+    "graph_json": {
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": "Enter URL",
+                "position": {"x": 40, "y": 120},
+                "config": {
+                    "input_fields": [
+                        {
+                            "key": "url",
+                            "label": "Website URL",
+                            "placeholder": "https://example.com",
+                            "required": True,
+                        },
+                        {
+                            "key": "use_proxy",
+                            "label": "Use proxy",
+                            "placeholder": "true / false",
+                            "required": False,
+                        },
+                        {
+                            "key": "format",
+                            "label": "Output format",
+                            "placeholder": "markdown / text / json / html",
+                            "required": False,
+                        },
+                    ],
+                },
+            },
+            {
+                "id": "fetch",
+                "type": "skill",
+                "name": "Fetch page",
+                "position": {"x": 320, "y": 120},
+                "config": {
+                    "skill_name": "web-fetch",
+                    "workflow_role": "search",
+                    "payload_template": {
+                        "command": "fetch",
+                        "url": "${input.url}",
+                        "proxy": "${input.proxy}",
+                        "format": "${input.format}",
+                    },
+                },
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "Done",
+                "position": {"x": 560, "y": 120},
+                "config": {},
+            },
+        ],
+        "edges": [
+            {"id": "e_start_fetch", "source": "start", "target": "fetch"},
+            {"id": "e_fetch_end", "source": "fetch", "target": "end"},
+        ],
+    },
+}
+
+BATCH_URL_FETCH: dict[str, Any] = {
+    "id": "batch_url_fetch",
+    "locale": "zh",
+    "name": "批量网页抓取",
+    "description": "输入多个 URL（每行一个），批量抓取每个网页的标题和正文。",
+    "category": "general",
+    "graph_json": {
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": "输入 URL 列表",
+                "position": {"x": 40, "y": 120},
+                "config": {
+                    "input_fields": [
+                        {
+                            "key": "urls",
+                            "label": "网站 URL（每行一个）",
+                            "placeholder": "https://example.com\nhttps://httpbin.org/get",
+                            "required": True,
+                            "type": "multiline",
+                        },
+                        {
+                            "key": "proxy",
+                            "label": "使用代理",
+                            "placeholder": "true / false（留空=否）",
+                            "required": False,
+                        },
+                    ],
+                },
+            },
+            {
+                "id": "batch",
+                "type": "batch",
+                "name": "逐个抓取",
+                "position": {"x": 360, "y": 120},
+                "config": {
+                    "list_path": "input.urls",
+                    "max_concurrent": 3,
+                },
+            },
+            {
+                "id": "fetch_child",
+                "type": "skill",
+                "name": "web-fetch",
+                "parentId": "batch",
+                "position": {"x": 20, "y": 70},
+                "config": {
+                    "skill_name": "web-fetch",
+                    "payload_template": {
+                        "command": "fetch",
+                        "url": "${item.line}",
+                        "format": "text",
+                        "max_length": 5000,
+                    },
+                },
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "完成",
+                "position": {"x": 640, "y": 120},
+                "config": {},
+            },
+        ],
+        "edges": [
+            {"id": "e_start_batch", "source": "start", "target": "batch"},
+            {"id": "e_batch_end", "source": "batch", "target": "end"},
+        ],
+    },
+}
+
+BATCH_URL_FETCH_EN: dict[str, Any] = {
+    "id": "batch_url_fetch_en",
+    "locale": "en",
+    "name": "Batch URL Fetcher",
+    "description": "Enter multiple URLs (one per line) to batch-fetch each page's title and content.",
+    "category": "general",
+    "graph_json": {
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": "Enter URL list",
+                "position": {"x": 40, "y": 120},
+                "config": {
+                    "input_fields": [
+                        {
+                            "key": "urls",
+                            "label": "Website URLs (one per line)",
+                            "placeholder": "https://example.com\nhttps://httpbin.org/get",
+                            "required": True,
+                        },
+                        {
+                            "key": "proxy",
+                            "label": "Use proxy",
+                            "placeholder": "true / false (blank=no)",
+                            "required": False,
+                        },
+                    ],
+                },
+            },
+            {
+                "id": "batch",
+                "type": "batch",
+                "name": "Fetch each",
+                "position": {"x": 360, "y": 120},
+                "config": {
+                    "list_path": "input.urls",
+                    "item_key": "line",
+                    "skill_name": "web-fetch",
+                    "max_concurrent": 3,
+                    "payload_template": {
+                        "command": "fetch",
+                        "url": "${item.line}",
+                        "format": "text",
+                        "max_length": 5000,
+                    },
+                },
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "Done",
+                "position": {"x": 640, "y": 120},
+                "config": {},
+            },
+        ],
+        "edges": [
+            {"id": "e_start_batch", "source": "start", "target": "batch"},
+            {"id": "e_batch_end", "source": "batch", "target": "end"},
+        ],
+    },
+}
+
 _BUILTIN_TEMPLATES: dict[str, dict[str, Any]] = {
     PATENT_REPORT_MULTIDIM["id"]: PATENT_REPORT_MULTIDIM,
     PATENT_REPORT_MULTIDIM_EN["id"]: PATENT_REPORT_MULTIDIM_EN,
     NOTIFY_PING_TEST["id"]: NOTIFY_PING_TEST,
     NOTIFY_PING_TEST_EN["id"]: NOTIFY_PING_TEST_EN,
+    WEB_FETCH_ZH["id"]: WEB_FETCH_ZH,
+    WEB_FETCH_EN["id"]: WEB_FETCH_EN,
+    BATCH_URL_FETCH["id"]: BATCH_URL_FETCH,
+    BATCH_URL_FETCH_EN["id"]: BATCH_URL_FETCH_EN,
 }
 
 

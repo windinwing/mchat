@@ -75,7 +75,9 @@ export function ChatInput({
       noSpeechDetected: t('speech.noSpeechDetected'),
       speechFailed: t('speech.speechFailed'),
       micDenied: t('speech.micDenied'),
+      micNotAllowed: t('speech.micNotAllowed'),
       unavailable: t('speech.unavailable'),
+      wechatUnsupported: t('speech.wechatUnsupported'),
     }),
     [t, i18n.language],
   )
@@ -118,6 +120,22 @@ export function ChatInput({
     textareaRef.current.style.height = 'auto'
     textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
   }, [content, speech.interimText, singleLine])
+
+  const scrollInputIntoView = useCallback(() => {
+    const el = singleLine ? inputRef.current : textareaRef.current
+    if (!el) return
+    window.setTimeout(() => {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      if (window.visualViewport) {
+        const vv = window.visualViewport
+        const rect = el.getBoundingClientRect()
+        const bottomGap = vv.height - (rect.bottom - vv.offsetTop)
+        if (bottomGap < 12) {
+          window.scrollBy({ top: 12 - bottomGap, behavior: 'smooth' })
+        }
+      }
+    }, 280)
+  }, [singleLine])
 
   const handleSubmit = () => {
     const trimmed = content.trim()
@@ -413,11 +431,31 @@ export function ChatInput({
         {speechEnabled && (
           <button
             type="button"
-            onClick={speech.toggleListening}
+            onClick={() => {
+              if (speech.holdToTalk) return
+              speech.toggleListening()
+            }}
+            onPointerDown={(e) => {
+              if (!speech.holdToTalk || disabled) return
+              e.preventDefault()
+              speech.startListening()
+            }}
+            onPointerUp={() => {
+              if (speech.holdToTalk) speech.stopListening()
+            }}
+            onPointerCancel={() => {
+              if (speech.holdToTalk) speech.stopListening()
+            }}
             disabled={disabled}
-            title={speech.isListening ? t('chat.stopVoice') : t('chat.voiceInput')}
+            title={
+              speech.holdToTalk
+                ? t('chat.voiceHoldHint')
+                : speech.isListening
+                  ? t('chat.stopVoice')
+                  : t('chat.voiceInput')
+            }
             className={cn(
-              'p-2 rounded-lg transition-colors disabled:opacity-50',
+              'p-2 rounded-lg transition-colors disabled:opacity-50 touch-none select-none',
               speech.isListening
                 ? 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 animate-pulse'
                 : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-700',
@@ -440,6 +478,7 @@ export function ChatInput({
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
+              onFocus={scrollInputIntoView}
               placeholder={displayPlaceholder}
               disabled={disabled}
               title={t('chat.inputHistoryHint')}
@@ -459,6 +498,7 @@ export function ChatInput({
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
+              onFocus={scrollInputIntoView}
               placeholder={displayPlaceholder}
               disabled={disabled}
               title={t('chat.inputHistoryHint')}

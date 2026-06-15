@@ -15,6 +15,7 @@ interface Props {
   upstreamNodeIds: string[]
   payload: Record<string, unknown>
   onChange: (next: Record<string, unknown>) => void
+  workflowFields?: Record<string, any>
 }
 
 function setNestedValue(obj: Record<string, unknown>, path: string, value: string) {
@@ -118,7 +119,7 @@ function ParamField({
   )
 }
 
-export function PayloadMapper({ skillName = '', fields, upstreamNodeIds, payload, onChange }: Props) {
+export function PayloadMapper({ skillName = '', fields, upstreamNodeIds, payload, onChange, workflowFields }: Props) {
   const { t } = useTranslation()
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
@@ -136,8 +137,8 @@ export function PayloadMapper({ skillName = '', fields, upstreamNodeIds, payload
   }, [fields, upstreamNodeIds])
 
   const paramFields = useMemo(
-    () => resolveSkillParamFields(skillName, payload, t),
-    [skillName, payload, t],
+    () => resolveSkillParamFields(skillName, payload, t, workflowFields),
+    [skillName, payload, t, workflowFields],
   )
 
   const extraKeys = useMemo(() => {

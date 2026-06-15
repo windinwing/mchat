@@ -2,14 +2,16 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <title>MChat Widget</title>
     <style>
       html, body {
         width: 100%;
         height: 100%;
+        height: 100dvh;
         margin: 0;
         overflow: hidden;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
       }
       #mchat-widget-root {
         width: 100%;

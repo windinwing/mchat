@@ -60,6 +60,7 @@ export function PortalAiConfigManager({ onUpdated }: { onUpdated?: () => void })
       { value: 'ollama', label: t('agents.providerOllama') },
       { value: 'groq', label: t('agents.providerGroqFast') },
       { value: 'zhipu', label: t('agents.providerZhipu') },
+      { value: 'zhipu-coding', label: t('agents.providerZhipuCoding') },
       { value: 'moonshot', label: t('agents.providerMoonshot') },
       { value: 'siliconflow', label: t('agents.providerSiliconflow') },
       { value: 'together', label: t('agents.providerTogether') },

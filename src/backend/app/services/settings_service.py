@@ -13,6 +13,8 @@ from app.utils.upload_paths import resolve_upload_root
 from app.utils.secret_mask import is_secret_mask, mask_secret
 from app.knowledge.milvus_client import milvus_client
 from app.knowledge.milvus_runtime import apply_milvus_runtime
+from app.knowledge.es_client import es_knowledge_client
+from app.knowledge.es_runtime import apply_elasticsearch_runtime
 from app.skill.ops_policy import (
     SCOPE_SERVER_OPS,
     is_server_ops_skill,
@@ -61,6 +63,12 @@ class SettingsService:
         milvus_enabled = get_val("milvus_enabled", DEFAULT_SETTINGS.milvus_enabled)
         milvus_host = get_val("milvus_host", DEFAULT_SETTINGS.milvus_host)
         milvus_port = get_val("milvus_port", DEFAULT_SETTINGS.milvus_port)
+        elasticsearch_enabled = get_val(
+            "elasticsearch_enabled", DEFAULT_SETTINGS.elasticsearch_enabled
+        )
+        elasticsearch_url = str(
+            get_val("elasticsearch_url", DEFAULT_SETTINGS.elasticsearch_url) or ""
+        ).strip()
         storage_backend = get_val("storage_backend", DEFAULT_SETTINGS.storage_backend)
         upload_default = (
             os.environ.get("UPLOAD_DIR", "").strip()
@@ -132,9 +140,15 @@ class SettingsService:
             host=milvus_host,
             port=milvus_port,
         )
+        apply_elasticsearch_runtime(
+            enabled=elasticsearch_enabled,
+            url=elasticsearch_url,
+        )
         settings.milvus_enabled = milvus_enabled
         settings.milvus_host = milvus_host
         settings.milvus_port = milvus_port
+        settings.elasticsearch_enabled = elasticsearch_enabled
+        settings.elasticsearch_url = elasticsearch_url
         settings.embedding_provider = embedding_provider
         settings.embedding_model = embedding_model
         settings.embedding_api_base = embedding_api_base
@@ -221,6 +235,8 @@ class SettingsService:
             milvus_enabled=milvus_enabled,
             milvus_host=milvus_host,
             milvus_port=milvus_port,
+            elasticsearch_enabled=elasticsearch_enabled,
+            elasticsearch_url=elasticsearch_url,
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
             embedding_api_base=embedding_api_base,
@@ -304,6 +320,8 @@ class SettingsService:
             await milvus_client.reconnect()
             if milvus_client._connected:
                 await milvus_client.create_collection()
+        if any(k.startswith("elasticsearch_") for k in updates):
+            await es_knowledge_client.reconnect()
         return result
 
     async def test_milvus_connection(
@@ -328,6 +346,27 @@ class SettingsService:
                 port=saved.port,
             )
             await milvus_client.reconnect()
+
+    async def test_elasticsearch_connection(
+        self, *, enabled: bool, url: str
+    ) -> dict:
+        """Test Elasticsearch connectivity with given settings (does not persist)."""
+        from app.knowledge import es_runtime
+
+        saved = es_runtime.get_elasticsearch_runtime()
+        apply_elasticsearch_runtime(enabled=enabled, url=url)
+        try:
+            ok = await es_knowledge_client.reconnect()
+            if ok:
+                return {"ok": True, "message": f"已连接 Elasticsearch {url.strip()}"}
+            if not enabled:
+                return {"ok": True, "message": "Elasticsearch 已禁用（使用内置 BM25）"}
+            if not (url or "").strip():
+                return {"ok": False, "message": "请填写 Elasticsearch URL"}
+            return {"ok": False, "message": f"无法连接 Elasticsearch {url.strip()}"}
+        finally:
+            apply_elasticsearch_runtime(enabled=saved.enabled, url=saved.url)
+            await es_knowledge_client.reconnect()
 
     async def get_log_tail(
         self,

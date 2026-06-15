@@ -16,6 +16,7 @@ from app.core.database import close_db, init_db
 from app.core.event_bus import event_bus
 from app.exceptions import MChatError
 from app.knowledge.milvus_client import milvus_client
+from app.knowledge.es_client import es_knowledge_client
 from app.utils.logger import setup_logger
 from app.utils.upload_paths import resolve_upload_root
 
@@ -89,6 +90,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await milvus_client.connect()
     if milvus_client._connected:
         await milvus_client.create_collection()
+    await es_knowledge_client.connect()
 
     logger.info("mchat backend server started successfully")
     yield
@@ -97,6 +99,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Shutting down mchat backend server...")
     await close_db()
     await milvus_client.close()
+    await es_knowledge_client.close()
     event_bus.clear()
     logger.info("mchat backend server stopped")
 

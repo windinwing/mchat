@@ -10,6 +10,7 @@ import {
   CheckCircle,
   AlertCircle,
   Settings2,
+  Pencil,
 } from 'lucide-react'
 import api from '@/lib/api'
 import {
@@ -23,6 +24,7 @@ import {
   type ChunkStrategy,
   type KnowledgeBase,
   type KnowledgeBaseRagSettings,
+  type KeywordBackend,
   type KnowledgeDocument,
   type RetrievalMode,
   type RerankProvider,
@@ -37,6 +39,11 @@ import { toast } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
 import { formatDate } from '@/lib/utils'
 import { Select } from '@/components/ui/Select'
+import { Tabs, TabPanel } from '@/components/ui/Tabs'
+import {
+  TokenizerFileEditor,
+  type TokenizerFileTarget,
+} from '@/components/admin/TokenizerFileEditor'
 
 interface GroupOption {
   id: string
@@ -51,7 +58,7 @@ const ragSelect =
   'dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:color-scheme-dark'
 const ragHint = 'text-[11px] leading-snug text-gray-500 dark:text-gray-400'
 const ragSectionTitle = 'text-xs font-semibold text-gray-700 dark:text-gray-200'
-const ragSection = 'border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2'
+const ragSection = 'border-t border-gray-200 dark:border-gray-700 pt-2 space-y-1.5'
 const ragInputCompact =
   '[&_label]:text-xs [&_label]:mb-0.5 [&_label]:text-gray-600 dark:[&_label]:text-gray-300 [&_input]:h-8 [&_input]:py-1.5 [&_input]:text-sm'
 const milvusInput =
@@ -68,6 +75,14 @@ export function KnowledgeManager() {
   const [milvusPort, setMilvusPort] = useState('19530')
   const [milvusSaving, setMilvusSaving] = useState(false)
   const [milvusTesting, setMilvusTesting] = useState(false)
+  const [esEnabled, setEsEnabled] = useState(false)
+  const [esUrl, setEsUrl] = useState('http://localhost:9200')
+  const [esSaving, setEsSaving] = useState(false)
+  const [esTesting, setEsTesting] = useState(false)
+  const [tokenizerFiles, setTokenizerFiles] = useState<
+    Array<{ key: string; filename: string; line_count: number }>
+  >([])
+  const [tokenizerEditor, setTokenizerEditor] = useState<TokenizerFileTarget | null>(null)
   const [globalEmbedProvider, setGlobalEmbedProvider] = useState('ollama')
   const [globalEmbedModel, setGlobalEmbedModel] = useState('nomic-embed-text')
   const [globalEmbedApiBase, setGlobalEmbedApiBase] = useState('http://localhost:11434')
@@ -82,6 +97,9 @@ export function KnowledgeManager() {
   const [kbDesc, setKbDesc] = useState('')
   const [search, setSearch] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [platformTab, setPlatformTab] = useState<'connections' | 'embedding' | 'tokenizer'>(
+    'connections',
+  )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ragSettings, setRagSettings] = useState<KnowledgeBaseRagSettings>(defaultRag)
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -120,6 +138,7 @@ export function KnowledgeManager() {
   useEffect(() => {
     loadKnowledgeBases()
     loadPlatformKnowledgeSettings()
+    loadTokenizerFiles()
     loadEmbeddingModels()
     api.get<GroupOption[]>('/groups/mine').then(setGroups).catch(() => setGroups([]))
   }, [])
@@ -228,6 +247,7 @@ export function KnowledgeManager() {
           retrievalBm25B: meta.retrievalBm25B,
           retrievalQueryRewriteEnabled: meta.retrievalQueryRewriteEnabled,
           retrievalQueryRewriteCount: meta.retrievalQueryRewriteCount,
+          retrievalKeywordBackend: meta.retrievalKeywordBackend,
         })
       }
     }
@@ -239,6 +259,8 @@ export function KnowledgeManager() {
       setMilvusEnabled(Boolean(data.milvus_enabled))
       setMilvusHost(String(data.milvus_host ?? 'localhost'))
       setMilvusPort(String(data.milvus_port ?? 19530))
+      setEsEnabled(Boolean(data.elasticsearch_enabled))
+      setEsUrl(String(data.elasticsearch_url ?? 'http://localhost:9200'))
       setGlobalEmbedProvider(String(data.embedding_provider ?? 'ollama'))
       setGlobalEmbedModel(String(data.embedding_model ?? 'nomic-embed-text'))
       setGlobalEmbedApiBase(String(data.embedding_api_base ?? 'http://localhost:11434'))
@@ -247,6 +269,46 @@ export function KnowledgeManager() {
     } catch (err) {
       console.error('Failed to load platform knowledge settings:', err)
     }
+  }
+
+  const loadTokenizerFiles = async () => {
+    try {
+      const data = await api.get<Array<{ key: string; filename: string; line_count: number }>>(
+        '/settings/tokenizer',
+      )
+      setTokenizerFiles(data)
+    } catch (err) {
+      console.error('Failed to load tokenizer files:', err)
+    }
+  }
+
+  const openGlobalTokenizerEditor = (key: 'stop_words' | 'suffix_chars') => {
+    const meta = tokenizerFiles.find((f) => f.key === key)
+    setTokenizerEditor({
+      scope: 'global',
+      key,
+      title:
+        key === 'stop_words'
+          ? t('knowledge.tokenizerStopWords')
+          : t('knowledge.tokenizerSuffixChars'),
+      hint:
+        key === 'stop_words'
+          ? t('knowledge.tokenizerStopWordsHint')
+          : t('knowledge.tokenizerSuffixCharsHint'),
+      filename: meta?.filename ?? `${key}.txt`,
+    })
+  }
+
+  const openKbUserDictEditor = () => {
+    if (!selectedKB) return
+    setTokenizerEditor({
+      scope: 'kb',
+      key: 'user_dict',
+      knowledgeBaseId: selectedKB,
+      title: t('knowledge.tokenizerUserDict'),
+      hint: t('knowledge.tokenizerUserDictHint'),
+      filename: `knowledge/${selectedKB}/tokenizer/user_dict.txt`,
+    })
   }
 
   const saveGlobalEmbeddingSettings = async () => {
@@ -305,6 +367,41 @@ export function KnowledgeManager() {
       toast(t('knowledge.toastConnectionTestFailed'), { type: 'error', message })
     } finally {
       setMilvusTesting(false)
+    }
+  }
+
+  const saveEsSettings = async () => {
+    setEsSaving(true)
+    try {
+      await api.put('/settings', {
+        elasticsearch_enabled: esEnabled,
+        elasticsearch_url: esUrl.trim(),
+      })
+      toast(t('knowledge.toastEsSaved'), { type: 'success' })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t('common.failed')
+      toast(t('knowledge.toastSaveFailed'), { type: 'error', message })
+    } finally {
+      setEsSaving(false)
+    }
+  }
+
+  const testEs = async () => {
+    setEsTesting(true)
+    try {
+      const result = await api.post<{ ok: boolean; message: string }>(
+        '/settings/elasticsearch/test',
+        {
+          elasticsearch_enabled: esEnabled,
+          elasticsearch_url: esUrl.trim(),
+        },
+      )
+      toast(result.message, { type: result.ok ? 'success' : 'error' })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t('common.failed')
+      toast(t('knowledge.toastConnectionTestFailed'), { type: 'error', message })
+    } finally {
+      setEsTesting(false)
     }
   }
 
@@ -478,6 +575,17 @@ export function KnowledgeManager() {
     }
   }
 
+  const retrievalModeLabel = (mode: RetrievalMode) => {
+    switch (mode) {
+      case 'vector':
+        return t('knowledge.retrievalVector')
+      case 'keyword':
+        return t('knowledge.retrievalKeyword')
+      default:
+        return t('knowledge.retrievalHybrid')
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -487,201 +595,222 @@ export function KnowledgeManager() {
   }
 
   return (
-    <div className="space-y-3 h-full flex flex-col">
-      <Card>
-        <CardContent className="py-3 space-y-2">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="min-w-0">
-              <h3 className="text-sm font-medium text-gray-800 dark:text-gray-100">
-                {t('knowledge.localModelsTitle')}
-              </h3>
-              <p className={`${ragHint} mt-0.5`}>{t('knowledge.localModelsHint')}</p>
-            </div>
-            <Button
-              size="sm"
-              leftIcon={<Upload className="w-4 h-4" />}
-              isLoading={modelUploading}
-              onClick={() => embeddingModelInputRef.current?.click()}
-            >
-              {t('knowledge.uploadModelZip')}
-            </Button>
-            <input
-              ref={embeddingModelInputRef}
-              type="file"
-              accept=".zip"
-              className="hidden"
-              aria-label={t('knowledge.uploadModelZip')}
-              title={t('knowledge.uploadModelZip')}
-              onChange={handleUploadEmbeddingModel}
-            />
-          </div>
-          {embeddingModels.length > 0 ? (
-            <div className="space-y-1 max-h-32 overflow-y-auto">
-              {embeddingModels.map((m) => (
-                <div
-                  key={m.id}
-                  className="flex items-center justify-between gap-2 text-sm py-1 px-2 rounded-md bg-gray-50 dark:bg-gray-900/60 border border-transparent dark:border-gray-700/80"
-                >
-                  <div className="min-w-0">
-                    <span className="font-medium text-gray-800 dark:text-gray-100">{m.name}</span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
-                      {m.status === 'ready'
-                        ? t('knowledge.modelDim', { dim: m.dimension })
-                        : m.status === 'failed'
-                          ? t('knowledge.modelFailed')
-                          : t('knowledge.modelProcessing')}
-                    </span>
-                  </div>
-                  <div className="flex gap-1 shrink-0">
-                    {m.status === 'ready' ? (
-                      <Button size="sm" variant="ghost" onClick={() => handleSelectLocalModel(m.id)}>
-                        {t('knowledge.useModel')}
-                      </Button>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteEmbeddingModel(m.id)}
-                      className="p-1 text-gray-400 hover:text-red-500"
-                      aria-label={t('common.delete')}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className={ragHint}>{t('knowledge.noLocalModels')}</p>
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="py-3 space-y-3">
-          <div>
-            <h3 className="text-sm font-medium text-gray-800 dark:text-gray-100">
-              {t('knowledge.globalEmbeddingTitle')}
-            </h3>
-            <p className={`${ragHint} mt-0.5`}>{t('knowledge.globalEmbeddingHint')}</p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <label className={ragLabel}>{t('knowledge.embeddingProvider')}</label>
-              <select
-                className={ragSelect}
-                value={globalEmbedProvider}
-                title={t('knowledge.embeddingProvider')}
-                onChange={(e) => setGlobalEmbedProvider(e.target.value)}
-              >
-                <option value="ollama">Ollama</option>
-                <option value="openai">OpenAI API</option>
-                <option value="openai-compatible">{t('knowledge.providerCompatible')}</option>
-                <option value="local">{t('knowledge.providerLocal')}</option>
-              </select>
-            </div>
-            <div>
-              <label className={ragLabel}>{t('knowledge.embeddingModel')}</label>
-              <input
-                className={`w-full ${milvusInput}`}
-                value={globalEmbedModel}
-                aria-label={t('knowledge.embeddingModel')}
-                title={t('knowledge.embeddingModel')}
-                onChange={(e) => setGlobalEmbedModel(e.target.value)}
-                placeholder={
-                  globalEmbedProvider === 'ollama' ? 'nomic-embed-text' : 'text-embedding-3-small'
-                }
-              />
-            </div>
-            <div>
-              <label className={ragLabel}>{t('knowledge.embeddingApiBase')}</label>
-              <input
-                className={`w-full ${milvusInput}`}
-                value={globalEmbedApiBase}
-                aria-label={t('knowledge.embeddingApiBase')}
-                title={t('knowledge.embeddingApiBase')}
-                onChange={(e) => setGlobalEmbedApiBase(e.target.value)}
-                placeholder={
-                  globalEmbedProvider === 'ollama'
-                    ? 'http://localhost:11434'
-                    : 'https://api.openai.com/v1'
-                }
-              />
-            </div>
-            <div>
-              <label className={ragLabel}>{t('knowledge.embeddingDimension')}</label>
-              <input
-                type="number"
-                className={`w-full ${milvusInput}`}
-                value={globalEmbedDimension}
-                aria-label={t('knowledge.embeddingDimension')}
-                title={t('knowledge.embeddingDimension')}
-                onChange={(e) => setGlobalEmbedDimension(e.target.value.replace(/[^\d]/g, ''))}
-              />
-            </div>
-          </div>
-          {globalEmbedProvider === 'local' && (
-            <p className={ragHint}>{t('knowledge.globalLocalEmbedHint')}</p>
-          )}
-          {(globalEmbedProvider === 'openai' ||
-            globalEmbedProvider === 'openai-compatible') && (
-            <div className="max-w-md">
-              <label className={ragLabel}>{t('knowledge.embeddingApiKey')}</label>
-              <input
-                type="password"
-                autoComplete="off"
-                className={`w-full ${milvusInput}`}
-                value={globalEmbedApiKey}
-                onChange={(e) => setGlobalEmbedApiKey(e.target.value)}
-                placeholder={t('knowledge.embeddingApiKeyPlaceholder')}
-              />
-            </div>
-          )}
-          <div>
-            <Button size="sm" onClick={saveGlobalEmbeddingSettings} isLoading={globalEmbedSaving}>
-              {t('common.save')}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="py-3 space-y-2">
-          <div className="flex items-center justify-between gap-3 flex-wrap lg:flex-nowrap">
-            <div className="min-w-0 shrink-0">
-              <h3 className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('knowledge.milvusTitle')}</h3>
-              <p className={`${ragHint} mt-0.5`}>{t('knowledge.milvusHint')}</p>
-            </div>
-            <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 ml-auto">
-              <div className="shrink-0">
-                <Switch checked={milvusEnabled} onChange={setMilvusEnabled} />
-              </div>
+    <div className="space-y-2 h-full flex flex-col min-h-0">
+      <Card className="shrink-0">
+        <Tabs
+          compact
+          activeTab={platformTab}
+          onChange={(id) => setPlatformTab(id as typeof platformTab)}
+          tabs={[
+            { id: 'connections', label: t('knowledge.platformTabConnections') },
+            { id: 'embedding', label: t('knowledge.platformTabEmbedding') },
+            { id: 'tokenizer', label: t('knowledge.platformTabTokenizer') },
+          ]}
+        />
+        <CardContent className="py-2 px-3">
+          <TabPanel id="connections" activeTab={platformTab} className="pt-0 space-y-2">
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-gray-200 px-2.5 py-1.5 dark:border-gray-700">
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-200 w-14 shrink-0">
+                Milvus
+              </span>
+              <Switch checked={milvusEnabled} onChange={setMilvusEnabled} />
               {milvusEnabled && (
                 <>
                   <input
                     aria-label={t('knowledge.host')}
-                    title={t('knowledge.host')}
                     value={milvusHost}
                     onChange={(e) => setMilvusHost(e.target.value)}
                     placeholder={t('knowledge.host')}
-                    className={`w-48 ${milvusInput}`}
+                    className={`w-36 ${milvusInput}`}
                   />
                   <input
                     aria-label={t('knowledge.port')}
-                    title={t('knowledge.port')}
                     value={milvusPort}
                     onChange={(e) => setMilvusPort(e.target.value.replace(/[^\d]/g, ''))}
                     placeholder={t('knowledge.port')}
-                    className={`w-24 ${milvusInput}`}
+                    className={`w-20 ${milvusInput}`}
                   />
-                  <Button variant="secondary" size="sm" onClick={testMilvus} isLoading={milvusTesting}>{t('knowledge.testConnection')}</Button>
+                  <Button variant="secondary" size="sm" onClick={testMilvus} isLoading={milvusTesting}>
+                    {t('knowledge.testConnection')}
+                  </Button>
                 </>
               )}
-              <Button size="sm" onClick={saveMilvusSettings} isLoading={milvusSaving}>{t('common.save')}</Button>
+              <Button size="sm" className="ml-auto" onClick={saveMilvusSettings} isLoading={milvusSaving}>
+                {t('common.save')}
+              </Button>
             </div>
-          </div>
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-gray-200 px-2.5 py-1.5 dark:border-gray-700">
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-200 w-14 shrink-0">
+                ES
+              </span>
+              <Switch checked={esEnabled} onChange={setEsEnabled} />
+              {esEnabled && (
+                <>
+                  <input
+                    aria-label={t('knowledge.esUrl')}
+                    value={esUrl}
+                    onChange={(e) => setEsUrl(e.target.value)}
+                    placeholder="http://localhost:9200"
+                    className={`w-52 ${milvusInput}`}
+                  />
+                  <Button variant="secondary" size="sm" onClick={testEs} isLoading={esTesting}>
+                    {t('knowledge.testConnection')}
+                  </Button>
+                </>
+              )}
+              <Button size="sm" className="ml-auto" onClick={saveEsSettings} isLoading={esSaving}>
+                {t('common.save')}
+              </Button>
+            </div>
+            <p className={ragHint}>{t('knowledge.platformConnectionsHint')}</p>
+          </TabPanel>
+
+          <TabPanel id="embedding" activeTab={platformTab} className="pt-0 space-y-2">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label className={ragLabel}>{t('knowledge.embeddingProvider')}</label>
+                <select
+                  className={ragSelect}
+                  value={globalEmbedProvider}
+                  onChange={(e) => setGlobalEmbedProvider(e.target.value)}
+                >
+                  <option value="ollama">Ollama</option>
+                  <option value="openai">OpenAI API</option>
+                  <option value="openai-compatible">{t('knowledge.providerCompatible')}</option>
+                  <option value="local">{t('knowledge.providerLocal')}</option>
+                </select>
+              </div>
+              <div>
+                <label className={ragLabel}>{t('knowledge.embeddingModel')}</label>
+                <input
+                  className={`w-full ${milvusInput}`}
+                  value={globalEmbedModel}
+                  onChange={(e) => setGlobalEmbedModel(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className={ragLabel}>{t('knowledge.embeddingApiBase')}</label>
+                <input
+                  className={`w-full ${milvusInput}`}
+                  value={globalEmbedApiBase}
+                  onChange={(e) => setGlobalEmbedApiBase(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className={ragLabel}>{t('knowledge.embeddingDimension')}</label>
+                <input
+                  type="number"
+                  className={`w-full ${milvusInput}`}
+                  value={globalEmbedDimension}
+                  onChange={(e) => setGlobalEmbedDimension(e.target.value.replace(/[^\d]/g, ''))}
+                />
+              </div>
+            </div>
+            {(globalEmbedProvider === 'openai' || globalEmbedProvider === 'openai-compatible') && (
+              <input
+                type="password"
+                autoComplete="off"
+                className={`max-w-sm w-full ${milvusInput}`}
+                value={globalEmbedApiKey}
+                onChange={(e) => setGlobalEmbedApiKey(e.target.value)}
+                placeholder={t('knowledge.embeddingApiKeyPlaceholder')}
+              />
+            )}
+            <div className="flex items-center justify-between gap-2">
+              <Button size="sm" onClick={saveGlobalEmbeddingSettings} isLoading={globalEmbedSaving}>
+                {t('common.save')}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                leftIcon={<Upload className="w-3.5 h-3.5" />}
+                isLoading={modelUploading}
+                onClick={() => embeddingModelInputRef.current?.click()}
+              >
+                {t('knowledge.uploadModelZip')}
+              </Button>
+              <input
+                ref={embeddingModelInputRef}
+                type="file"
+                accept=".zip"
+                className="hidden"
+                onChange={handleUploadEmbeddingModel}
+              />
+            </div>
+            {embeddingModels.length > 0 ? (
+              <div className="space-y-0.5 max-h-24 overflow-y-auto">
+                {embeddingModels.map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex items-center justify-between gap-2 text-xs py-0.5 px-2 rounded bg-gray-50 dark:bg-gray-900/60"
+                  >
+                    <span className="truncate text-gray-800 dark:text-gray-100">
+                      {m.name}
+                      <span className="text-gray-400 ml-1">
+                        {m.status === 'ready'
+                          ? `${m.dimension}d`
+                          : m.status === 'failed'
+                            ? '×'
+                            : '…'}
+                      </span>
+                    </span>
+                    <div className="flex gap-0.5 shrink-0">
+                      {m.status === 'ready' ? (
+                        <Button size="sm" variant="ghost" onClick={() => handleSelectLocalModel(m.id)}>
+                          {t('knowledge.useModel')}
+                        </Button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteEmbeddingModel(m.id)}
+                        className="p-1 text-gray-400 hover:text-red-500"
+                        aria-label={t('common.delete')}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className={ragHint}>{t('knowledge.noLocalModels')}</p>
+            )}
+          </TabPanel>
+
+          <TabPanel id="tokenizer" activeTab={platformTab} className="pt-0 space-y-1.5">
+            <p className={ragHint}>{t('knowledge.tokenizerSectionHint')}</p>
+            {(['stop_words', 'suffix_chars'] as const).map((key) => {
+              const meta = tokenizerFiles.find((f) => f.key === key)
+              const label =
+                key === 'stop_words'
+                  ? t('knowledge.tokenizerStopWords')
+                  : t('knowledge.tokenizerSuffixChars')
+              return (
+                <div
+                  key={key}
+                  className="flex items-center gap-2 rounded-md border border-gray-200 px-2.5 py-1.5 dark:border-gray-700"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-gray-800 dark:text-gray-100">{label}</p>
+                    <p className="text-[10px] font-mono text-gray-400 truncate">
+                      {meta?.filename ?? `${key}.txt`}
+                      {meta ? ` · ${t('knowledge.tokenizerLineCount', { count: meta.line_count })}` : ''}
+                    </p>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={() => openGlobalTokenizerEditor(key)}>
+                    <Pencil className="w-3 h-3 mr-1" />
+                    {t('knowledge.editTokenizerFile')}
+                  </Button>
+                </div>
+              )
+            })}
+          </TabPanel>
         </CardContent>
       </Card>
-      <div className="flex gap-6 flex-1 min-h-0">
+
+      <div className="flex gap-4 flex-1 min-h-0">
       {/* Knowledge Base List */}
-      <div className="w-72 shrink-0 space-y-3">
+      <div className="w-64 shrink-0 space-y-2 min-h-0 overflow-y-auto">
         <Select
           label={t('knowledge.scopeLabel', '知识库作用域')}
           value={scopeValue}
@@ -719,7 +848,7 @@ export function KnowledgeManager() {
                 className={selectedKB === kb.id ? 'ring-2 ring-primary-500' : ''}
                 onClick={() => setSelectedKB(kb.id)}
               >
-                <CardContent className="py-3">
+                <CardContent className="py-2">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -756,42 +885,62 @@ export function KnowledgeManager() {
       {/* Documents */}
       <div className="flex-1 min-w-0">
         {selectedKB ? (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {t('knowledge.docListTitle')}
-                {selectedKbMeta ? (
-                  <span className="text-gray-400 font-normal ml-2">
-                    · {selectedKbMeta.name}
-                  </span>
-                ) : null}
-              </h3>
-              <div className="flex gap-2">
-                <Button
-                  size="actionWide"
-                  variant="secondary"
-                  leftIcon={<Settings2 className="w-4 h-4" />}
-                  onClick={() => setSettingsOpen(true)}
-                >
-                  {t('knowledge.ragSettings')}
-                </Button>
-                <Input
-                  placeholder={t('knowledge.searchDocsPlaceholder')}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  leftIcon={<Search className="w-4 h-4" />}
-                  className="w-60"
-                />
-                <Button
-                  size="actionWide"
-                  leftIcon={<Upload className="w-4 h-4" />}
-                  onClick={() => {
-                    setUploadOpen(true)
-                    fileInputRef.current?.click()
-                  }}
-                >
-                  {t('knowledge.uploadDocument')}
-                </Button>
+          <div className="space-y-2 min-h-0 flex flex-col">
+            <div className="rounded-lg border border-primary-200 bg-primary-50/80 dark:border-primary-800/60 dark:bg-primary-950/30 px-3 py-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <div className="w-8 h-8 rounded-md bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center shrink-0">
+                    <BookOpen className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                        {selectedKbMeta?.name}
+                      </h3>
+                      <Badge variant="default" size="sm">
+                        {t('knowledge.currentKbBadge')}
+                      </Badge>
+                      {selectedKbMeta?.needsReindex ? (
+                        <Badge variant="warning" size="sm">
+                          {t('knowledge.needsReindexBadge')}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                      {t('knowledge.kbMetaLine', {
+                        count: selectedKbMeta?.documentCount ?? 0,
+                        mode: retrievalModeLabel(ragSettings.retrievalMode),
+                      })}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    size="actionWide"
+                    variant="secondary"
+                    leftIcon={<Settings2 className="w-4 h-4" />}
+                    onClick={() => setSettingsOpen(true)}
+                  >
+                    {t('knowledge.ragSettings')}
+                  </Button>
+                  <Button
+                    size="actionWide"
+                    leftIcon={<Upload className="w-4 h-4" />}
+                    onClick={() => {
+                      setUploadOpen(true)
+                      fileInputRef.current?.click()
+                    }}
+                  >
+                    {t('knowledge.uploadDocument')}
+                  </Button>
+                  <Input
+                    placeholder={t('knowledge.searchDocsPlaceholder')}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    leftIcon={<Search className="w-4 h-4" />}
+                    className="w-44 [&_input]:h-8"
+                  />
+                </div>
               </div>
             </div>
 
@@ -809,17 +958,17 @@ export function KnowledgeManager() {
             {filteredDocs.length === 0 ? (
               <Card>
                 <CardContent>
-                  <div className="flex flex-col items-center py-12 text-gray-400">
-                    <FileText className="w-12 h-12 mb-3 opacity-50" />
+                  <div className="flex flex-col items-center py-8 text-gray-400">
+                    <FileText className="w-10 h-10 mb-2 opacity-50" />
                     <p className="text-sm">{t('knowledge.emptyDocs')}</p>
                   </div>
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-1.5 overflow-y-auto flex-1 min-h-0">
                 {filteredDocs.map((doc) => (
                   <Card key={doc.id}>
-                    <CardContent className="py-3">
+                    <CardContent className="py-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3 min-w-0">
                           <FileText className="w-5 h-5 text-gray-400 shrink-0" />
@@ -883,12 +1032,29 @@ export function KnowledgeManager() {
       <Dialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        title={t('knowledge.dialogRagTitle')}
-        size="md"
-        className="max-w-md"
-        bodyClassName="p-4 pt-3"
+        title={
+          selectedKbMeta
+            ? t('knowledge.dialogRagTitleForKb', { name: selectedKbMeta.name })
+            : t('knowledge.dialogRagTitle')
+        }
+        size="lg"
+        bodyClassName="p-3 pt-2"
       >
-        <div className="space-y-3 max-h-[75vh] overflow-y-auto pr-0.5 text-gray-900 dark:text-gray-100">
+        <div className="space-y-2 max-h-[78vh] overflow-y-auto pr-0.5 text-gray-900 dark:text-gray-100">
+          {selectedKbMeta ? (
+            <div className="sticky top-0 z-10 flex items-center gap-2 rounded-md border border-primary-200 bg-primary-50 px-2.5 py-1.5 dark:border-primary-800 dark:bg-primary-950/40">
+              <BookOpen className="w-4 h-4 text-primary-600 dark:text-primary-400 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                  {selectedKbMeta.name}
+                </p>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                  {t('knowledge.ragScopeHint', { count: selectedKbMeta.documentCount })}
+                </p>
+              </div>
+              <Badge size="sm">{t('knowledge.currentKbBadge')}</Badge>
+            </div>
+          ) : null}
           {selectedKbMeta?.needsReindex ? (
             <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-700/80 dark:bg-amber-950/40 px-2.5 py-1.5 text-xs text-amber-900 dark:text-amber-100">
               {t('knowledge.needsReindexHint')}
@@ -1135,6 +1301,24 @@ export function KnowledgeManager() {
               <option value="vector">{t('knowledge.retrievalVector')}</option>
               <option value="keyword">{t('knowledge.retrievalKeyword')}</option>
             </select>
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mt-2 mb-1">
+              {t('knowledge.keywordBackend')}
+            </label>
+            <select
+              className={ragSelect}
+              value={ragSettings.retrievalKeywordBackend}
+              title={t('knowledge.keywordBackend')}
+              onChange={(e) =>
+                setRagSettings((s) => ({
+                  ...s,
+                  retrievalKeywordBackend: e.target.value as KeywordBackend,
+                }))
+              }
+            >
+              <option value="local">{t('knowledge.keywordBackendLocal')}</option>
+              <option value="elasticsearch">{t('knowledge.keywordBackendEs')}</option>
+            </select>
+            <p className={ragHint}>{t('knowledge.keywordBackendHint')}</p>
             <div className="grid grid-cols-2 gap-2">
               <Input
                 className={ragInputCompact}
@@ -1300,6 +1484,19 @@ export function KnowledgeManager() {
               />
             </div>
           </div>
+          {/* Tokenizer (per-KB user dict) */}
+          <div className={ragSection}>
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className={ragSectionTitle}>{t('knowledge.tokenizerKbSection')}</p>
+                <p className={ragHint}>{t('knowledge.tokenizerKbSectionHint')}</p>
+              </div>
+              <Button variant="secondary" size="sm" onClick={openKbUserDictEditor} disabled={!selectedKB}>
+                <Pencil className="w-3 h-3 mr-1" />
+                {t('knowledge.editUserDictFile')}
+              </Button>
+            </div>
+          </div>
           {/* Query rewrite */}
           <div className={ragSection}>
             <p className={ragSectionTitle}>{t('knowledge.queryRewriteSection')}</p>
@@ -1443,6 +1640,7 @@ export function KnowledgeManager() {
                       retrievalBm25B: mapped.retrievalBm25B,
                       retrievalQueryRewriteEnabled: mapped.retrievalQueryRewriteEnabled,
                       retrievalQueryRewriteCount: mapped.retrievalQueryRewriteCount,
+                      retrievalKeywordBackend: mapped.retrievalKeywordBackend,
                     })
                     setSettingsTab('form')
                     setJsonError('')
@@ -1490,6 +1688,13 @@ export function KnowledgeManager() {
           </div>
         </div>
       </Dialog>
+      <TokenizerFileEditor
+        target={tokenizerEditor}
+        onClose={() => setTokenizerEditor(null)}
+        onSaved={() => {
+          void loadTokenizerFiles()
+        }}
+      />
       </div>
     </div>
   )

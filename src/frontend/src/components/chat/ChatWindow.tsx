@@ -188,8 +188,8 @@ export function ChatWindow({
         <div
           className={cn(
             studio && 'mx-auto w-full max-w-3xl px-4 pt-3 pb-4',
-            embed && 'px-2 py-2',
-            !studio && !embed && 'px-4 pt-3 pb-5',
+            embed && 'px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]',
+            !studio && !embed && 'px-4 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]',
           )}
         >
       <ChatInput

@@ -10,7 +10,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.knowledge.rerank import _tokenize
+from app.knowledge.tokenize import TokenizeConfig, tokenize_for_search
 
 
 @dataclass
@@ -45,8 +45,11 @@ class Bm25Index:
     def invalidate(self, kb_id: str) -> None:
         self._cache.pop(kb_id, None)
 
+    def invalidate_all(self) -> None:
+        self._cache.clear()
+
     async def _load_chunks(
-        self, db: AsyncSession, kb_id: str
+        self, db: AsyncSession, kb_id: str, tokenize_config: TokenizeConfig | None = None
     ) -> list[_ChunkEntry]:
         from app.models.knowledge import DocumentChunk, Document
 
@@ -62,7 +65,11 @@ class Bm25Index:
         entries: list[_ChunkEntry] = []
         for chunk_id, content in result.all():
             text = (content or "").lower()
-            tokens = _tokenize(text)
+            tokens = tokenize_for_search(
+                text,
+                tokenize_config,
+                apply_stop_words=False,
+            )
             tf: dict[str, int] = {}
             for t in tokens:
                 tf[t] = tf.get(t, 0) + 1
@@ -76,8 +83,13 @@ class Bm25Index:
             )
         return entries
 
-    async def build_index(self, db: AsyncSession, kb_id: str) -> None:
-        entries = await self._load_chunks(db, kb_id)
+    async def build_index(
+        self,
+        db: AsyncSession,
+        kb_id: str,
+        tokenize_config: TokenizeConfig | None = None,
+    ) -> None:
+        entries = await self._load_chunks(db, kb_id, tokenize_config)
         if not entries:
             self._cache[kb_id] = _CorpusStats(chunks=[], avgdl=0.0, idf={})
             return
@@ -101,13 +113,18 @@ class Bm25Index:
             chunks=entries, avgdl=avgdl, idf=idf
         )
 
-    async def ensure_index(self, db: AsyncSession, kb_id: str) -> None:
+    async def ensure_index(
+        self,
+        db: AsyncSession,
+        kb_id: str,
+        tokenize_config: TokenizeConfig | None = None,
+    ) -> None:
         if kb_id in self._cache:
             return
         lock = self._get_lock(kb_id)
         async with lock:
             if kb_id not in self._cache:
-                await self.build_index(db, kb_id)
+                await self.build_index(db, kb_id, tokenize_config)
 
     async def search(
         self,
@@ -117,9 +134,10 @@ class Bm25Index:
         top_k: int,
         k1: float | None = None,
         b: float | None = None,
+        tokenize_config: TokenizeConfig | None = None,
     ) -> list[tuple[float, str]]:
         """Return scored (score, chunk_id) pairs."""
-        await self.ensure_index(db, kb_id)
+        await self.ensure_index(db, kb_id, tokenize_config)
         stats = self._cache.get(kb_id)
         if not stats or not stats.chunks:
             return []
@@ -127,7 +145,7 @@ class Bm25Index:
         _k1 = k1 if k1 is not None else self.k1
         _b = b if b is not None else self.b
 
-        query_terms = _tokenize(query)
+        query_terms = tokenize_for_search(query, tokenize_config)
         if not query_terms:
             return []
 

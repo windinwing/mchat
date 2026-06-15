@@ -33,7 +33,8 @@ aiosqlite==0.20.0
 # Optional: local STT (STT_PROVIDER=local)
 # faster-whisper>=1.0.0
 
-# Optional: upload local embedding models (embedding_provider=local)
+# Optional: Elasticsearch keyword retrieval (per-KB opt-in)
+# elasticsearch>=8.0,<9
 # sentence-transformers>=3.0.0
 # torch  # install per platform if not pulled in by sentence-transformers
 

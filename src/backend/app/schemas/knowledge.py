@@ -36,6 +36,10 @@ class KnowledgeBaseRagFields(BaseModel):
     rerank_model: str | None = None
     retrieval_query_rewrite_enabled: bool = False
     retrieval_query_rewrite_count: int = 3
+    retrieval_stop_words: str | None = None
+    retrieval_query_suffix_chars: str | None = None
+    retrieval_user_dict: str | None = None
+    retrieval_keyword_backend: str = "local"
 
 
 class KnowledgeBaseCreate(KnowledgeBaseRagFields):
@@ -89,6 +93,10 @@ class KnowledgeBaseUpdate(BaseModel):
     rerank_model: str | None = None
     retrieval_query_rewrite_enabled: bool | None = None
     retrieval_query_rewrite_count: int | None = None
+    retrieval_stop_words: str | None = None
+    retrieval_query_suffix_chars: str | None = Field(None, max_length=200)
+    retrieval_user_dict: str | None = None
+    retrieval_keyword_backend: str | None = None
 
 
 class KnowledgeBaseResponse(KnowledgeBaseRagFields):

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     milvus_port: int = 19530
     milvus_enabled: bool = False
 
+    # Elasticsearch (optional keyword retrieval backend; per-KB opt-in)
+    elasticsearch_url: str = ""
+    elasticsearch_enabled: bool = False
+
     # Embedding global defaults (admin UI → DB overrides these at runtime; .env is fallback only)
     embedding_provider: str = "ollama"
     embedding_model: str = "nomic-embed-text"
@@ -213,6 +217,7 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     moonshot_api_key: str = ""
     zhipu_api_key: str = ""
+    zhipu_coding_api_key: str = ""
     groq_api_key: str = ""
     siliconflow_api_key: str = ""
     together_api_key: str = ""

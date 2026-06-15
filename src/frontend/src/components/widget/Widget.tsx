@@ -319,7 +319,7 @@ export function Widget({
 
   if (isPage) {
     return (
-      <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
+      <div className="h-[100dvh] min-h-0 flex flex-col bg-gray-50 dark:bg-gray-900">
         {chat.error && (
           <div className="shrink-0 mx-4 mt-2 px-4 py-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-600">
             {chat.error}
@@ -345,10 +345,11 @@ export function Widget({
           className={cn(
             'fixed z-[9999] flex flex-col overflow-hidden shadow-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 widget-enter',
             isExpanded
-              ? 'inset-0 rounded-none'
+              ? 'inset-0 rounded-none pb-[env(safe-area-inset-bottom)]'
               : cn(
-                  'bottom-24 rounded-2xl',
+                  'rounded-2xl pb-[env(safe-area-inset-bottom)]',
                   resolved.position === 'right' ? 'right-4' : 'left-4',
+                  'bottom-[calc(6rem+env(safe-area-inset-bottom))]',
                 ),
           )}
           style={
@@ -437,8 +438,9 @@ export function Widget({
       {isOpen && isMinimized && (
         <div
           className={cn(
-            'fixed bottom-24 z-[9999] rounded-2xl shadow-lg px-4 py-3 text-white cursor-pointer flex items-center gap-2',
+            'fixed z-[9999] rounded-2xl shadow-lg px-4 py-3 text-white cursor-pointer flex items-center gap-2',
             resolved.position === 'right' ? 'right-4' : 'left-4',
+            'bottom-[calc(6rem+env(safe-area-inset-bottom))]',
           )}
           style={{ backgroundColor: resolved.primaryColor }}
           onClick={() => setIsMinimized(false)}
@@ -451,8 +453,9 @@ export function Widget({
       {configError && (
         <div
           className={cn(
-            'fixed bottom-24 z-[9998] max-w-xs rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700',
+            'fixed z-[9998] max-w-xs rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700',
             resolved.position === 'right' ? 'right-4' : 'left-4',
+            'bottom-[calc(6rem+env(safe-area-inset-bottom))]',
           )}
         >
           {configError}
@@ -462,8 +465,9 @@ export function Widget({
       {configLoading && isOpen && (
         <div
           className={cn(
-            'fixed bottom-24 z-[9998] rounded-lg bg-white border px-3 py-2 text-xs text-gray-600 shadow flex items-center gap-2',
+            'fixed z-[9998] rounded-lg bg-white border px-3 py-2 text-xs text-gray-600 shadow flex items-center gap-2',
             resolved.position === 'right' ? 'right-4' : 'left-4',
+            'bottom-[calc(6rem+env(safe-area-inset-bottom))]',
           )}
         >
           <Loader2 className="w-4 h-4 animate-spin" />

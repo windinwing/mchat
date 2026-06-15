@@ -56,9 +56,10 @@ def _chunk_key(item: RankedChunk) -> str:
     return f"{item.document_id}:{item.chunk_index}"
 
 
-def _tokenize(text: str) -> set[str]:
-    tokens = re.findall(r"[\w一-鿿]+", text.lower())
-    return {t for t in tokens if len(t) > 1 or "一" <= t <= "鿿"}
+def _tokenize(text: str, config=None) -> set[str]:
+    from app.knowledge.tokenize import TokenizeConfig, tokenize_for_search
+
+    return tokenize_for_search(text, config or TokenizeConfig())
 
 
 def _lexical_score(terms: set[str], content: str) -> float:

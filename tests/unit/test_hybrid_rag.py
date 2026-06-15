@@ -40,6 +40,60 @@ async def test_rerank_prefers_lexical_overlap():
 
 
 @pytest.mark.asyncio
+async def test_bm25_matches_chinese_followup_with_suffix(db_session, monkeypatch):
+    from app.knowledge.bm25 import bm25_index
+
+    user = User(username="bm25_user", password_hash="hash", role="admin")
+    db_session.add(user)
+    await db_session.flush()
+
+    kb = KnowledgeBase(
+        user_id=user.id,
+        name="Troops KB",
+        retrieval_mode="keyword",
+        retrieval_bm25_enabled=True,
+    )
+    db_session.add(kb)
+    await db_session.flush()
+
+    doc = Document(
+        knowledge_base_id=kb.id,
+        title="troops.txt",
+        content="troops data",
+        status="indexed",
+        chunk_count=1,
+    )
+    db_session.add(doc)
+    await db_session.flush()
+
+    db_session.add(
+        DocumentChunk(
+            document_id=doc.id,
+            knowledge_base_id=kb.id,
+            chunk_index=0,
+            content=(
+                "12\t镇守者\t镇守者是鹰之神界针对重装兵种防御而开发的得意之作。\n"
+                "13\t统御者\t鹰之神界轻装兵种攻击力的翘楚。"
+            ),
+        )
+    )
+    await db_session.commit()
+
+    bm25_index.invalidate(kb.id)
+    monkeypatch.setattr("app.core.database.async_session_factory", TestSessionFactory)
+
+    response = await RagService().search(
+        query="镇守者呢",
+        user_id=user.id,
+        knowledge_base_id=kb.id,
+        top_k=3,
+    )
+
+    assert response.total >= 1
+    assert "镇守者" in response.results[0].content
+
+
+@pytest.mark.asyncio
 async def test_hybrid_search_uses_db_chunks(db_session, monkeypatch):
     user = User(username="hybrid_user", password_hash="hash", role="admin")
     db_session.add(user)

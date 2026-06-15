@@ -45,6 +45,13 @@ async def replace_document_chunks(
         )
     await db.flush()
     _invalidate_bm25(knowledge_base_id)
+    from app.knowledge.es_sync import sync_document_chunks_to_es
+
+    await sync_document_chunks_to_es(
+        db,
+        document_id=document_id,
+        knowledge_base_id=knowledge_base_id,
+    )
     return len(chunks)
 
 
@@ -64,6 +71,14 @@ async def delete_document_chunks(db: AsyncSession, document_id: str) -> None:
 
     if kb_id:
         _invalidate_bm25(kb_id)
+
+    from app.knowledge.es_sync import delete_document_from_es
+
+    await delete_document_from_es(
+        db,
+        document_id=document_id,
+        knowledge_base_id=kb_id,
+    )
 
 
 async def load_document_chunks(

@@ -22,10 +22,11 @@ class WorkflowUpdate(BaseModel):
 
 class WorkflowGraphNode(BaseModel):
     id: str = Field(..., min_length=1, max_length=80)
-    type: str = Field(..., min_length=1, max_length=40)  # start, skill, condition, end, approval, merge
+    type: str = Field(..., min_length=1, max_length=40)
     name: str | None = None
     position: dict | None = None
     config: dict | None = None
+    parentId: str | None = None
 
 
 class WorkflowGraphEdge(BaseModel):

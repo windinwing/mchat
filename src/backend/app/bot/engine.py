@@ -220,6 +220,46 @@ def _merge_tool_call(existing: dict[str, Any], incoming: dict[str, Any]) -> dict
     return merged
 
 
+_FOLLOWUP_SUFFIX_CHARS = frozenset("呢吗啊呀吧么")
+_SHORT_RAG_QUERY_MAX_LEN = 20
+
+
+async def _expand_rag_query(
+    query: str,
+    db_session: AsyncSession,
+    conversation: Conversation,
+    *,
+    current_message_id: str | None = None,
+) -> str:
+    """Prepend prior user turn for short Chinese follow-ups (e.g. 统御者… → 镇守者呢)."""
+    q = (query or "").strip()
+    if not q:
+        return q
+
+    is_followup = len(q) <= _SHORT_RAG_QUERY_MAX_LEN and (
+        q[-1] in _FOLLOWUP_SUFFIX_CHARS or len(q) <= 8
+    )
+    if not is_followup:
+        return q
+
+    result = await db_session.execute(
+        select(Message)
+        .where(
+            Message.conversation_id == conversation.id,
+            Message.role == "user",
+        )
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(5)
+    )
+    for prior_msg in result.scalars().all():
+        if current_message_id and prior_msg.id == current_message_id:
+            continue
+        prior = (prior_msg.content or "").strip()
+        if prior and prior != q:
+            return f"{prior} {q}"
+    return q
+
+
 async def _append_rag_context(
     system_prompt: str,
     query: str,
@@ -230,7 +270,14 @@ async def _append_rag_context(
     chat_fn=None,
     *,
     conversation_id: str | None = None,
+    current_message_id: str | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
+    query = await _expand_rag_query(
+        query,
+        db_session,
+        conversation,
+        current_message_id=current_message_id,
+    )
     kb_ids = list(knowledge_base_ids_for_chat(customer_config) or [])
     if conversation.scope_type == "group" and conversation.scope_id:
         group_kb_result = await db_session.execute(
@@ -521,6 +568,7 @@ async def process_message(
             conversation,
             chat_fn=None,
             conversation_id=conversation.id,
+            current_message_id=message.id,
         )
 
         system_prompt = chat_extensions.augment_system_prompt(

@@ -172,7 +172,6 @@ def resolve_llm_base_url(provider: str, api_base: str | None) -> str | None:
         "deepseek",
         "ollama",
         "groq",
-        "zhipu",
         "moonshot",
         "siliconflow",
         "together",
@@ -500,6 +499,7 @@ def create_provider(ai_config: AIConfig) -> LLMProvider:
         # Generic / compatible providers
         "openai-compatible": OpenAICompatibleProvider,
         "zhipu": OpenAICompatibleProvider,  # Zhipu GLM uses OpenAI-compatible API
+        "zhipu-coding": OpenAICompatibleProvider,  # Zhipu GLM Coding Plan (coding endpoint)
         "moonshot": OpenAICompatibleProvider,  # Moonshot/Kimi uses OpenAI-compatible API
         "siliconflow": OpenAICompatibleProvider,  # SiliconFlow uses OpenAI-compatible API
         "together": OpenAICompatibleProvider,  # Together AI uses OpenAI-compatible API

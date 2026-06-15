@@ -42,7 +42,7 @@ export function Button({
     md: 'px-4 py-2 text-sm gap-2',
     lg: 'px-6 py-3 text-base gap-2',
     action: 'shrink-0 w-[7.5rem] px-4 py-2 text-sm gap-2',
-    actionWide: 'shrink-0 w-[9.375rem] px-3 py-1.5 text-sm gap-1.5',
+    actionWide: 'shrink-0 min-w-[10.5rem] w-auto px-4 py-2 text-sm gap-2 whitespace-nowrap',
   }
 
   return (

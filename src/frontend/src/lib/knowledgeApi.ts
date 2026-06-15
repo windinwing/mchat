@@ -2,6 +2,7 @@
 
 export type ChunkStrategy = 'fixed' | 'paragraph' | 'markdown' | 'semantic'
 export type RetrievalMode = 'vector' | 'keyword' | 'hybrid'
+export type KeywordBackend = 'local' | 'elasticsearch'
 export type RerankProvider = 'none' | 'lexical' | 'cohere' | 'bge' | 'cross-encoder'
 
 export interface KnowledgeBaseRagSettings {
@@ -27,6 +28,10 @@ export interface KnowledgeBaseRagSettings {
   retrievalBm25B: number
   retrievalQueryRewriteEnabled: boolean
   retrievalQueryRewriteCount: number
+  retrievalStopWords?: string
+  retrievalQuerySuffixChars?: string
+  retrievalUserDict?: string
+  retrievalKeywordBackend: KeywordBackend
 }
 
 export interface KnowledgeBase extends KnowledgeBaseRagSettings {
@@ -70,6 +75,7 @@ const defaultRag: KnowledgeBaseRagSettings = {
   retrievalBm25B: 0.75,
   retrievalQueryRewriteEnabled: false,
   retrievalQueryRewriteCount: 3,
+  retrievalKeywordBackend: 'local',
 }
 
 function mapRagFields(raw: Record<string, unknown>): KnowledgeBaseRagSettings {
@@ -101,6 +107,16 @@ function mapRagFields(raw: Record<string, unknown>): KnowledgeBaseRagSettings {
     retrievalBm25B: Number(raw.retrieval_bm25_b ?? defaultRag.retrievalBm25B),
     retrievalQueryRewriteEnabled: raw.retrieval_query_rewrite_enabled === true || raw.retrieval_query_rewrite_enabled === 1,
     retrievalQueryRewriteCount: Number(raw.retrieval_query_rewrite_count ?? defaultRag.retrievalQueryRewriteCount),
+    retrievalStopWords:
+      raw.retrieval_stop_words != null ? String(raw.retrieval_stop_words) : undefined,
+    retrievalQuerySuffixChars:
+      raw.retrieval_query_suffix_chars != null
+        ? String(raw.retrieval_query_suffix_chars)
+        : undefined,
+    retrievalUserDict:
+      raw.retrieval_user_dict != null ? String(raw.retrieval_user_dict) : undefined,
+    retrievalKeywordBackend:
+      raw.retrieval_keyword_backend === 'elasticsearch' ? 'elasticsearch' : 'local',
   }
 }
 
@@ -130,6 +146,7 @@ export function ragSettingsToPayload(
     retrieval_bm25_b: settings.retrievalBm25B,
     retrieval_query_rewrite_enabled: settings.retrievalQueryRewriteEnabled,
     retrieval_query_rewrite_count: settings.retrievalQueryRewriteCount,
+    retrieval_keyword_backend: settings.retrievalKeywordBackend,
   }
 }
 

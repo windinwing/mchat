@@ -9,7 +9,7 @@ export interface WorkflowSkillOption {
   config?: Record<string, unknown> | null
 }
 
-export type GraphNodeType = 'start' | 'skill' | 'condition' | 'end' | 'approval' | 'merge'
+export type GraphNodeType = 'start' | 'skill' | 'condition' | 'end' | 'approval' | 'merge' | 'batch'
 
 export const NODE_COLORS: Record<GraphNodeType, string> = {
   start: '#22c55e',
@@ -18,9 +18,10 @@ export const NODE_COLORS: Record<GraphNodeType, string> = {
   end: '#a855f7',
   approval: '#ef4444',
   merge: '#6366f1',
+  batch: '#06b6d4',
 }
 
-export const CONTROL_NODE_TYPES: GraphNodeType[] = ['start', 'condition', 'approval', 'merge', 'end']
+export const CONTROL_NODE_TYPES: GraphNodeType[] = ['start', 'condition', 'approval', 'merge', 'batch', 'end']
 
 export const CATEGORY_ORDER: WorkflowSkillCategory[] = [
   'search',
@@ -159,7 +160,7 @@ export interface InputFieldDef {
   label: string
   placeholder?: string
   required?: boolean
-  type?: 'text' | 'number'
+  type?: 'text' | 'number' | 'multiline' | 'file'
 }
 
 /** True when graph includes patent-report chart/export nodes. */
@@ -222,7 +223,7 @@ export function extractStartInputFields(
       label: String(f.label || f.key || ''),
       placeholder: f.placeholder ? String(f.placeholder) : undefined,
       required: Boolean(f.required),
-      type: (f.type === 'number' ? 'number' : 'text') as 'number' | 'text',
+      type: (f.type === 'number' ? 'number' : f.type === 'multiline' ? 'multiline' : f.type === 'file' ? 'file' : 'text') as InputFieldDef['type'],
     })).filter((f) => f.key)
   }
 

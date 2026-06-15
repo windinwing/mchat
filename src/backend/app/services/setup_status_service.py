@@ -22,6 +22,7 @@ _ENV_PROVIDERS = (
     "deepseek",
     "moonshot",
     "zhipu",
+    "zhipu-coding",
     "groq",
     "siliconflow",
     "together",

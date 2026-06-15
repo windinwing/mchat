@@ -11,6 +11,8 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pydantic import BaseModel
+
 from app.core.database import get_db
 from app.middleware.auth import require_permission, Permission
 from app.models.user import User
@@ -140,6 +142,46 @@ async def update_knowledge_base(
             detail="Knowledge base not found",
         )
     return kb
+
+
+class KbTokenizerFileContent(BaseModel):
+    content: str = ""
+
+
+@router.get("/bases/{kb_id}/tokenizer/user_dict")
+async def read_kb_user_dict(
+    kb_id: str,
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read per-knowledge-base user dictionary file."""
+    service = KnowledgeService(db)
+    kb = await service.get_knowledge_base(kb_id=kb_id, user_id=admin.id)
+    if kb is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge base not found")
+    from app.knowledge.tokenizer_files import read_kb_tokenizer_file
+
+    return read_kb_tokenizer_file(kb_id)
+
+
+@router.put("/bases/{kb_id}/tokenizer/user_dict")
+async def write_kb_user_dict(
+    kb_id: str,
+    request: KbTokenizerFileContent,
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Write per-knowledge-base user dictionary file."""
+    service = KnowledgeService(db)
+    kb = await service.get_knowledge_base(kb_id=kb_id, user_id=admin.id)
+    if kb is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge base not found")
+    from app.knowledge.bm25 import bm25_index
+    from app.knowledge.tokenizer_files import write_kb_tokenizer_file
+
+    result = write_kb_tokenizer_file(kb_id, request.content)
+    bm25_index.invalidate(kb_id)
+    return result
 
 
 @router.post("/bases/{kb_id}/reindex", response_model=ReindexResponse)

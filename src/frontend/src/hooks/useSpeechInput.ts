@@ -1,4 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  isMediaRecorderSupported,
+  isWeChatBrowser,
+  isIOS,
+  pickRecorderMimeType,
+  recorderFileExtension,
+  isTouchMobile,
+} from '@/lib/mobileEnv'
 
 export interface SpeechConfig {
   enabled: boolean
@@ -16,7 +24,9 @@ export interface SpeechMessages {
   noSpeechDetected: string
   speechFailed: string
   micDenied: string
+  micNotAllowed: string
   unavailable: string
+  wechatUnsupported?: string
 }
 
 interface UseSpeechInputOptions {
@@ -66,6 +76,7 @@ export function useSpeechInput({
 
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const warmStreamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const configRef = useRef<SpeechConfig | null>(null)
   const transcriptDeliveredRef = useRef(false)
@@ -83,7 +94,7 @@ export function useSpeechInput({
       if (cancelled) return
       configRef.current = cfg
       const Ctor = getSpeechRecognitionCtor()
-      if (cfg?.enabled && transcribeUrl) {
+      if (cfg?.enabled && transcribeUrl && isMediaRecorderSupported()) {
         setMode('recorder')
       } else if (cfg?.browser_fallback !== false && Ctor) {
         setMode('browser')
@@ -101,6 +112,8 @@ export function useSpeechInput({
   const stopBrowser = useCallback(() => {
     recognitionRef.current?.stop()
     recognitionRef.current = null
+    warmStreamRef.current?.getTracks().forEach((t) => t.stop())
+    warmStreamRef.current = null
     setIsListening(false)
     setInterimText('')
   }, [])
@@ -113,13 +126,32 @@ export function useSpeechInput({
     mediaRecorderRef.current = null
   }, [])
 
-  const startBrowser = useCallback(() => {
+  const startBrowser = useCallback(async () => {
     const Ctor = getSpeechRecognitionCtor()
     const msg = messagesRef.current
     if (!Ctor) {
       onError?.(msg.browserUnsupported)
       return
     }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      })
+      warmStreamRef.current = stream
+    } catch {
+      onError?.(msg.micNotAllowed)
+      return
+    }
+
+    const cleanup = () => {
+      warmStreamRef.current?.getTracks().forEach((t) => t.stop())
+      warmStreamRef.current = null
+      recognitionRef.current = null
+      setIsListening(false)
+      setInterimText('')
+    }
+
     const recognition = new Ctor()
     recognition.lang = language
     recognition.continuous = false
@@ -144,45 +176,64 @@ export function useSpeechInput({
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       if (event.error !== 'aborted') {
-        onError?.(
-          msg.recognitionFailed.replace('{{error}}', event.error),
-        )
+        if (event.error === 'not-allowed') {
+          onError?.(msg.micNotAllowed)
+        } else {
+          onError?.(
+            msg.recognitionFailed.replace('{{error}}', event.error),
+          )
+        }
       }
-      setIsListening(false)
-      setInterimText('')
+      cleanup()
     }
 
     recognition.onend = () => {
-      setIsListening(false)
-      setInterimText('')
       const text = finalText.trim()
       if (text && !transcriptDeliveredRef.current) {
         transcriptDeliveredRef.current = true
         onTranscript(text, false)
       }
-      recognitionRef.current = null
+      cleanup()
     }
 
     recognitionRef.current = recognition
-    recognition.start()
-    setIsListening(true)
+    try {
+      recognition.start()
+      setIsListening(true)
+    } catch (e) {
+      const name = (e as DOMException)?.name
+      if (name === 'NotAllowedError') {
+        onError?.(msg.micNotAllowed)
+      } else {
+        onError?.(
+          msg.recognitionFailed.replace(
+            '{{error}}',
+            name || 'unknown',
+          ),
+        )
+      }
+      cleanup()
+    }
   }, [language, onError, onTranscript])
 
   const startRecorder = useCallback(async () => {
     const msg = messagesRef.current
     if (!transcribeUrl) {
-      startBrowser()
+      await startBrowser()
       return
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-          ? 'audio/webm'
-          : 'audio/mp4'
-
-      const recorder = new MediaRecorder(stream, { mimeType })
+      const mimeType = pickRecorderMimeType()
+      let recorder: MediaRecorder
+      try {
+        recorder = mimeType
+          ? new MediaRecorder(stream, { mimeType })
+          : new MediaRecorder(stream)
+      } catch {
+        recorder = new MediaRecorder(stream)
+      }
+      const resolvedMime = recorder.mimeType || mimeType || 'audio/webm'
       chunksRef.current = []
 
       recorder.ondataavailable = (e) => {
@@ -194,13 +245,13 @@ export function useSpeechInput({
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop())
         setIsListening(false)
-        const blob = new Blob(chunksRef.current, { type: mimeType })
+        const blob = new Blob(chunksRef.current, { type: resolvedMime })
         chunksRef.current = []
-        if (blob.size < 500) {
+        if (blob.size < 200) {
           onError?.(msg.recordingTooShort)
           return
         }
-        const ext = mimeType.includes('webm') ? 'webm' : 'm4a'
+        const ext = recorderFileExtension(resolvedMime)
         const form = new FormData()
         form.append('file', blob, `recording.${ext}`)
         try {
@@ -233,7 +284,12 @@ export function useSpeechInput({
       recorder.start()
       setIsListening(true)
     } catch (e) {
-      onError?.(e instanceof Error ? e.message : msg.micDenied)
+      const name = (e as DOMException)?.name
+      if (name === 'NotAllowedError') {
+        onError?.(msg.micNotAllowed)
+      } else {
+        onError?.(e instanceof Error ? e.message : msg.micDenied)
+      }
     }
   }, [onError, onTranscript, startBrowser, transcribeUrl])
 
@@ -243,14 +299,16 @@ export function useSpeechInput({
     if (mode === 'off') {
       const Ctor = getSpeechRecognitionCtor()
       if (Ctor) {
-        startBrowser()
+        void startBrowser()
+      } else if (isWeChatBrowser() && isIOS()) {
+        onError?.(msg.wechatUnsupported || msg.unavailable)
       } else {
         onError?.(msg.unavailable)
       }
       return
     }
     if (mode === 'browser') {
-      startBrowser()
+      void startBrowser()
     } else {
       void startRecorder()
     }
@@ -289,5 +347,6 @@ export function useSpeechInput({
     startListening,
     stopListening,
     supported: mode !== 'off' || !!getSpeechRecognitionCtor(),
+    holdToTalk: mode === 'recorder' && isTouchMobile(),
   }
 }

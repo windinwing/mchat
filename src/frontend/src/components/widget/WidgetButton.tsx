@@ -38,12 +38,13 @@ export function WidgetButton({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       className={cn(
-        'fixed bottom-6 z-[9999] flex items-center justify-center gap-2 transition-all duration-200',
+        'fixed z-[9999] flex items-center justify-center gap-2 transition-all duration-200',
         'shadow-lg hover:shadow-xl ring-1 ring-white/20',
         showText
           ? 'h-12 px-5 rounded-full'
           : 'w-14 h-14 rounded-full',
         position === 'right' ? 'right-6' : 'left-6',
+        'bottom-[calc(1.5rem+env(safe-area-inset-bottom))]',
         hover ? 'scale-105' : 'scale-100',
       )}
       style={{

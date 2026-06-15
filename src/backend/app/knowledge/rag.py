@@ -271,9 +271,18 @@ class RagService:
                 top_k=candidate_k,
                 settings=settings,
             )
-            if vector_hits and keyword_hits:
+            if keyword_hits and vector_hits:
                 return reciprocal_rank_fusion([vector_hits, keyword_hits])
-            return vector_hits or keyword_hits
+            if keyword_hits:
+                return keyword_hits
+            if vector_hits:
+                return self._prioritize_vector_lexical_overlap(
+                    query,
+                    vector_hits,
+                    retrieval.tokenize,
+                    top_k,
+                )
+            return []
 
     async def _vector_search(
         self,
@@ -316,6 +325,28 @@ class RagService:
             )
         return ranked
 
+    @staticmethod
+    def _prioritize_vector_lexical_overlap(
+        query: str,
+        vector_hits: list[RankedChunk],
+        tokenize_config,
+        top_k: int,
+    ) -> list[RankedChunk]:
+        """When keyword leg misses, prefer vector hits that still contain query terms."""
+        from app.knowledge.tokenize import TokenizeConfig, tokenize_for_search
+
+        terms = tokenize_for_search(query, tokenize_config or TokenizeConfig())
+        if not terms:
+            return vector_hits[:top_k]
+
+        def overlap_score(chunk: RankedChunk) -> tuple[int, float]:
+            content_lower = (chunk.content or "").lower()
+            hits = sum(1 for term in terms if term in content_lower)
+            return (hits, chunk.vector_score)
+
+        ranked = sorted(vector_hits, key=overlap_score, reverse=True)
+        return ranked[:top_k]
+
     async def _keyword_chunk_search(
         self,
         query: str,
@@ -326,10 +357,24 @@ class RagService:
     ) -> list[RankedChunk]:
         if not knowledge_base_id:
             return await self._keyword_chunk_search_naive(
-                query, user_id, knowledge_base_id, top_k
+                query, user_id, knowledge_base_id, top_k, settings=settings
             )
 
         retrieval = (settings or self.rag_settings).retrieval_config()
+
+        if retrieval.keyword_backend == "elasticsearch":
+            from app.knowledge.es_client import es_knowledge_client
+
+            if es_knowledge_client.connected:
+                ranked = await self._es_search(
+                    query, knowledge_base_id, top_k, retrieval
+                )
+                if ranked:
+                    return ranked
+                logger.warning(
+                    "Elasticsearch keyword search empty for kb=%s, falling back to local",
+                    knowledge_base_id,
+                )
 
         if retrieval.bm25_enabled:
             return await self._bm25_search(
@@ -337,8 +382,75 @@ class RagService:
             )
 
         return await self._keyword_chunk_search_naive(
-            query, user_id, knowledge_base_id, top_k
+            query, user_id, knowledge_base_id, top_k, tokenize_config=retrieval.tokenize
         )
+
+    async def _es_search(
+        self,
+        query: str,
+        knowledge_base_id: str,
+        top_k: int,
+        retrieval,
+    ) -> list[RankedChunk]:
+        from app.core.database import async_session_factory
+        from app.knowledge.es_client import es_knowledge_client
+        from app.models.knowledge import Document, DocumentChunk
+
+        try:
+            scored = await es_knowledge_client.search(
+                query=query,
+                knowledge_base_id=knowledge_base_id,
+                top_k=top_k,
+                tokenize_config=retrieval.tokenize,
+            )
+            if not scored:
+                return []
+
+            async with async_session_factory() as db:
+                return await self._ranked_chunks_from_scored_ids(db, scored)
+        except Exception as exc:
+            logger.warning(f"Elasticsearch search failed, falling back to local: {exc}")
+            return []
+
+    async def _ranked_chunks_from_scored_ids(
+        self,
+        db,
+        scored: list[tuple[float, str]],
+    ) -> list[RankedChunk]:
+        from app.models.knowledge import Document, DocumentChunk
+
+        chunk_ids = [cid for _, cid in scored]
+        score_map = {cid: s for s, cid in scored}
+        stmt = (
+            select(DocumentChunk, Document.title)
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .where(DocumentChunk.id.in_(chunk_ids))
+        )
+        rows = await db.execute(stmt)
+        chunk_map: dict[str, DocumentChunk] = {}
+        titles: dict[str, str] = {}
+        for chunk_row, title in rows.all():
+            chunk_map[chunk_row.id] = chunk_row
+            titles[chunk_row.id] = title
+
+        ranked: list[RankedChunk] = []
+        for _, chunk_id in scored:
+            chunk_row = chunk_map.get(chunk_id)
+            if chunk_row is None:
+                continue
+            score = score_map.get(chunk_id, 0.0)
+            ranked.append(
+                RankedChunk(
+                    document_id=chunk_row.document_id,
+                    knowledge_base_id=chunk_row.knowledge_base_id,
+                    chunk_index=chunk_row.chunk_index,
+                    content=chunk_row.content,
+                    title=titles.get(chunk_id) or "Untitled",
+                    keyword_score=score,
+                    fused_score=score,
+                )
+            )
+        return ranked
 
     async def _bm25_search(
         self,
@@ -360,44 +472,12 @@ class RagService:
                     top_k=top_k,
                     k1=retrieval.bm25_k1,
                     b=retrieval.bm25_b,
+                    tokenize_config=retrieval.tokenize,
                 )
                 if not scored:
                     return []
 
-                chunk_ids = [cid for _, cid in scored]
-                score_map = {cid: s for s, cid in scored}
-
-                from app.models.knowledge import Document, DocumentChunk
-                stmt = (
-                    select(DocumentChunk, Document.title)
-                    .join(Document, Document.id == DocumentChunk.document_id)
-                    .where(DocumentChunk.id.in_(chunk_ids))
-                )
-                rows = await db.execute(stmt)
-                chunk_map = {}
-                titles = {}
-                for chunk_row, title in rows.all():
-                    chunk_map[chunk_row.id] = chunk_row
-                    titles[chunk_row.id] = title
-
-                ranked: list[RankedChunk] = []
-                for _, chunk_id in scored:
-                    chunk_row = chunk_map.get(chunk_id)
-                    if chunk_row is None:
-                        continue
-                    score = score_map.get(chunk_id, 0.0)
-                    ranked.append(
-                        RankedChunk(
-                            document_id=chunk_row.document_id,
-                            knowledge_base_id=chunk_row.knowledge_base_id,
-                            chunk_index=chunk_row.chunk_index,
-                            content=chunk_row.content,
-                            title=titles.get(chunk_id) or "Untitled",
-                            keyword_score=score,
-                            fused_score=score,
-                        )
-                    )
-                return ranked
+                return await self._ranked_chunks_from_scored_ids(db, scored)
         except Exception as e:
             logger.warning(f"BM25 search failed, falling back to naive: {e}")
             return await self._keyword_chunk_search_naive(
@@ -410,17 +490,14 @@ class RagService:
         user_id: str | None,
         knowledge_base_id: str | None,
         top_k: int,
+        *,
+        tokenize_config=None,
     ) -> list[RankedChunk]:
         from app.core.database import async_session_factory
         from app.models.knowledge import Document, DocumentChunk, KnowledgeBase
+        from app.knowledge.tokenize import TokenizeConfig, tokenize_for_search
 
-        query_terms = {
-            t.lower()
-            for t in query.split()
-            if len(t) > 1
-        }
-        if not query_terms:
-            query_terms = {query.lower()} if query.strip() else set()
+        query_terms = tokenize_for_search(query, tokenize_config or TokenizeConfig())
 
         try:
             async with async_session_factory() as db:
@@ -483,7 +560,11 @@ class RagService:
         from app.core.database import async_session_factory
         from app.models.knowledge import Document, KnowledgeBase
 
-        query_terms = set(query.lower().split())
+        from app.knowledge.tokenize import TokenizeConfig, tokenize_for_search
+
+        query_terms = tokenize_for_search(query, TokenizeConfig())
+        if not query_terms:
+            return []
         try:
             async with async_session_factory() as db:
                 stmt = select(Document).where(Document.status == "indexed")

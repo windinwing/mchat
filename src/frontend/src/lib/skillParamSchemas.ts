@@ -168,7 +168,11 @@ export function resolveSkillParamFields(
   skillName: string,
   payload: Record<string, unknown>,
   t?: (key: string) => string,
+  workflowFields?: Record<string, any>,
 ): SkillParamFieldDef[] {
+  if (workflowFields) {
+    return Object.entries(workflowFields).map(([k, def]) => ({ key: k, ...def } as SkillParamFieldDef))
+  }
   const tr = (key: string, fallback: string) => (t ? t(key) : fallback)
   const name = skillName.trim().toLowerCase()
   if (name === 'patent-search') return patentSearchFields(payload, tr)

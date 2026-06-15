@@ -111,6 +111,71 @@ async def test_milvus_settings(
     )
 
 
+class ElasticsearchTestRequest(BaseModel):
+    elasticsearch_enabled: bool = False
+    elasticsearch_url: str = ""
+
+
+@router.post("/elasticsearch/test")
+async def test_elasticsearch_settings(
+    request: ElasticsearchTestRequest,
+    _admin: User = Depends(require_permission(Permission.SETTINGS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Test Elasticsearch connection with provided settings."""
+    service = SettingsService(db)
+    return await service.test_elasticsearch_connection(
+        enabled=request.elasticsearch_enabled,
+        url=request.elasticsearch_url,
+    )
+
+
+class TokenizerFileContent(BaseModel):
+    content: str = ""
+
+
+@router.get("/tokenizer")
+async def list_tokenizer_files(
+    _admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+):
+    """List global tokenizer text files (stop words, suffix chars)."""
+    from app.knowledge.tokenizer_files import list_global_tokenizer_files
+
+    return list_global_tokenizer_files()
+
+
+@router.get("/tokenizer/{file_key}")
+async def read_tokenizer_file(
+    file_key: str,
+    _admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+):
+    """Read a global tokenizer text file."""
+    from app.knowledge.tokenizer_files import read_global_tokenizer_file
+
+    try:
+        return read_global_tokenizer_file(file_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.put("/tokenizer/{file_key}")
+async def write_tokenizer_file(
+    file_key: str,
+    request: TokenizerFileContent,
+    _admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+):
+    """Write a global tokenizer text file (one entry per line)."""
+    from app.knowledge.bm25 import bm25_index
+    from app.knowledge.tokenizer_files import write_global_tokenizer_file
+
+    try:
+        result = write_global_tokenizer_file(file_key, request.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    bm25_index.invalidate_all()
+    return result
+
+
 @router.get("/logs", response_model=AppLogResponse)
 async def get_backend_logs(
     source: str = "app",

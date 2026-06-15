@@ -30,6 +30,7 @@ def provider_env_api_key(provider: str) -> str:
         "moonshot": settings.moonshot_api_key,
         "openai-compatible": settings.openai_api_key,
         "zhipu": settings.zhipu_api_key,
+        "zhipu-coding": settings.zhipu_coding_api_key,
         "groq": settings.groq_api_key,
         "siliconflow": settings.siliconflow_api_key,
         "together": settings.together_api_key,

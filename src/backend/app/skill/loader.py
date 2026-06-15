@@ -187,11 +187,15 @@ class SkillLoader:
                     frontmatter = parts[1].strip()
                     body = parts[2].strip()
 
-                    # Parse simple key: value lines
+                    # Parse simple top-level key: value lines (skip indented/nested)
                     for line in frontmatter.split("\n"):
-                        line = line.strip()
-                        if ":" in line:
-                            key, _, value = line.partition(":")
+                        stripped = line.strip()
+                        if not stripped or stripped.startswith("#"):
+                            continue
+                        if line[0:1].isspace():
+                            continue
+                        if ":" in stripped:
+                            key, _, value = stripped.partition(":")
                             key = key.strip().lower()
                             value = value.strip().strip('"').strip("'")
 
@@ -237,13 +241,15 @@ class SkillLoader:
     def _parse_config(
         self, frontmatter: str
     ) -> dict[str, Any]:
-        """Parse additional config from frontmatter."""
+        """Parse additional config from frontmatter (top-level keys only)."""
         config: dict[str, Any] = {}
 
         for line in frontmatter.split("\n"):
-            line = line.strip()
-            if line.startswith("parameters:"):
-                params_str = line.split(":", 1)[1].strip()
+            if line[0:1].isspace():
+                continue
+            stripped = line.strip()
+            if stripped.startswith("parameters:"):
+                params_str = stripped.split(":", 1)[1].strip()
                 if params_str:
                     try:
                         import json
@@ -251,10 +257,22 @@ class SkillLoader:
                         config["parameters"] = json.loads(params_str)
                     except json.JSONDecodeError:
                         pass
-            elif line.startswith("scope:"):
-                config["scope"] = line.split(":", 1)[1].strip().strip('"').strip("'")
-            elif line.startswith("requires_admin:"):
-                val = line.split(":", 1)[1].strip().lower()
+            elif stripped.startswith("workflow_fields:"):
+                fields_str = stripped.split(":", 1)[1].strip()
+                if fields_str:
+                    try:
+                        import json
+                        config["workflow_fields"] = json.loads(fields_str)
+                    except json.JSONDecodeError:
+                        pass
+            elif stripped.startswith("workflow_role:"):
+                val = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+                if val:
+                    config["workflow_role"] = val
+            elif stripped.startswith("scope:"):
+                config["scope"] = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+            elif stripped.startswith("requires_admin:"):
+                val = stripped.split(":", 1)[1].strip().lower()
                 config["requires_admin"] = val in ("true", "1", "yes")
 
         return config

@@ -171,6 +171,8 @@ export function WorkflowsPage() {
   const [descriptionInput, setDescriptionInput] = useState('')
   const [enabledInput, setEnabledInput] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(new Set())
+  const [batchDeleting, setBatchDeleting] = useState(false)
 
   useEffect(() => {
     loadAll()
@@ -407,6 +409,41 @@ export function WorkflowsPage() {
       toast(t('workflows.toastRunDeleted'), { type: 'success' })
     } catch (err: any) {
       toast(t('workflows.toastRunDeleteFailed'), { type: 'error', message: err.message })
+    }
+  }
+
+  const batchDeleteRuns = async () => {
+    if (selectedRunIds.size === 0) return
+    if (!window.confirm(t('workflows.batchDeleteRunConfirm', { count: selectedRunIds.size }))) return
+    setBatchDeleting(true)
+    let deleted = 0
+    for (const id of selectedRunIds) {
+      try {
+        await api.delete(`/workflows/runs/${id}`)
+        deleted++
+      } catch { /* skip */ }
+    }
+    setSelectedRunIds(new Set())
+    setBatchDeleting(false)
+    await refreshRuns()
+    toast(t('workflows.toastBatchDeleted', { count: deleted }), { type: 'success' })
+  }
+
+  const toggleRunSelect = (runId: string) => {
+    setSelectedRunIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(runId)) next.delete(runId)
+      else next.add(runId)
+      return next
+    })
+  }
+
+  const toggleSelectAllRuns = () => {
+    const nonRunning = runs.filter((r) => r.status !== 'running')
+    if (selectedRunIds.size === nonRunning.length) {
+      setSelectedRunIds(new Set())
+    } else {
+      setSelectedRunIds(new Set(nonRunning.map((r) => r.id)))
     }
   }
 
@@ -786,6 +823,7 @@ export function WorkflowsPage() {
               </CardContent>
             </Card>
           )}
+          {myTemplates.length > 0 && (
           <Card>
             <CardHeader>{t('workflows.myTemplatesTitle')}</CardHeader>
             <CardContent>
@@ -797,6 +835,7 @@ export function WorkflowsPage() {
               )}
             </CardContent>
           </Card>
+          )}
         </div>
       )}
 
@@ -877,6 +916,7 @@ export function WorkflowsPage() {
         </CardContent>
       </Card>
 
+      {pendingApprovals.length > 0 && (
       <Card>
         <CardHeader>{t('workflows.approvalsTitle')}</CardHeader>
         <CardContent className="p-0">
@@ -910,9 +950,32 @@ export function WorkflowsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       <Card>
-        <CardHeader>{t('workflows.runsTitle')}</CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <span>{t('workflows.runsTitle')}</span>
+            {runs.length > 0 && (
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={selectedRunIds.size > 0 && selectedRunIds.size === runs.filter(r => r.status !== 'running').length}
+                    onChange={toggleSelectAllRuns}
+                    className="h-3.5 w-3.5"
+                  />
+                  {t('workflows.selectAll')}
+                </label>
+                {selectedRunIds.size > 0 && (
+                  <Button size="sm" variant="danger" isLoading={batchDeleting} onClick={batchDeleteRuns}>
+                    {t('workflows.batchDelete')} ({selectedRunIds.size})
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        </CardHeader>
         <CardContent className="p-0">
           {runs.length === 0 ? (
             <div className="py-10 text-center text-gray-500 dark:text-gray-400">
@@ -925,7 +988,15 @@ export function WorkflowsPage() {
                 const runSubtitle = runListSubtitle(run)
                 return (
                 <div key={run.id} className="px-6 py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={selectedRunIds.has(run.id)}
+                      disabled={run.status === 'running'}
+                      onChange={() => toggleRunSelect(run.id)}
+                      className="h-3.5 w-3.5 shrink-0"
+                    />
+                    <div className="min-w-0">
                     <div className="flex items-center gap-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                         {runTitle}
@@ -946,6 +1017,7 @@ export function WorkflowsPage() {
                       {formatDate(run.started_at)} · {run.trigger_type}
                       {run.error ? ` · ${run.error}` : ''}
                     </p>
+                  </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <Badge
@@ -1100,6 +1172,34 @@ export function WorkflowsPage() {
               outputPayload={selectedRunDetail.output_payload ?? undefined}
             />
 
+            {/* Content preview for text-based results (e.g. web-scraped content) */}
+            {(() => {
+              const textResults: Array<{ nodeName: string; content: string }> = []
+              for (const nr of selectedRunDetail.node_runs || []) {
+                const r = nr.result
+                if (!r || typeof r !== 'object') continue
+                const text = r.stdout || r.content
+                if (typeof text === 'string' && text.trim().length > 10) {
+                  textResults.push({ nodeName: nr.node_name || nr.node_id, content: text.trim() })
+                }
+              }
+              if (textResults.length === 0) return null
+              return (
+                <div className="space-y-3">
+                  {textResults.map((tr, i) => (
+                    <div key={i} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+                        {tr.nodeName} {t('workflows.contentPreview')}
+                      </p>
+                      <pre className="text-xs whitespace-pre-wrap break-words bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700 p-3 max-h-96 overflow-auto text-gray-800 dark:text-gray-200">
+                        {tr.content}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
+
             <div className="space-y-1">
               <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{t('workflows.detailStepRuns')}</p>
               <div className="space-y-2 max-h-80 overflow-auto pr-1">
@@ -1247,20 +1347,55 @@ export function WorkflowsPage() {
       <Dialog open={runInputOpen} onClose={() => setRunInputOpen(false)} title={t('workflows.runInputTitle')}>
         <div className="space-y-3">
           <p className="text-sm text-gray-500 dark:text-gray-400">{t('workflows.runInputHint')}</p>
-          {runTarget &&
+          {        runTarget &&
             extractStartInputFields(runTarget.graph_json?.nodes || [], {
               t,
               skills: skillOpts,
-            }).map((field) => (
-              <Input
-                key={field.key}
-                type={field.type === 'number' ? 'number' : 'text'}
-                label={field.label}
-                value={runInputValues[field.key] || ''}
-                placeholder={field.placeholder}
-                onChange={(e) => handleRunInputChange(field.key, e.target.value)}
-              />
-            ))}
+            }).map((field) => {
+              if (field.type === 'multiline') {
+                return (
+                  <div key={field.key} className="space-y-1">
+                    <label className="text-sm text-gray-600 dark:text-gray-300">{field.label}</label>
+                    <textarea
+                      className="w-full min-h-[120px] rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      placeholder={field.placeholder}
+                      value={runInputValues[field.key] || ''}
+                      onChange={(e) => handleRunInputChange(field.key, e.target.value)}
+                    />
+                  </div>
+                )
+              }
+              if (field.type === 'file') {
+                return (
+                  <div key={field.key} className="space-y-1">
+                    <label className="text-sm text-gray-600 dark:text-gray-300">{field.label}</label>
+                    <input
+                      type="file"
+                      className="block w-full text-sm text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 dark:file:bg-gray-700 dark:file:text-gray-200"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+                        const text = await file.text()
+                        handleRunInputChange(field.key, text)
+                      }}
+                    />
+                    {runInputValues[field.key] ? (
+                      <p className="text-xs text-green-600 dark:text-green-400">{t('workflows.fileLoaded', { size: runInputValues[field.key].length })}</p>
+                    ) : null}
+                  </div>
+                )
+              }
+              return (
+                <Input
+                  key={field.key}
+                  type={field.type === 'number' ? 'number' : 'text'}
+                  label={field.label}
+                  value={runInputValues[field.key] || ''}
+                  placeholder={field.placeholder}
+                  onChange={(e) => handleRunInputChange(field.key, e.target.value)}
+                />
+              )
+            })}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setRunInputOpen(false)}>
               {t('common.cancel')}

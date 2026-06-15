@@ -75,7 +75,7 @@ export function WorkflowCanvasToolbar({
     <Panel position="top-left" className="!m-3 flex flex-col gap-1">
       <div
         className={cn(
-          'flex flex-col gap-0.5 rounded-lg border border-gray-200/90 bg-white/95 p-1 shadow-lg backdrop-blur-sm',
+          'flex flex-col items-center gap-0.5 rounded-lg border border-gray-200/90 bg-white/95 p-1 shadow-lg backdrop-blur-sm',
           'dark:border-gray-700/90 dark:bg-gray-900/95',
         )}
       >

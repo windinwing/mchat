@@ -12,6 +12,67 @@ from types import SimpleNamespace
 from typing import Any
 
 
+class _SkillCLIArgs:
+    """Thin namespace for CLI-based skill argument mapping."""
+
+
+def _dispatch_cli(skill_dir: Path, main_module: Any, args: dict[str, Any]) -> Any:
+    """Run CLI-based skills by passing args as sys.argv."""
+    saved_argv = sys.argv[:]
+    saved_stdout = sys.stdout
+    try:
+        from io import StringIO
+
+        cli_args = [str(skill_dir / "main.py")]
+        command = str(args.pop("command", None) or "fetch")
+        cli_args.append(command)
+        url = args.pop("url", None)
+        if url:
+            cli_args.append(str(url))
+        for key in sorted(args.keys()):
+            value = args[key]
+            if value is None or value == "":
+                continue
+            if isinstance(value, str) and value.lower() in ("true", "false"):
+                value = value.lower() == "true"
+            cli_key = key
+            if key == "use_proxy":
+                cli_key = "proxy"
+            flag = "--" + cli_key.replace("_", "-")
+            if isinstance(value, bool):
+                if value:
+                    cli_args.append(flag)
+            elif isinstance(value, (list, dict)):
+                import json as _json
+                cli_args.extend([flag, _json.dumps(value, ensure_ascii=False)])
+            else:
+                cli_args.extend([flag, str(value)])
+        sys.argv = cli_args
+        buf = StringIO()
+        err_buf = StringIO()
+        saved_stderr = sys.stderr
+        sys.stdout = buf
+        sys.stderr = err_buf
+        try:
+            main_module.main()
+        except SystemExit:
+            pass
+        output = buf.getvalue().strip()
+        err_output = err_buf.getvalue().strip()
+        if output:
+            try:
+                return json.loads(output)
+            except (json.JSONDecodeError, ValueError):
+                return {"stdout": output, "stderr": err_output if err_output else None}
+        if err_output:
+            return {"error": err_output, "stderr": err_output}
+        return {"stdout": "(no output)"}
+    finally:
+        sys.stdout = saved_stdout
+        sys.stderr = saved_stderr
+        sys.argv = saved_argv
+
+
 def _filter_kwargs(func: Any, args: dict[str, Any]) -> dict[str, Any]:
     sig = inspect.signature(func)
     params = sig.parameters
@@ -59,28 +120,23 @@ def _load_module(skill_dir: Path, filename: str, module_key: str) -> Any | None:
 def _dispatch_namespace(skill_dir: Path, main_module: Any, args: dict[str, Any]) -> Any:
     skill_mod = _load_module(skill_dir, "patent_skill.py", "patent_skill")
     api_mod = _load_module(skill_dir, "patent_api.py", "patent_api")
-    if skill_mod is None or api_mod is None:
-        return {
-            "error": (
-                "技能 main() 不支持工具参数；请添加 run(**kwargs)，"
-                "或提供 patent_skill.py / patent_api.py。"
-            )
-        }
-    patent_api_cls = getattr(api_mod, "PatentAPI", None)
-    patent_skill_cls = getattr(skill_mod, "PatentSkill", None)
-    if patent_api_cls is None or patent_skill_cls is None:
-        return {"error": "专利技能缺少 PatentAPI / PatentSkill 类"}
-    api = patent_api_cls()
-    skill = patent_skill_cls(api)
-    if hasattr(main_module, "handle_analysis"):
-        skill.handle_analysis = lambda a: main_module.handle_analysis(skill, a)
-    if hasattr(main_module, "handle_help"):
-        skill.handle_help = lambda a: main_module.handle_help(skill, a)
-    ns = _args_to_namespace(args)
-    handler = skill.commands.get(ns.command)
-    if not handler:
-        return {"error": f"Unknown command: {ns.command}"}
-    return handler(ns)
+    if skill_mod is not None and api_mod is not None:
+        patent_api_cls = getattr(api_mod, "PatentAPI", None)
+        patent_skill_cls = getattr(skill_mod, "PatentSkill", None)
+        if patent_api_cls is not None and patent_skill_cls is not None:
+            api = patent_api_cls()
+            skill = patent_skill_cls(api)
+            if hasattr(main_module, "handle_analysis"):
+                skill.handle_analysis = lambda a: main_module.handle_analysis(skill, a)
+            if hasattr(main_module, "handle_help"):
+                skill.handle_help = lambda a: main_module.handle_help(skill, a)
+            ns = _args_to_namespace(args)
+            handler = skill.commands.get(ns.command)
+            if not handler:
+                return {"error": f"Unknown command: {ns.command}"}
+            return handler(ns)
+    # Fallback: run CLI-based skill by passing args as sys.argv
+    return _dispatch_cli(skill_dir, main_module, args)
 
 
 def execute_skill_script(script_path: Path, args: dict[str, Any]) -> Any:
@@ -174,19 +230,70 @@ def _load_module(skill_dir, filename, module_key):
 def _dispatch_namespace(skill_dir, main_module, args):
     skill_mod = _load_module(skill_dir, "patent_skill.py", "patent_skill")
     api_mod = _load_module(skill_dir, "patent_api.py", "patent_api")
-    if skill_mod is None or api_mod is None:
-        return {"error": "技能 main() 不支持工具参数；请添加 run(**kwargs)"}
-    patent_api_cls = getattr(api_mod, "PatentAPI", None)
-    patent_skill_cls = getattr(skill_mod, "PatentSkill", None)
-    if patent_api_cls is None or patent_skill_cls is None:
-        return {"error": "专利技能缺少 PatentAPI / PatentSkill 类"}
-    api = patent_api_cls()
-    skill = patent_skill_cls(api)
-    ns = _args_to_namespace(args)
-    handler = skill.commands.get(ns.command)
-    if not handler:
-        return {"error": f"Unknown command: {ns.command}"}
-    return handler(ns)
+    if skill_mod is not None and api_mod is not None:
+        patent_api_cls = getattr(api_mod, "PatentAPI", None)
+        patent_skill_cls = getattr(skill_mod, "PatentSkill", None)
+        if patent_api_cls is not None and patent_skill_cls is not None:
+            api = patent_api_cls()
+            skill = patent_skill_cls(api)
+            ns = _args_to_namespace(args)
+            handler = skill.commands.get(ns.command)
+            if not handler:
+                return {"error": f"Unknown command: {ns.command}"}
+            return handler(ns)
+    return _dispatch_cli(skill_dir, main_module, dict(args))
+
+def _dispatch_cli(skill_dir, main_module, args):
+    """Run CLI-based skills by passing args as sys.argv."""
+    import json as _json
+    saved_argv = sys.argv[:]
+    saved_stdout = sys.stdout
+    try:
+        from io import StringIO
+        cli_args = [str(skill_dir / "main.py")]
+        command = str(args.pop("command", None) or "fetch")
+        cli_args.append(command)
+        url = args.pop("url", None)
+        if url:
+            cli_args.append(str(url))
+        for key in sorted(args.keys()):
+            value = args[key]
+            if value is None or value == "":
+                continue
+            if isinstance(value, str) and value.lower() in ("true", "false"):
+                value = value.lower() == "true"
+            flag = "--" + key.replace("_", "-")
+            if isinstance(value, bool):
+                if value:
+                    cli_args.append(flag)
+            elif isinstance(value, (list, dict)):
+                cli_args.extend([flag, _json.dumps(value, ensure_ascii=False)])
+            else:
+                cli_args.extend([flag, str(value)])
+        sys.argv = cli_args
+        buf = StringIO()
+        err_buf = StringIO()
+        saved_stderr = sys.stderr
+        sys.stdout = buf
+        sys.stderr = err_buf
+        try:
+            main_module.main()
+        except SystemExit:
+            pass
+        output = buf.getvalue().strip()
+        err_output = err_buf.getvalue().strip()
+        if output:
+            try:
+                return _json.loads(output)
+            except (_json.JSONDecodeError, ValueError):
+                return {"stdout": output, "stderr": err_output if err_output else None}
+        if err_output:
+            return {"error": err_output, "stderr": err_output}
+        return {"stdout": "(no output)"}
+    finally:
+        sys.stdout = saved_stdout
+        sys.stderr = saved_stderr
+        sys.argv = saved_argv
 
 def main():
     if len(sys.argv) < 2:

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { WorkflowSkillOption } from '@/lib/workflowSkillMeta'
 
 export type GraphContextMenuState =
   | { kind: 'node'; x: number; y: number; nodeId: string }
@@ -15,6 +16,8 @@ interface Props {
   onDeleteEdge: (edgeId: string) => void
   onSetEdgeCondition: (edgeId: string, condition: string) => void
   onAddControlAt: (nodeType: string, position: { x: number; y: number }) => void
+  onAddSkillAt: (skill: WorkflowSkillOption, position: { x: number; y: number }) => void
+  skills: WorkflowSkillOption[]
 }
 
 export function WorkflowGraphContextMenu({
@@ -25,6 +28,8 @@ export function WorkflowGraphContextMenu({
   onDeleteEdge,
   onSetEdgeCondition,
   onAddControlAt,
+  onAddSkillAt,
+  skills,
 }: Props) {
   const { t } = useTranslation()
   const ref = useRef<HTMLDivElement>(null)
@@ -106,6 +111,28 @@ export function WorkflowGraphContextMenu({
               {t(labelKey)}
             </button>
           ))}
+          {skills.length > 0 && (
+            <>
+              <div className="mx-2 my-1 border-t border-gray-100 dark:border-gray-800" />
+              <p className="px-3 py-1 text-[10px] font-semibold uppercase text-gray-400">{t('workflows.ctxAddSkill')}</p>
+              <div className="max-h-40 overflow-y-auto">
+                {skills.slice(0, 10).map((skill) => (
+                  <button
+                    key={skill.id}
+                    type="button"
+                    className={itemClass}
+                    title={skill.description || skill.name}
+                    onClick={() => {
+                      onAddSkillAt(skill, { x: menu.flowX, y: menu.flowY })
+                      onClose()
+                    }}
+                  >
+                    {skill.name}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </>
       ) : null}
     </div>

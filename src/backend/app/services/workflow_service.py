@@ -31,6 +31,7 @@ from app.schemas.workflow import (
     WorkflowApprovalDecisionRequest,
     WorkflowApprovalResponse,
     WorkflowGraph,
+    WorkflowGraphEdge,
     WorkflowCreate,
     WorkflowResponse,
     WorkflowRunDetailResponse,
@@ -1122,6 +1123,179 @@ class WorkflowService:
                             ),
                         }
                     record["result"] = {"sections": sections, "merged": True}
+                    record["status"] = "success"
+                    return node_id, record
+
+                if node.type == "batch":
+                    # Find child nodes inside this batch container
+                    child_nodes = [n for n in graph.nodes if n.parentId == node.id]
+                    if child_nodes:
+                        # Child nodes (sub-workflow): execute chain for each item
+                        list_path = str(cfg.get("list_path") or "").strip()
+                        if not list_path:
+                            raise RuntimeError("batch node with children requires config.list_path")
+                        items_raw = _resolve_path(list_path, outputs)
+                        items: list[Any] = []
+                        if isinstance(items_raw, list):
+                            items = list(items_raw)
+                        elif isinstance(items_raw, str) and items_raw.strip():
+                            stripped = items_raw.strip()
+                            if stripped.startswith("["):
+                                try:
+                                    import json as _json
+                                    parsed = _json.loads(stripped)
+                                    items = parsed if isinstance(parsed, list) else [parsed]
+                                except Exception:
+                                    items = [{"line": l.strip()} for l in stripped.split("\n") if l.strip()]
+                            else:
+                                items = [{"line": l.strip()} for l in stripped.split("\n") if l.strip()]
+                        if not items:
+                            record["result"] = {"items": [], "count": 0}
+                            record["status"] = "success"
+                            return node_id, record
+                        max_concurrent = max(1, int(cfg.get("max_concurrent") or 3))
+                        # Build child node chain (topological sort)
+                        child_ids = {n.id for n in child_nodes}
+                        child_incoming: dict[str, list[str]] = {}
+                        child_outgoing: dict[str, list[WorkflowGraphEdge]] = {}
+                        for cn in child_nodes:
+                            child_incoming[cn.id] = []
+                            child_outgoing[cn.id] = []
+                        for edge in graph.edges:
+                            if edge.source in child_ids and edge.target in child_ids:
+                                child_incoming[edge.target].append(edge.source)
+                                child_outgoing[edge.source].append(edge)
+                        # Topological sort
+                        sorted_children: list[str] = []
+                        visited: set[str] = set()
+                        ready = [n.id for n in child_nodes if not child_incoming[n.id]]
+                        while ready:
+                            nid = ready.pop(0)
+                            if nid in visited:
+                                continue
+                            visited.add(nid)
+                            sorted_children.append(nid)
+                            for edge in child_outgoing[nid]:
+                                target = edge.target
+                                if all(s in visited for s in child_incoming[target]):
+                                    ready.append(target)
+                        if not sorted_children:
+                            sorted_children = [n.id for n in child_nodes]
+                        child_node_map = {n.id: n for n in child_nodes}
+
+                        async def _run_batch_child(item_idx: int, item: Any) -> dict:
+                            local_outputs = {
+                                "input": dict(outputs.get("input") or {}),
+                                "nodes": dict(outputs.get("nodes") or {}),
+                                "item": item,
+                                "item_value": item.get("line") if isinstance(item, dict) and "line" in item else item,
+                            }
+                            node_results: dict[str, Any] = {}
+                            for cid in sorted_children:
+                                cn = child_node_map[cid]
+                                if cn.type != "skill":
+                                    node_results[cid] = {"result": {}, "status": "skipped"}
+                                    local_outputs["nodes"][cid] = node_results[cid]
+                                    continue
+                                child_skill_name = str((cn.config or {}).get("skill_name") or "").strip()
+                                child_skill_id = str((cn.config or {}).get("skill_id") or "").strip()
+                                skill: Skill | None = None
+                                if child_skill_id:
+                                    skill = await self._get_skill(skill_id=child_skill_id, user_id=workflow.user_id, require_enabled=True)
+                                elif child_skill_name:
+                                    skill = await self._get_skill_by_name(skill_name=child_skill_name, user_id=workflow.user_id, require_enabled=True)
+                                if skill is None:
+                                    node_results[cid] = {"result": {"error": f"Skill not found: {child_skill_name or child_skill_id}"}, "status": "failed"}
+                                    local_outputs["nodes"][cid] = node_results[cid]
+                                    continue
+                                pt = (cn.config or {}).get("payload_template") or {}
+                                payload = _render_template(pt, local_outputs)
+                                if not isinstance(payload, dict):
+                                    payload = {"value": payload}
+                                else:
+                                    payload = _strip_blank_skill_params(payload)
+                                try:
+                                    raw = await _execute_skill_for_user(self.db, workflow.user_id, skill, payload, tenant_facing=tenant_facing)
+                                    result = _to_result_dict(raw)
+                                    node_results[cid] = {"result": result, "status": "success"}
+                                except Exception as exc:
+                                    node_results[cid] = {"result": {"error": str(exc)}, "status": "failed"}
+                                local_outputs["nodes"][cid] = node_results[cid]
+                            return {"index": item_idx, "item": item, "children": node_results}
+
+                        sem = asyncio.Semaphore(max_concurrent)
+                        async def _bounded(item_idx: int, item: Any) -> dict:
+                            async with sem:
+                                return await _run_batch_child(item_idx, item)
+                        tasks = [_bounded(i, it) for i, it in enumerate(items)]
+                        batch_results = list(await asyncio.gather(*tasks))
+                        record["result"] = {"items": batch_results, "count": len(items), "children": [n.id for n in child_nodes]}
+                        record["status"] = "success"
+                        return node_id, record
+
+                    # No child nodes: use config-based approach (backward compat)
+                    list_path = str(cfg.get("list_path") or "").strip()
+                    if not list_path:
+                        raise RuntimeError("batch node requires config.list_path")
+                    items_raw = _resolve_path(list_path, outputs)
+                    items: list[Any] = []
+                    if isinstance(items_raw, list):
+                        items = list(items_raw)
+                    elif isinstance(items_raw, str) and items_raw.strip():
+                        stripped = items_raw.strip()
+                        if stripped.startswith("["):
+                            try:
+                                import json as _json
+                                parsed = _json.loads(stripped)
+                                items = parsed if isinstance(parsed, list) else [parsed]
+                            except Exception:
+                                items = [{"line": l.strip()} for l in stripped.split("\n") if l.strip()]
+                        else:
+                            items = [{"line": l.strip()} for l in stripped.split("\n") if l.strip()]
+                    if not items:
+                        record["result"] = {"items": [], "count": 0}
+                        record["status"] = "success"
+                        return node_id, record
+                    item_key = str(cfg.get("item_key") or "").strip()
+                    skill_name = str(cfg.get("skill_name") or "").strip()
+                    if not skill_name:
+                        raise RuntimeError("batch node requires config.skill_name")
+                    skill = await self._get_skill_by_name(
+                        skill_name=skill_name,
+                        user_id=workflow.user_id,
+                        require_enabled=True,
+                    )
+                    if skill is None:
+                        raise RuntimeError(f"batch node: skill '{skill_name}' not found")
+                    payload_tpl = cfg.get("payload_template") or {}
+                    max_concurrent = max(1, int(cfg.get("max_concurrent") or 3))
+                    batch_results: list[Any] = []
+                    sem = asyncio.Semaphore(max_concurrent)
+
+                    async def _run_batch_item(idx: int, item: Any) -> Any:
+                        async with sem:
+                            ctx = outputs.copy()
+                            if item_key and isinstance(item, dict):
+                                ctx["item"] = item
+                                ctx["item_value"] = item.get(item_key)
+                            else:
+                                ctx["item"] = item
+                                ctx["item_value"] = item
+                            payload = _render_template(payload_tpl, ctx)
+                            if not isinstance(payload, dict):
+                                payload = {"value": payload}
+                            try:
+                                raw = await _execute_skill_for_user(
+                                    self.db, workflow.user_id, skill, payload,
+                                    tenant_facing=tenant_facing,
+                                )
+                                return {"index": idx, "item": item, "result": _to_result_dict(raw)}
+                            except Exception as exc:
+                                return {"index": idx, "item": item, "error": str(exc)}
+
+                    tasks = [_run_batch_item(i, item) for i, item in enumerate(items)]
+                    batch_results = list(await asyncio.gather(*tasks))
+                    record["result"] = {"items": batch_results, "count": len(items)}
                     record["status"] = "success"
                     return node_id, record
 

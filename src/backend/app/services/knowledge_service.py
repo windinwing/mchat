@@ -63,6 +63,10 @@ def _kb_to_response(kb: KnowledgeBase) -> KnowledgeBaseResponse:
         rerank_model=kb.rerank_model,
         retrieval_query_rewrite_enabled=kb.retrieval_query_rewrite_enabled,
         retrieval_query_rewrite_count=kb.retrieval_query_rewrite_count,
+        retrieval_stop_words=kb.retrieval_stop_words,
+        retrieval_query_suffix_chars=kb.retrieval_query_suffix_chars,
+        retrieval_user_dict=kb.retrieval_user_dict,
+        retrieval_keyword_backend=kb.retrieval_keyword_backend,
         indexed_embedding_key=kb.indexed_embedding_key,
         needs_reindex=needs_reindex(kb),
         reindex_status=kb.reindex_status,
@@ -95,11 +99,25 @@ def _apply_rag_fields(kb: KnowledgeBase, data: KnowledgeBaseCreate | KnowledgeBa
         "rerank_model",
         "retrieval_query_rewrite_enabled",
         "retrieval_query_rewrite_count",
+        "retrieval_stop_words",
+        "retrieval_query_suffix_chars",
+        "retrieval_user_dict",
+        "retrieval_keyword_backend",
     ]
+    tokenizer_fields = {
+        "retrieval_user_dict",
+    }
+    tokenizer_changed = False
     for field in fields:
         value = getattr(data, field, None)
         if value is not None:
+            if field in tokenizer_fields:
+                tokenizer_changed = True
             setattr(kb, field, value)
+    if tokenizer_changed:
+        from app.knowledge.bm25 import bm25_index
+
+        bm25_index.invalidate(kb.id)
 
 
 def _doc_to_list_item(doc: Document) -> DocumentListItem:

@@ -76,6 +76,14 @@ class KnowledgeBase(Base):
     retrieval_query_rewrite_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=3
     )
+    retrieval_stop_words: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retrieval_query_suffix_chars: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
+    retrieval_user_dict: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retrieval_keyword_backend: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="local"
+    )  # local | elasticsearch
     # Semantic chunking
     chunk_semantic_threshold: Mapped[float] = mapped_column(
         Float, nullable=False, default=0.7
