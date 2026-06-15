@@ -49,7 +49,7 @@ export function WorkflowGraphPage() {
       setLoading(true)
       try {
         const [wf, sk] = await Promise.all([
-          api.get<WorkflowDetail>(`/workflows/${workflowId}`),
+          api.get<WorkflowDetail>(`/workflows/wf/${workflowId}`),
           api.get<WorkflowSkillOption[]>('/skills'),
         ])
         setWorkflow(wf)

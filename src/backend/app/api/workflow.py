@@ -280,6 +280,25 @@ async def list_pending_approvals(
     )
 
 
+@router.get("/wf/{workflow_id}", response_model=WorkflowResponse)
+async def get_workflow(
+    workflow_id: str,
+    admin: User = Depends(require_permission(Permission.SKILLS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetch a single workflow by ID (for the graph editor page)."""
+    wf = await WorkflowService(db)._get_workflow(workflow_id=workflow_id, user_id=admin.id)
+    return WorkflowResponse(
+        id=wf.id,
+        name=wf.name,
+        description=wf.description,
+        enabled=wf.enabled,
+        graph_json=wf.graph_json,
+        created_at=wf.created_at,
+        updated_at=wf.updated_at,
+    )
+
+
 @router.post("/approvals/{approval_id}/approve", response_model=WorkflowApprovalResponse)
 async def approve_workflow_task(
     approval_id: str,
