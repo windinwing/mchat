@@ -1212,10 +1212,24 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
         </div>
         <div className="flex items-center gap-1">
           {headerExtra}
-          <IconToolButton title={t('workflows.graphDeleteSelected')} onClick={removeSelected} disabled={!selectedNodeId && !selectedEdgeId} className="text-red-600 dark:text-red-400">
-            <Trash2 className="h-4 w-4" />
-          </IconToolButton>
-          <button type="button" onClick={saveGraph} className="flex items-center gap-1 rounded-md bg-primary-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-primary-700">
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title={fullScreen ? t('workflows.graphExitFullscreen') : t('workflows.graphFullscreen')}
+            className="inline-flex items-center justify-center rounded-md border border-gray-200 dark:border-gray-700 p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            {fullScreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            type="button"
+            onClick={removeSelected}
+            disabled={!selectedNodeId && !selectedEdgeId}
+            title={t('workflows.graphDeleteSelected')}
+            className="inline-flex items-center justify-center rounded-md border border-gray-200 dark:border-gray-700 p-1.5 text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+          <button type="button" onClick={saveGraph} className="flex items-center gap-1 rounded-md bg-primary-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-primary-700">
             <Save className="h-3.5 w-3.5" />
             {t('workflows.graphSave')}
           </button>

@@ -5,8 +5,14 @@ import {
   ChevronRight,
   Search,
   Box,
-  Workflow as WorkflowIcon,
   Plus,
+  CirclePlay,
+  Split,
+  ShieldCheck,
+  GitMerge,
+  Repeat,
+  Square,
+  Wrench,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -135,6 +141,17 @@ export function WorkflowSidebar({ skills, locale, onAddControlNode, presets }: W
 
   const categoryLabel = (cat: WorkflowSkillCategory): string => t(`workflows.skillCategory.${cat}`)
 
+  const NODE_ICONS: Record<GraphNodeType, React.ComponentType<{ className?: string }>> = {
+    start: CirclePlay,
+    skill: Wrench,
+    condition: Split,
+    approval: ShieldCheck,
+    merge: GitMerge,
+    batch: Repeat,
+    end: Square,
+    group: Box,
+  }
+
   const beginControlDrag = (e: React.DragEvent, nodeType: GraphNodeType) => {
     e.dataTransfer.setData(DRAG_MIME, JSON.stringify({ kind: 'control', nodeType }))
   }
@@ -166,16 +183,19 @@ export function WorkflowSidebar({ skills, locale, onAddControlNode, presets }: W
       <div className="flex-1 overflow-y-auto p-2">
         {/* Control nodes */}
         <CategorySection title={t('workflows.controlNodes', 'Control')} count={CONTROL_NODE_TYPES.length} defaultOpen>
-          {CONTROL_NODE_TYPES.map((nt) => (
+          {CONTROL_NODE_TYPES.map((nt) => {
+            const Icon = NODE_ICONS[nt] || Box
+            return (
             <NodeDragItem
               key={nt}
               label={nodeTypeLabel(nt)}
               color={NODE_COLORS[nt]}
-              icon={<WorkflowIcon className="w-3.5 h-3.5" />}
+              icon={<Icon className="w-3.5 h-3.5" />}
               onClick={() => onAddControlNode(nt)}
               onDragStart={(e) => beginControlDrag(e, nt)}
             />
-          ))}
+            )
+          })}
         </CategorySection>
 
         {/* Patent presets */}
