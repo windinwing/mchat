@@ -1407,37 +1407,47 @@ class WorkflowService:
             if not batch:
                 break
             results = await asyncio.gather(*[run_node(nid) for nid in batch])
+            hit_pause = False
             for node_id, rec in results:
                 node_runs.append(rec)
                 if rec.get("status") == "paused":
-                    pause_reason = {
-                        "node_id": node_id,
-                        "node_name": rec.get("node_name"),
-                        "approval_id": (rec.get("result") or {}).get("approval_id"),
-                    }
-                    final_status = "paused"
-                    final_error = "approval required"
                     outputs["nodes"][node_id] = rec.get("result")
-                    ready = []
-                    break
+                    if not hit_pause:
+                        pause_reason = {
+                            "node_id": node_id,
+                            "node_name": rec.get("node_name"),
+                            "approval_id": (rec.get("result") or {}).get("approval_id"),
+                        }
+                        final_status = "paused"
+                        final_error = "approval required"
+                        hit_pause = True
+                    # Paused nodes wait for approval — they are not 'done'.
+                    # Don't break: keep recording sibling results below so
+                    # they aren't re-executed on resume. Only suppress new
+                    # downstream scheduling (hit_pause guard).
+                    continue
                 done.add(node_id)
                 outputs["nodes"][node_id] = rec.get("result")
-                if rec.get("status") == "failed":
+                if rec.get("status") == "failed" and not hit_pause:
                     final_status = "failed"
                     final_error = rec.get("error") or "node failed"
-                for edge in outgoing.get(node_id, []):
-                    target = edge.target
-                    deps = incoming[target]
-                    if all(dep in done for dep in deps) and target not in done:
-                        target_node = nodes[target]
-                        if nodes[node_id].type == "condition":
-                            cond = rec.get("result", {}).get("condition")
-                            edge_cond = (edge.condition or "default").lower()
-                            if edge_cond == "true" and cond is not True:
-                                continue
-                            if edge_cond == "false" and cond is not False:
-                                continue
-                        ready.append(target)
+                if not hit_pause:
+                    for edge in outgoing.get(node_id, []):
+                        target = edge.target
+                        deps = incoming[target]
+                        if all(dep in done for dep in deps) and target not in done:
+                            target_node = nodes[target]
+                            if nodes[node_id].type == "condition":
+                                cond = rec.get("result", {}).get("condition")
+                                edge_cond = (edge.condition or "default").lower()
+                                if edge_cond == "true" and cond is not True:
+                                    continue
+                                if edge_cond == "false" and cond is not False:
+                                    continue
+                            ready.append(target)
+            if hit_pause:
+                ready = []
+                break
 
         payload = {
             "graph": graph.model_dump(),
