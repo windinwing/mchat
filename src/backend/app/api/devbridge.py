@@ -167,6 +167,42 @@ async def rollback_provider_project_release(
     )
 
 
+# ── Game center (metadata-enhanced project listing) ──
+
+
+@router.get("/providers/{provider_key}/games")
+async def list_provider_games(
+    provider_key: str,
+    current_user: User = Depends(require_permission(Permission.DEVBRIDGE_READ)),
+):
+    """List all games with metadata from game.meta.json."""
+    provider = get_devbridge_provider(provider_key)
+    return provider.service_factory().list_games()
+
+
+@router.get("/providers/{provider_key}/games/{slug}")
+async def get_provider_game(
+    provider_key: str,
+    slug: str,
+    current_user: User = Depends(require_permission(Permission.DEVBRIDGE_READ)),
+):
+    """Single game detail with metadata."""
+    provider = get_devbridge_provider(provider_key)
+    return provider.service_factory().get_game(slug)
+
+
+@router.patch("/providers/{provider_key}/games/{slug}/meta")
+async def update_provider_game_meta(
+    provider_key: str,
+    slug: str,
+    request: dict,
+    current_user: User = Depends(require_permission(Permission.DEVBRIDGE_WRITE)),
+):
+    """Update game.meta.json (name, category, description, etc.)."""
+    provider = get_devbridge_provider(provider_key)
+    return provider.service_factory().update_game_meta(slug, request)
+
+
 # ── new generic development endpoints ──
 
 

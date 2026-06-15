@@ -269,6 +269,81 @@ class RootedProjectBridgeService:
             top_level_files=self._top_level_files(project_dir),
         )
 
+    # ── Game metadata (game.meta.json) ──
+
+    _META_FILE = "game.meta.json"
+    _CATEGORIES = {"game", "puzzle", "action", "rpg", "strategy", "casual", "tool", "web", "other"}
+
+    def _read_game_meta(self, project_dir: Path, slug: str) -> dict:
+        """Read game.meta.json, or auto-derive minimal metadata."""
+        meta_path = project_dir / self._META_FILE
+        if meta_path.is_file():
+            try:
+                return json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        # Auto-derive from project structure
+        engine = "unknown"
+        if self._is_cocos_project_dir(project_dir):
+            engine = "cocos"
+        elif (project_dir / "index.html").is_file():
+            engine = "web"
+        elif (project_dir / "package.json").is_file():
+            engine = "node"
+        # Beautify slug as name
+        name = slug.replace("_", " ").replace("-", " ").title()
+        return {"name": name, "category": "game" if engine in ("cocos", "web") else "tool", "description": "", "engine": engine, "version": "1.0.0"}
+
+    def list_games(self) -> list[dict]:
+        """List all projects enriched with game metadata."""
+        games: list[dict] = []
+        for discovered in self._discover_projects():
+            project_dir = discovered.path
+            meta = self._read_game_meta(project_dir, discovered.slug)
+            play_urls = self._play_urls(discovered.slug)
+            games.append({
+                "slug": discovered.slug,
+                "name": meta.get("name") or discovered.slug,
+                "category": meta.get("category") or "other",
+                "description": meta.get("description") or "",
+                "engine": meta.get("engine") or "unknown",
+                "version": meta.get("version") or "1.0.0",
+                "tags": meta.get("tags") or [],
+                "has_meta": (project_dir / self._META_FILE).is_file(),
+                "has_build": self._build_dir(project_dir).is_dir(),
+                "play_url": play_urls[0] if play_urls else None,
+                "source_updated_at": self._timestamp(project_dir),
+            })
+        return games
+
+    def get_game(self, slug: str) -> dict:
+        """Single game detail with metadata."""
+        project_dir = self._project_dir(slug)
+        meta = self._read_game_meta(project_dir, slug)
+        play_urls = self._play_urls(slug)
+        return {
+            "slug": slug,
+            "name": meta.get("name") or slug,
+            "category": meta.get("category") or "other",
+            "description": meta.get("description") or "",
+            "engine": meta.get("engine") or "unknown",
+            "version": meta.get("version") or "1.0.0",
+            "tags": meta.get("tags") or [],
+            "has_meta": (project_dir / self._META_FILE).is_file(),
+            "has_build": self._build_dir(project_dir).is_dir(),
+            "play_urls": play_urls,
+            "source_updated_at": self._timestamp(project_dir),
+        }
+
+    def update_game_meta(self, slug: str, updates: dict) -> dict:
+        """Update game.meta.json (merge updates into existing)."""
+        project_dir = self._project_dir(slug)
+        meta_path = project_dir / self._META_FILE
+        existing = self._read_game_meta(project_dir, slug)
+        existing.update({k: v for k, v in updates.items() if v is not None})
+        meta_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+        return existing
+
     def _resolve_browsable_path(self, project_dir: Path, relpath: str) -> Path:
         rel = _safe_relpath(relpath)
         if not rel:
@@ -998,6 +1073,19 @@ class RootedProjectBridgeService:
             else:
                 target.touch()
             created.append(rel)
+
+        # Auto-generate game.meta.json
+        tmpl_category = tmpl_def.get("category", "other")
+        meta = {
+            "name": slug_safe.replace("_", " ").replace("-", " ").title(),
+            "category": "game" if tmpl_category in ("cocos", "web") else tmpl_category,
+            "description": tmpl_def.get("description") or "",
+            "engine": tmpl_category,
+            "version": "1.0.0",
+        }
+        (project_dir / self._META_FILE).write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
         self._auto_allowlist_slug(slug_safe, actual_provider)
 

@@ -5,9 +5,11 @@ import {
   Code2,
   FileText,
   FolderOpen,
+  Gamepad2,
   Hammer,
   History,
   Loader2,
+  Play,
   RefreshCw,
   Rocket,
   RotateCcw,
@@ -46,6 +48,20 @@ interface DevBridgeProject {
   top_level_files?: string[]
 }
 
+interface GameCard {
+  slug: string
+  name: string
+  category: string
+  description: string
+  engine: string
+  version: string
+  tags: string[]
+  has_meta: boolean
+  has_build: boolean
+  play_url: string | null
+  source_updated_at?: string | null
+}
+
 interface DevBridgeFileEntry {
   path: string
   name: string
@@ -82,13 +98,15 @@ interface DevBridgeRelease {
   play_url?: string | null
 }
 
-type DevBridgeTab = 'projects' | 'settings'
+type DevBridgeTab = 'projects' | 'games' | 'settings'
 
 export function DevBridgePage() {
   const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab: DevBridgeTab =
-    searchParams.get('tab') === 'settings' ? 'settings' : 'projects'
+    searchParams.get('tab') === 'settings' ? 'settings'
+    : searchParams.get('tab') === 'games' ? 'games'
+    : 'projects'
   const [providers, setProviders] = useState<DevBridgeProvider[]>([])
   const [loadingProviders, setLoadingProviders] = useState(true)
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
@@ -115,6 +133,9 @@ export function DevBridgePage() {
   const [rollingBackId, setRollingBackId] = useState<string | null>(null)
   const [projectQuery, setProjectQuery] = useState('')
   const [permSet, setPermSet] = useState<Set<string>>(new Set())
+  const [games, setGames] = useState<GameCard[]>([])
+  const [loadingGames, setLoadingGames] = useState(false)
+  const [gameFilter, setGameFilter] = useState('all')
   const canDevbridgeWrite = permSet.has('devbridge:write')
   const canDevbridgeSettings = permSet.has('devbridge:settings:read')
 
@@ -168,6 +189,18 @@ export function DevBridgePage() {
       setLoadingProjects(false)
     }
   }, [t])
+
+  const loadGames = useCallback(async (providerKey: string) => {
+    setLoadingGames(true)
+    try {
+      const data = await api.get<GameCard[]>(`/devbridge/providers/${providerKey}/games`)
+      setGames(data || [])
+    } catch {
+      setGames([])
+    } finally {
+      setLoadingGames(false)
+    }
+  }, [])
 
   const loadProjectDetail = useCallback(async (providerKey: string, slug: string) => {
     try {
@@ -411,6 +444,22 @@ export function DevBridgePage() {
             >
               {t('devbridge.tabProjects')}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchParams({ tab: 'games' })
+                if (selectedProvider) void loadGames(selectedProvider)
+              }}
+              className={cn(
+                'px-3 py-1.5 text-sm font-medium rounded-md transition-colors inline-flex items-center gap-1.5',
+                activeTab === 'games'
+                  ? 'bg-white dark:bg-gray-800 text-primary-700 dark:text-primary-300 shadow-sm'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200',
+              )}
+            >
+              <Gamepad2 className="w-3.5 h-3.5" />
+              {t('devbridge.tabGames', '游戏中心')}
+            </button>
             {canDevbridgeSettings && (
               <button
                 type="button"
@@ -444,6 +493,124 @@ export function DevBridgePage() {
 
       {activeTab === 'settings' ? (
         <DevBridgeSettingsPanel />
+      ) : activeTab === 'games' ? (
+        <div className="space-y-4">
+          {/* Provider selector */}
+          {!selectedProvider && providers.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {providers.map((p) => (
+                <button key={p.key} onClick={() => { setSelectedProvider(p.key); void loadGames(p.key) }} className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800">
+                  {p.title}
+                </button>
+              ))}
+            </div>
+          )}
+          {loadingGames ? (
+            <div className="flex justify-center py-16"><Spinner size="md" /></div>
+          ) : games.length === 0 ? (
+            <Card><CardContent className="py-10 text-center text-gray-500 dark:text-gray-400">
+              {t('devbridge.noGames', '暂无游戏项目')}
+            </CardContent></Card>
+          ) : (
+            <>
+              {/* Category filter */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {[...new Set(games.map((g) => g.category))].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setGameFilter(gameFilter === cat ? 'all' : cat)}
+                    className={cn(
+                      'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                      gameFilter === cat || (gameFilter === 'all' && false)
+                        ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300'
+                        : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800',
+                    )}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              {/* Game grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {games
+                  .filter((g) => gameFilter === 'all' || g.category === gameFilter)
+                  .map((game) => (
+                    <div
+                      key={game.slug}
+                      className="group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden hover:shadow-md transition-shadow"
+                    >
+                      {/* Cover placeholder */}
+                      <div className="aspect-video bg-gradient-to-br from-primary-400/20 to-purple-400/20 flex items-center justify-center relative">
+                        <Gamepad2 className="w-10 h-10 text-primary-400/40" />
+                        <span className="absolute top-2 right-2 rounded-md bg-black/40 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur">
+                          {game.engine}
+                        </span>
+                        {game.has_build && (
+                          <span className="absolute top-2 left-2 rounded-md bg-green-500/80 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                            ● 已构建
+                          </span>
+                        )}
+                      </div>
+                      {/* Info */}
+                      <div className="p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate flex-1">
+                            {game.name}
+                          </h3>
+                          <span className="shrink-0 rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-500">
+                            {game.category}
+                          </span>
+                        </div>
+                        {game.description && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-2">
+                            {game.description}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                          <span>v{game.version}</span>
+                          {game.source_updated_at && (
+                            <span>· {new Date(game.source_updated_at).toLocaleDateString()}</span>
+                          )}
+                        </div>
+                        {/* Actions */}
+                        <div className="mt-2.5 flex items-center gap-1.5">
+                          {game.play_url && (
+                            <a
+                              href={game.play_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 rounded-md bg-primary-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-primary-700"
+                            >
+                              <Play className="w-3 h-3" />
+                              {t('devbridge.play', '试玩')}
+                            </a>
+                          )}
+                          <button
+                            onClick={() => {
+                              setSelectedProvider(providers.find((p) => p.enabled)?.key || providers[0]?.key || '')
+                              setSearchParams({})
+                              // Navigate to project detail
+                              setTimeout(() => {
+                                const proj = projects.find((p) => p.slug === game.slug)
+                                if (proj) {
+                                  setSelectedProject(proj)
+                                  void loadProjectDetail(selectedProvider || '', game.slug)
+                                }
+                              }, 100)
+                            }}
+                            className="flex items-center gap-1 rounded-md border border-gray-200 dark:border-gray-600 px-2.5 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                          >
+                            <Code2 className="w-3 h-3" />
+                            {t('devbridge.develop', '开发')}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </>
+          )}
+        </div>
       ) : loadingProviders ? (
         <div className="flex justify-center py-16"><Spinner size="md" /></div>
       ) : providers.length === 0 ? (
