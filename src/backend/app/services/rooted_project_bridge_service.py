@@ -63,6 +63,11 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+import re
+
+_SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$")
+
+
 def _safe_relpath(value: str) -> str:
     text = (value or "").strip().replace("\\", "/").strip("/")
     if not text:
@@ -71,6 +76,14 @@ def _safe_relpath(value: str) -> str:
     if any(part in {".", ".."} for part in parts):
         raise HTTPException(status_code=400, detail="Invalid path")
     return "/".join(parts)
+
+
+def _validate_slug(slug: str) -> str:
+    """Strict slug validation to prevent shell injection in build commands."""
+    s = (slug or "").strip()
+    if not s or not _SLUG_RE.match(s):
+        raise HTTPException(status_code=400, detail="Invalid project slug: use only letters, digits, dash, underscore, dot")
+    return s
 
 
 def _candidate_relpaths(slug: str, relpath: str, readable_roots: tuple[str, ...]) -> list[str]:
@@ -173,14 +186,8 @@ class RootedProjectBridgeService:
         return root
 
     def _project_dir(self, slug: str) -> Path:
-        safe_slug = _safe_relpath(slug)
-        if not safe_slug or "/" in safe_slug:
-            raise HTTPException(status_code=400, detail="Invalid project slug")
+        safe_slug = _validate_slug(slug)
         if self.config.project_allowlist is not None and safe_slug not in self.config.project_allowlist:
-            # Fallback for newly created projects: try direct path in source_root
-            direct = (self.config.source_root / safe_slug).resolve()
-            if direct.is_dir():
-                return direct
             raise HTTPException(status_code=403, detail="Project not allowed")
         for root in self._all_source_roots():
             outer = (root / safe_slug).resolve()
@@ -777,9 +784,12 @@ class RootedProjectBridgeService:
         synced_extracted = self._sync_extracted_release(slug, release_dir)
         keep = max(int(self.config.release_keep or 20), 1)
         releases_root = self._playable_project_root(slug) / "releases"
+        # Identify the release currently pointed to by 'current' symlink
+        current_link = self._playable_project_root(slug) / "current"
+        current_target = current_link.resolve().name if current_link.is_symlink() else None
         siblings = sorted(releases_root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
         for old in siblings[keep:]:
-            if old.is_dir():
+            if old.is_dir() and old.name != current_target:
                 shutil.rmtree(old, ignore_errors=True)
         play_urls = self._play_urls(slug)
         play_url = play_urls[0] if play_urls else None
@@ -855,9 +865,9 @@ class RootedProjectBridgeService:
     def search_files(self, slug: str, pattern: str, *, path_hint: str = "", max_matches: int = 40) -> dict:
         self._ensure_enabled()
         project_dir = self._project_dir(slug)
-        compiled = re.compile(re.escape(pattern) if not any(c in pattern for c in ".*+?[](){}|\\") else pattern, re.IGNORECASE)
-        if all(c.isalnum() or c in " _-/" for c in pattern):
-            compiled = re.compile(re.escape(pattern), re.IGNORECASE)
+        # Always use re.escape to prevent ReDoS; users search by literal text.
+        # If regex is needed, it should be an explicit opt-in feature.
+        compiled = re.compile(re.escape(pattern), re.IGNORECASE)
         hint_path = _safe_relpath(path_hint)
         walk_root = project_dir
         if hint_path:
@@ -999,9 +1009,7 @@ class RootedProjectBridgeService:
     }
 
     def create_project(self, slug: str, template: str, *, provider_key: str | None = None) -> dict:
-        slug_safe = _safe_relpath(slug)
-        if not slug_safe:
-            raise HTTPException(status_code=400, detail="Invalid project slug")
+        slug_safe = _validate_slug(slug)
         actual_provider = provider_key or self.config.provider_key
         source_root = self.config.source_root
         project_dir = source_root / slug_safe

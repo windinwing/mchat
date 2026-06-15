@@ -60,12 +60,14 @@ def load_config() -> dict[str, Any]:
 
 
 def _check_token(config: dict[str, Any], header_value: str | None) -> bool:
+    import hmac
     expected = str(config.get("token") or "").strip()
     if not expected:
-        return True
+        # No token configured — reject all requests for safety
+        return False
     if not header_value or not header_value.startswith("Bearer "):
         return False
-    return header_value[7:].strip() == expected
+    return hmac.compare_digest(header_value[7:].strip(), expected)
 
 
 def _bash_exe(config: dict[str, Any]) -> str:
@@ -103,12 +105,15 @@ def _run_pipeline(
         raise FileNotFoundError(f"bash not found: {bash}")
 
     pipeline_posix = pipeline.replace("\\", "/")
-    cmd = f"bash '{pipeline_posix}' '{deploy_host}' '{slug}'"
+    # Pass arguments as positional parameters to avoid shell injection via slug/deploy_host
+    script = f'source "{pipeline_posix}"'
+    args_list = [deploy_host, slug]
     if force:
-        cmd += " --force"
+        args_list.append("--force")
     if skip_pull:
-        cmd += " --skip-pull"
-    args = [bash, "--noprofile", "--norc", "-lc", cmd]
+        args_list.append("--skip-pull")
+    # bash -c 'script "$@"' bash arg1 arg2 ... (positional, no interpolation)
+    args = [bash, "--noprofile", "--norc", "-lc", f'{script} "$@"', "bash"] + args_list
 
     started = _utc_now()
     job = {
@@ -274,8 +279,15 @@ def main() -> int:
         print(f"Failed to load config: {exc}", file=sys.stderr)
         return 1
 
-    host = str(config.get("host") or "0.0.0.0").strip()
+    token = str(config.get("token") or "").strip()
+    host = str(config.get("host") or ("0.0.0.0" if token else "127.0.0.1")).strip()
     port = int(config.get("port") or 19280)
+    if not token:
+        print(
+            "WARNING: No 'token' configured — all requests will be rejected. "
+            "Set a token in the agent config JSON.",
+            file=sys.stderr,
+        )
     httpd = ThreadingHTTPServer((host, port), AgentHandler)
     httpd.config = config  # type: ignore[attr-defined]
     print(

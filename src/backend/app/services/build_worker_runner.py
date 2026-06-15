@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from fastapi import HTTPException
 from loguru import logger
 
 from app.services.gamecenter_provider import create_gamecenter_bridge_service
+from app.services.devbridge_registry import get_devbridge_provider
+from app.services.devbridge_admin_settings import load_devbridge_admin_settings
 
 
 def execute_queued_build_job(job: dict) -> dict:
@@ -19,14 +18,29 @@ def execute_queued_build_job(job: dict) -> dict:
         return {"ok": False, "error": "invalid job"}
 
     provider_key = str(job.get("provider_key") or "gamecenter").strip().lower()
-    if provider_key != "gamecenter":
-        logger.error("Unsupported build provider: {}", provider_key)
-        return {"ok": False, "error": f"unsupported provider: {provider_key}"}
 
-    service = create_gamecenter_bridge_service()
+    # Resolve the provider's service instance
+    if provider_key == "gamecenter":
+        service = create_gamecenter_bridge_service()
+    else:
+        provider = get_devbridge_provider(provider_key)
+        if provider is None:
+            logger.error("Unknown build provider: {}", provider_key)
+            return {"ok": False, "error": f"unknown provider: {provider_key}"}
+        # Build service from admin settings for this provider
+        from app.services.configured_bridge_provider import create_configured_bridge_service
+        admin_settings = load_devbridge_admin_settings()
+        cfg = admin_settings.get("custom_providers", {}).get(provider_key, {})
+        if not cfg:
+            cfg = provider.config if hasattr(provider, 'config') else {}
+        service = create_configured_bridge_service(provider_key, cfg)
+
     try:
         return service.run_queued_build(job)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         logger.warning("Build job failed slug={} build_id={}: {}", slug, build_id, detail)
         return {"ok": False, "error": detail}
+    except Exception as exc:
+        logger.exception("Build job crashed slug={} build_id={}", slug, build_id)
+        return {"ok": False, "error": str(exc)}
