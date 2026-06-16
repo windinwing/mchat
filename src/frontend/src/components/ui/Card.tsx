@@ -33,7 +33,7 @@ export function CardHeader({
   return (
     <div
       className={cn(
-        'px-6 py-4 border-b border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 font-medium',
+        'px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-900 dark:text-gray-100',
         className,
       )}
     >
@@ -49,7 +49,7 @@ export function CardContent({
   className?: string
   children: React.ReactNode
 }) {
-  return <div className={cn('px-6 py-4', className)}>{children}</div>
+  return <div className={cn('px-4 py-3', className)}>{children}</div>
 }
 
 export function CardFooter({

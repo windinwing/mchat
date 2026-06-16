@@ -17,6 +17,7 @@ import {
 
 import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
+import { WorkflowTemplateGallery } from '@/components/workflow/WorkflowTemplateGallery'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -170,6 +171,7 @@ export function WorkflowsPage() {
   const [descriptionInput, setDescriptionInput] = useState('')
   const [enabledInput, setEnabledInput] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [showTemplateGallery, setShowTemplateGallery] = useState(false)
   const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(new Set())
   const [batchDeleting, setBatchDeleting] = useState(false)
 
@@ -765,10 +767,10 @@ export function WorkflowsPage() {
           <Button
             variant="ghost"
             size="sm"
-            leftIcon={<Store className="w-4 h-4" />}
-            onClick={() => navigate(workflowCenterPath)}
+            leftIcon={<LayoutTemplate className="w-4 h-4" />}
+            onClick={() => setShowTemplateGallery(true)}
           >
-            {t('workflowCenter.browse')}
+            {t('workflows.sidebarTemplates', '模板')}
           </Button>
           <Button variant="ghost" size="sm" leftIcon={<RefreshCw className="w-4 h-4" />} onClick={loadAll}>
             {t('common.refresh')}
@@ -837,31 +839,6 @@ export function WorkflowsPage() {
         </details>
       ) : null}
 
-      {(builtinTemplates.length > 0 || myTemplates.length > 0) && (
-        <div className="space-y-4">
-          {builtinTemplates.length > 0 && (
-            <Card>
-              <CardHeader>{t('workflows.templatesTitle')}</CardHeader>
-              <CardContent className="grid gap-3 md:grid-cols-2">
-                {builtinTemplates.map(renderTemplateCard)}
-              </CardContent>
-            </Card>
-          )}
-          {myTemplates.length > 0 && (
-          <Card>
-            <CardHeader>{t('workflows.myTemplatesTitle')}</CardHeader>
-            <CardContent>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('workflows.myTemplatesHint')}</p>
-              {myTemplates.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">{t('workflows.myTemplatesEmpty')}</p>
-              ) : (
-                <div className="grid gap-3 md:grid-cols-2">{myTemplates.map(renderTemplateCard)}</div>
-              )}
-            </CardContent>
-          </Card>
-          )}
-        </div>
-      )}
 
       <Card>
         <CardHeader>{t('workflows.listTitle')}</CardHeader>
@@ -893,7 +870,6 @@ export function WorkflowsPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <Switch checked={row.enabled} onChange={(v) => toggleWorkflow(row, v)} />
                     <Button
                       size="sm"
                       variant="secondary"
@@ -1409,6 +1385,29 @@ export function WorkflowsPage() {
           </div>
         </div>
       </Dialog>
+
+      {/* Template gallery modal */}
+      <WorkflowTemplateGallery
+        open={showTemplateGallery}
+        onClose={() => setShowTemplateGallery(false)}
+        onApply={(graph) => {
+          // Save template graph as a new workflow
+          void (async () => {
+            try {
+              const created = await api.post<{ id: string }>('/workflows', {
+                name: t('workflows.fromTemplate', '从模板创建'),
+                description: '',
+                graph_json: graph,
+              })
+              toast(t('workflows.toastCreated'), { type: 'success' })
+              setShowTemplateGallery(false)
+              navigate(`/admin/workflows/${created.id}/graph`)
+            } catch (err) {
+              toast(err instanceof Error ? err.message : t('workflows.toastCreateFailed'), { type: 'error' })
+            }
+          })()
+        }}
+      />
     </div>
   )
 }
