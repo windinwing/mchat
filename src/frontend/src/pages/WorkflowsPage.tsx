@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Eye,
   LayoutTemplate,
+  MoreVertical,
   Network,
   Pencil,
   Play,
@@ -146,7 +147,6 @@ export function WorkflowsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [runDetailOpen, setRunDetailOpen] = useState(false)
-  const [graphOpen, setGraphOpen] = useState(false)
   const [runInputOpen, setRunInputOpen] = useState(false)
   const [runInputValues, setRunInputValues] = useState<Record<string, string>>({})
   const reportTitleTouchedRef = useRef(false)
@@ -165,7 +165,6 @@ export function WorkflowsPage() {
 
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowItem | null>(null)
   const [selectedRunDetail, setSelectedRunDetail] = useState<WorkflowRunDetail | null>(null)
-  const [graphDraft, setGraphDraft] = useState<WorkflowGraphValue | null>(null)
 
   const [nameInput, setNameInput] = useState('')
   const [descriptionInput, setDescriptionInput] = useState('')
@@ -693,17 +692,6 @@ export function WorkflowsPage() {
     navigate(`${isPortal ? '/portal' : '/admin'}/workflows/${row.id}/graph`)
   }
 
-  const saveGraph = async (graph: WorkflowGraphValue) => {
-    if (!selectedWorkflow) return
-    try {
-      await api.patch(`/workflows/${selectedWorkflow.id}`, { graph_json: graph })
-      toast(t('workflows.toastGraphSaved'), { type: 'success' })
-      setGraphOpen(false)
-      await loadAll()
-    } catch (err: unknown) {
-      showLimitToast(err, 'workflows.toastGraphSaveFailed')
-    }
-  }
 
   const openRunDetail = async (run: WorkflowRun) => {
     try {
@@ -764,11 +752,10 @@ export function WorkflowsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
             {t('workflows.pageTitle')}
-            <Badge variant="warning">{t('common.beta')}</Badge>
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {t('workflows.pageSubtitle')}
@@ -776,13 +763,14 @@ export function WorkflowsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button
-            variant="secondary"
+            variant="ghost"
+            size="sm"
             leftIcon={<Store className="w-4 h-4" />}
             onClick={() => navigate(workflowCenterPath)}
           >
             {t('workflowCenter.browse')}
           </Button>
-          <Button variant="secondary" leftIcon={<RefreshCw className="w-4 h-4" />} onClick={loadAll}>
+          <Button variant="ghost" size="sm" leftIcon={<RefreshCw className="w-4 h-4" />} onClick={loadAll}>
             {t('common.refresh')}
           </Button>
           <Button
@@ -797,9 +785,46 @@ export function WorkflowsPage() {
 
       <WorkflowEntitlementBanner />
 
+      {pendingApprovals.length > 0 && (
+      <Card className="border-amber-200 dark:border-amber-800">
+        <CardHeader className="flex items-center gap-2">
+          <span className="text-amber-600 dark:text-amber-400">⚠</span>
+          {t('workflows.approvalsTitle')}
+          <Badge variant="warning">{pendingApprovals.length}</Badge>
+        </CardHeader>
+        <CardContent className="p-0">
+            <div className="divide-y divide-gray-100 dark:divide-gray-700">
+              {pendingApprovals.map((task) => (
+                <div key={task.id} className="px-6 py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                      {task.workflow_name}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      {task.node_name || task.node_id} · {formatDate(task.created_at)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button size="sm" variant="secondary" onClick={() => approveTask(task)}>
+                      {t('workflows.approve')}
+                    </Button>
+                    <Button size="sm" variant="danger" onClick={() => rejectTask(task)}>
+                      {t('workflows.reject')}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+        </CardContent>
+      </Card>
+      )}
+
       {builtinTemplates.some((tpl) => tpl.category === 'notification') ? (
-        <Card>
-          <CardHeader>{t('workflows.notifyTestCardTitle')}</CardHeader>
+        <details className="group">
+          <summary className="cursor-pointer text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 select-none py-1">
+            {t('workflows.notifyTestCardTitle')} →
+          </summary>
+        <Card className="mt-1">
           <CardContent className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
             <ol className="list-decimal list-inside space-y-1">
               <li>{t('workflows.notifyTestStep1')}</li>
@@ -809,6 +834,7 @@ export function WorkflowsPage() {
             <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">{t('workflows.notifyTestDoc')}</p>
           </CardContent>
         </Card>
+        </details>
       ) : null}
 
       {(builtinTemplates.length > 0 || myTemplates.length > 0) && (
@@ -847,108 +873,65 @@ export function WorkflowsPage() {
             </div>
           ) : (
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
-              {workflows.map((row) => (
-                <div key={row.id} className="px-6 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <div className="min-w-0">
+              {workflows.map((row) => {
+                const hasGraph = row.graph_json?.nodes?.length || 0
+                return (
+                <div key={row.id} className="px-6 py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{row.name}</p>
-                      <button
-                        type="button"
-                        title={t('workflows.renameWorkflow')}
-                        aria-label={t('workflows.renameWorkflow')}
-                        onClick={() => openEdit(row)}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <Badge variant={row.enabled ? 'success' : 'default'}>
-                        {row.enabled ? t('common.enabled') : t('common.disabled')}
-                      </Badge>
+                      {!hasGraph ? (
+                        <Badge variant="default" className="text-[10px]">未编排</Badge>
+                      ) : (
+                        <Badge variant={row.enabled ? 'success' : 'default'} className="text-[10px]">
+                          {hasGraph} 节点
+                        </Badge>
+                      )}
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
                       {row.description || t('workflows.noDescription')}
                     </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      {t('workflows.updatedAt')}: {formatDate(row.updated_at)}
-                    </p>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <Switch checked={row.enabled} onChange={(v) => toggleWorkflow(row, v)} />
                     <Button
                       size="sm"
                       variant="secondary"
-                      leftIcon={<Play className="w-4 h-4" />}
+                      leftIcon={<Play className="w-3.5 h-3.5" />}
                       isLoading={!!runningMap[row.id]}
                       onClick={() => openRunDialog(row)}
+                      disabled={!hasGraph}
                     >
                       {t('workflows.runOnce')}
                     </Button>
-                    <Button size="sm" variant="outline" leftIcon={<Network className="w-4 h-4" />} onClick={() => openGraphEditor(row)}>
+                    <Button size="sm" variant="outline" leftIcon={<Network className="w-3.5 h-3.5" />} onClick={() => openGraphEditor(row)}>
                       {t('workflows.editGraph')}
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      leftIcon={<LayoutTemplate className="w-4 h-4" />}
-                      onClick={() => openSaveTemplate(row)}
-                    >
-                      {t('workflows.saveAsTemplate')}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => openEdit(row)}>
-                      {t('common.edit')}
-                    </Button>
-                    <button
-                      type="button"
-                      title={t('common.delete')}
-                      aria-label={t('common.delete')}
-                      onClick={() => deleteWorkflow(row)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="relative group">
+                      <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" title="更多">
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+                      <div className="absolute right-0 top-full mt-1 hidden group-hover:block z-20 min-w-[140px] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg py-1">
+                        <button type="button" onClick={() => openEdit(row)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
+                          <Pencil className="inline w-3 h-3 mr-1.5" />{t('common.edit')}
+                        </button>
+                        <button type="button" onClick={() => openSaveTemplate(row)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
+                          <LayoutTemplate className="inline w-3 h-3 mr-1.5" />{t('workflows.saveAsTemplate')}
+                        </button>
+                        <button type="button" onClick={() => deleteWorkflow(row)} className="block w-full px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40">
+                          <Trash2 className="inline w-3 h-3 mr-1.5" />{t('common.delete')}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {pendingApprovals.length > 0 && (
-      <Card>
-        <CardHeader>{t('workflows.approvalsTitle')}</CardHeader>
-        <CardContent className="p-0">
-          {pendingApprovals.length === 0 ? (
-            <div className="py-8 text-center text-gray-500 dark:text-gray-400">
-              {t('workflows.approvalsEmpty')}
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100 dark:divide-gray-700">
-              {pendingApprovals.map((task) => (
-                <div key={task.id} className="px-6 py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {task.workflow_name}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                      {task.node_name || task.node_id} · {formatDate(task.created_at)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button size="sm" variant="secondary" onClick={() => approveTask(task)}>
-                      {t('workflows.approve')}
-                    </Button>
-                    <Button size="sm" variant="danger" onClick={() => rejectTask(task)}>
-                      {t('workflows.reject')}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-      )}
 
       <Card>
         <CardHeader>
@@ -1425,18 +1408,6 @@ export function WorkflowsPage() {
             <Button onClick={confirmSaveTemplate} isLoading={saving} disabled={!templateNameInput.trim()}>{t('common.save')}</Button>
           </div>
         </div>
-      </Dialog>
-      <Dialog
-        open={graphOpen}
-        onClose={() => setGraphOpen(false)}
-        title={t('workflows.graphDialogTitle')}
-        size="full"
-        className="h-[95vh]"
-        bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
-      >
-        {graphDraft && (
-          <WorkflowGraphEditor value={graphDraft} skills={skills} onSave={saveGraph} workflowId={selectedWorkflow?.id} />
-        )}
       </Dialog>
     </div>
   )
