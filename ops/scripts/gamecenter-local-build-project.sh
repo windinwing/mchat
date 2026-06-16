@@ -101,11 +101,18 @@ find_cocos_bins_for_major() {
 discover_cocos_bin() {
   local project_dir="${1:-}"
 
-  local project_ver major matched
+  local project_ver major preferred
   project_ver="$(read_project_cocos_version "$project_dir")"
   if [[ -n "$project_ver" ]]; then
     major="${project_ver%%.*}"
-    matched="$(find_cocos_bins_for_major "$major" "$project_ver" || true)"
+    if [[ "$major" == "2" ]]; then
+      preferred="${GAMECENTER_COCOS_2_VERSION:-2.4.15}"
+    elif [[ "$major" == "3" ]]; then
+      preferred="${GAMECENTER_COCOS_3_VERSION:-3.8.8}"
+    else
+      preferred="$project_ver"
+    fi
+    matched="$(find_cocos_bins_for_major "$major" "$preferred" || true)"
     if [[ -n "$matched" ]]; then
       echo "$matched"
       return 0
@@ -121,7 +128,12 @@ discover_cocos_bin() {
     return 0
   fi
 
-  matched="$(find_cocos_bins_for_major 3 "" || true)"
+  matched="$(find_cocos_bins_for_major 3 "${GAMECENTER_COCOS_3_VERSION:-3.8.8}" || true)"
+  if [[ -n "$matched" ]]; then
+    echo "$matched"
+    return 0
+  fi
+  matched="$(find_cocos_bins_for_major 2 "${GAMECENTER_COCOS_2_VERSION:-2.4.15}" || true)"
   if [[ -n "$matched" ]]; then
     echo "$matched"
     return 0
@@ -130,10 +142,10 @@ discover_cocos_bin() {
   local candidate
   for candidate in \
     "/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/MacOS/CocosCreator" \
-    "/Applications/Cocos/Creator/3.8.3/CocosCreator.app/Contents/MacOS/CocosCreator" \
+    "/Applications/Cocos/Creator/2.4.15/CocosCreator.app/Contents/MacOS/CocosCreator" \
     "/c/ProgramData/cocos/editors/Creator/3.8.8/CocosCreator.exe" \
     "/c/Program Files/Cocos/Creator/3.8.8/CocosCreator.exe" \
-    "/c/Program Files/Cocos/Creator/3.8.3/CocosCreator.exe"; do
+    "/c/Program Files/Cocos/Creator/2.4.15/CocosCreator.exe"; do
     if [[ -x "$candidate" || -f "$candidate" ]]; then
       echo "$candidate"
       return 0
