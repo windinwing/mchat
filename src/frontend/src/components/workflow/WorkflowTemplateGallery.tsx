@@ -82,7 +82,8 @@ function MiniGraphPreview({ graph }: { graph: TemplateGraph }) {
 }
 
 export function WorkflowTemplateGallery({ open, onClose, onApply }: WorkflowTemplateGalleryProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = i18n.language?.startsWith('zh') ? 'zh' : 'en'
   const [templates, setTemplates] = useState<TemplateItem[]>([])
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState('')
@@ -92,14 +93,14 @@ export function WorkflowTemplateGallery({ open, onClose, onApply }: WorkflowTemp
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.get<TemplateItem[]>('/workflows/templates')
+      const data = await api.get<TemplateItem[]>(`/workflows/templates`, { locale })
       setTemplates(data || [])
     } catch {
       setTemplates([])
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [locale])
 
   useEffect(() => {
     if (open) {
@@ -206,7 +207,7 @@ export function WorkflowTemplateGallery({ open, onClose, onApply }: WorkflowTemp
                         <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{tpl.name}</h3>
                         {tpl.builtin !== false && (
                           <span className="shrink-0 rounded bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 text-[9px] font-medium text-blue-600 dark:text-blue-400">
-                            built-in
+                            {t('workflows.builtin', '内置')}
                           </span>
                         )}
                       </div>
@@ -214,8 +215,8 @@ export function WorkflowTemplateGallery({ open, onClose, onApply }: WorkflowTemp
                         <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-2">{tpl.description}</p>
                       )}
                       <div className="flex items-center gap-3 text-[10px] text-gray-400">
-                        <span>{tpl.node_count || tpl.graph_json?.nodes?.length || 0} nodes</span>
-                        <span>{tpl.graph_json?.edges?.length || 0} edges</span>
+                        <span>{tpl.node_count || tpl.graph_json?.nodes?.length || 0} {t('workflows.nodes', '节点')}</span>
+                        <span>{tpl.graph_json?.edges?.length || 0} {t('workflows.edges', '连线')}</span>
                         {tpl.category && <span className="rounded bg-gray-100 dark:bg-gray-700 px-1 py-0.5">{tpl.category}</span>}
                       </div>
                     </div>
@@ -254,7 +255,7 @@ export function WorkflowTemplateGallery({ open, onClose, onApply }: WorkflowTemp
                             className="flex items-center gap-1 text-xs text-gray-500 hover:text-primary-600 dark:hover:text-primary-400"
                           >
                             <Eye className="w-3.5 h-3.5" />
-                            {t('common.preview', 'Preview')}
+                            {t('common.preview', '预览')}
                           </button>
                         )}
                         {tpl.graph_json && (
@@ -264,10 +265,10 @@ export function WorkflowTemplateGallery({ open, onClose, onApply }: WorkflowTemp
                               onApply(tpl.graph_json!)
                               onClose()
                             }}
-                            className="ml-auto flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400"
+                            className="ml-auto flex items-center gap-1 rounded-md bg-primary-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-primary-700"
                           >
                             <Plus className="w-3.5 h-3.5" />
-                            {t('workflows.applyTemplate', 'Apply')}
+                            {t('workflows.applyTemplate', '应用')}
                           </button>
                         )}
                       </div>

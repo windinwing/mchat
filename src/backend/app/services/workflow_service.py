@@ -644,6 +644,7 @@ class WorkflowService:
             "category": row.category,
             "locale": row.locale,
             "node_count": len((row.graph_json or {}).get("nodes") or []),
+            "graph_json": row.graph_json,
             "builtin": False,
             "visibility": row.visibility or "private",
             "author_id": row.user_id,

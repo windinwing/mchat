@@ -184,6 +184,7 @@ class WorkflowTemplateSummary(BaseModel):
     author_name: str | None = None
     use_count: int = 0
     is_mine: bool = False
+    graph_json: dict | None = None
 
 
 class WorkflowMarketplaceResponse(BaseModel):

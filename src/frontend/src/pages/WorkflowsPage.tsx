@@ -785,7 +785,7 @@ export function WorkflowsPage() {
         </div>
       </div>
 
-      <WorkflowEntitlementBanner />
+      {/* Entitlement banner hidden — only show when limits are hit */}
 
       {pendingApprovals.length > 0 && (
       <Card className="border-amber-200 dark:border-amber-800">
