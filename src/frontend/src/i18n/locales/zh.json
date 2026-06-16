@@ -1379,7 +1379,10 @@
     "noTemplates": "暂无模板",
     "noResults": "暂无结果",
     "applyTemplate": "应用",
-    "nodeOutputs": "节点输出"
+    "nodeOutputs": "节点输出",
+    "builtin": "内置",
+    "nodes": "节点",
+    "edges": "连线"
   },
   "workflowCenter": {
     "title": "工作流方案中心",

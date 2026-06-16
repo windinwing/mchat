@@ -125,10 +125,9 @@ export function WorkflowGraphPage() {
       <WorkflowTemplateGallery
         open={showTemplates}
         onClose={() => setShowTemplates(false)}
-        onApply={(graph) => {
-          // Reload editor with template graph
-          if (workflowId) {
-            void handleSave(graph as WorkflowGraphValue)
+        onSelectTemplate={(tpl) => {
+          if (tpl.graph_json && workflowId) {
+            void handleSave(tpl.graph_json as unknown as WorkflowGraphValue)
           }
         }}
       />

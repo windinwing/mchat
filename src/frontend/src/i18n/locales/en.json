@@ -1380,7 +1380,10 @@
     "noTemplates": "No templates",
     "noResults": "No results yet",
     "applyTemplate": "Apply",
-    "nodeOutputs": "Node Outputs"
+    "nodeOutputs": "Node Outputs",
+    "builtin": "Built-in",
+    "nodes": "nodes",
+    "edges": "edges"
   },
   "workflowCenter": {
     "title": "Workflow template hub",

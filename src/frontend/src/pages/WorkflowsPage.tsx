@@ -1390,23 +1390,7 @@ export function WorkflowsPage() {
       <WorkflowTemplateGallery
         open={showTemplateGallery}
         onClose={() => setShowTemplateGallery(false)}
-        onApply={(graph) => {
-          // Save template graph as a new workflow
-          void (async () => {
-            try {
-              const created = await api.post<{ id: string }>('/workflows', {
-                name: t('workflows.fromTemplate', '从模板创建'),
-                description: '',
-                graph_json: graph,
-              })
-              toast(t('workflows.toastCreated'), { type: 'success' })
-              setShowTemplateGallery(false)
-              navigate(`/admin/workflows/${created.id}/graph`)
-            } catch (err) {
-              toast(err instanceof Error ? err.message : t('workflows.toastCreateFailed'), { type: 'error' })
-            }
-          })()
-        }}
+        basePath={isPortal ? '/portal' : '/admin'}
       />
     </div>
   )
