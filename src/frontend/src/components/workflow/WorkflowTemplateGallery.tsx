@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
 import { ReactFlow, Background, type Node, type Edge } from '@xyflow/react'
 import { Loader2, Eye, Plus, X, Layers, Search, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -27,6 +26,9 @@ interface WorkflowTemplateGalleryProps {
   /** If provided, "use template" calls this instead of creating a new workflow.
    *  Used by the graph editor to replace the current workflow's graph. */
   onSelectTemplate?: (tpl: TemplateItem) => void
+  /** Called after a workflow is successfully created from a template.
+   *  If not provided, navigates to the new workflow's graph editor by default. */
+  onApplied?: (workflowId: string) => void
 }
 
 function MiniGraphPreview({ graph }: { graph: TemplateItem['graph_json'] }) {
@@ -75,9 +77,8 @@ function MiniGraphPreview({ graph }: { graph: TemplateItem['graph_json'] }) {
   )
 }
 
-export function WorkflowTemplateGallery({ open, onClose, basePath = '/admin', onSelectTemplate }: WorkflowTemplateGalleryProps) {
+export function WorkflowTemplateGallery({ open, onClose, onSelectTemplate, onApplied }: WorkflowTemplateGalleryProps) {
   const { t, i18n } = useTranslation()
-  const navigate = useNavigate()
   const locale = i18n.language?.startsWith('zh') ? 'zh' : 'en'
   const [templates, setTemplates] = useState<TemplateItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -136,7 +137,9 @@ export function WorkflowTemplateGallery({ open, onClose, basePath = '/admin', on
       })
       toast(t('workflows.toastTemplateCreated', '模板已应用'), { type: 'success' })
       onClose()
-      navigate(`${basePath}/workflows/${wf.id}/graph`)
+      if (onApplied) {
+        onApplied(wf.id)
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : t('workflows.toastTemplateCreateFailed', '应用失败'), { type: 'error' })
     } finally {

@@ -1390,7 +1390,7 @@ export function WorkflowsPage() {
       <WorkflowTemplateGallery
         open={showTemplateGallery}
         onClose={() => setShowTemplateGallery(false)}
-        basePath={isPortal ? '/portal' : '/admin'}
+        onApplied={() => void loadAll()}
       />
     </div>
   )
