@@ -230,17 +230,19 @@ function toFlowNodes(
       id: node.id,
       type: isGroup ? 'workflowGroup' : 'workflowNode',
       position: node.position || { x: 100, y: 100 },
-      style: node.parentId ? undefined : (node.type === 'batch' ? { width: 320, height: 240 } : isGroup ? { width: groupW, height: groupH } : undefined),
+      style: node.parentId ? undefined : (node.type === 'batch' ? { width: 320, height: 240 } : isGroup ? { width: groupW, height: groupH, overflow: config.collapsed ? 'hidden' : undefined } : undefined),
       width: (node.type === 'batch' && !node.parentId) ? 320 : isGroup ? groupW : undefined,
-      height: (node.type === 'batch' && !node.parentId) ? 240 : isGroup ? groupH : undefined,
-      measured: (node.type === 'batch' && !node.parentId) ? { width: 320, height: 240 } : isGroup ? { width: groupW, height: groupH } : undefined,
-      parentId: node.parentId || undefined,
-      extent: node.parentId ? 'parent' : undefined,
-      hidden: isGroup && config.collapsed ? false : undefined,
+      height: (node.type === 'batch' && !node.parentId) ? 240 : isGroup ? (config.collapsed ? 32 : groupH) : undefined,
+      measured: (node.type === 'batch' && !node.parentId) ? { width: 320, height: 240 } : isGroup ? { width: groupW, height: config.collapsed ? 32 : groupH } : undefined,
+      // Group children use data._groupParent (not ReactFlow parentId) to avoid
+      // parent-child rendering conflicts. Batch children still use parentId.
+      parentId: node.parentId && node.type !== 'group' && !(isGroup) ? node.parentId : (node.parentId && node.type !== 'batch' ? undefined : undefined),
+      hidden: node.parentId && isGroup ? (config.collapsed ? true : false) : undefined,
       data: {
         label: node.name || node.id,
         nodeType: node.type,
         config,
+        _groupParent: node.parentId || undefined,
         skillLabel: skillMissing && config.skill_name ? String(config.skill_name) : skillLabel,
         categoryLabel: category,
         skillMissing,
@@ -620,10 +622,37 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
 
   const onNodesChangeWrapped = useCallback(
     (changes: NodeChange[]) => {
-      // ReactFlow's built-in parent-child handles dragging children when the
-      // group moves (children with parentId are positioned relative to parent).
-      // We just pass through — no manual delta needed.
-      handleNodesChange(changes, onNodesChange)
+      // Manual group drag sync: when a group node moves, children (tracked via
+      // data._groupParent) move by the same delta. No ReactFlow parentId → no
+      // double counting.
+      const enriched = [...changes]
+      for (const change of changes) {
+        if (change.type === 'position' && change.position) {
+          const draggedNode = nodesRef.current.find((n) => n.id === change.id)
+          if (
+            draggedNode &&
+            (draggedNode.data as any)?.nodeType === 'group'
+          ) {
+            const dx = change.position.x - draggedNode.position.x
+            const dy = change.position.y - draggedNode.position.y
+            if (dx !== 0 || dy !== 0) {
+              for (const child of nodesRef.current) {
+                if ((child.data as any)?._groupParent === change.id) {
+                  enriched.push({
+                    type: 'position' as const,
+                    id: child.id,
+                    position: {
+                      x: child.position.x + dx,
+                      y: child.position.y + dy,
+                    },
+                  })
+                }
+              }
+            }
+          }
+        }
+      }
+      handleNodesChange(enriched, onNodesChange)
     },
     [handleNodesChange, onNodesChange],
   )
@@ -818,25 +847,19 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
   const deleteNodeById = (nodeId: string) => {
     pushHistory()
     const target = nodes.find((n) => n.id === nodeId)
-    const parentId = target?.parentId || undefined
     const isGroup = (target?.data as any)?.nodeType === 'group'
     setNodes((prev) => {
       let filtered = prev.filter((n) => n.id !== nodeId)
-      // When deleting a group, unparent its children (convert to absolute coords)
-      if (isGroup && target) {
+      // When deleting a group, unparent its children (clear _groupParent)
+      if (isGroup) {
         filtered = filtered.map((n) => {
-          if (n.parentId === nodeId) {
-            return {
-              ...n,
-              parentId: undefined,
-              extent: undefined,
-              position: { x: n.position.x + target.position.x, y: n.position.y + target.position.y },
-            }
+          if ((n.data as any)?._groupParent === nodeId) {
+            return { ...n, data: { ...n.data, _groupParent: undefined }, hidden: false }
           }
           return n
         })
       }
-      return parentId ? recomputeBatchChildrenMeta(filtered, parentId) : filtered
+      return filtered
     })
     setEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId))
     if (selectedNodeId === nodeId) setSelectedNodeId(null)
@@ -891,9 +914,9 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
           if (selectedIds.has(n.id)) {
             return {
               ...n,
-              parentId: groupId,
-              extent: 'parent' as const,
-              position: { x: n.position.x - bounds.x, y: n.position.y - bounds.y },
+              // Track group relationship via data, NOT ReactFlow parentId
+              // Children keep absolute positions (no relative conversion)
+              data: { ...n.data, _groupParent: groupId },
               selected: false,
             }
           }
@@ -908,20 +931,28 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
   useEffect(() => {
     const onToggle = (e: Event) => {
       const { groupId } = (e as CustomEvent).detail
-      // Only toggle the group's collapsed flag — children are hidden via CSS
-      // (overflow:hidden on the group container), NOT via node.hidden property.
-      // This avoids ReactFlow re-mounting nodes/edges and breaking parent-child drag.
-      setNodes((prev) => prev.map((n) => {
-        if (n.id !== groupId) return n
-        const cfg = (n.data as any)?.config || {}
+      setNodes((prev) => {
+        const group = prev.find((n) => n.id === groupId)
+        if (!group) return prev
+        const cfg = (group.data as any)?.config || {}
         const newCollapsed = !cfg.collapsed
-        const origHeight = cfg.height || (n.style as any)?.height || n.height || 160
-        return {
-          ...n,
-          style: { ...(n.style as any), height: newCollapsed ? 32 : origHeight, overflow: 'hidden' },
-          data: { ...n.data, config: { ...cfg, collapsed: newCollapsed, height: origHeight } },
-        }
-      }))
+        const origHeight = cfg.height || (group.style as any)?.height || group.height || 160
+        return prev.map((n) => {
+          if (n.id === groupId) {
+            return {
+              ...n,
+              style: { ...(n.style as any), height: newCollapsed ? 32 : origHeight, overflow: 'hidden' },
+              height: newCollapsed ? 32 : origHeight,
+              data: { ...n.data, config: { ...cfg, collapsed: newCollapsed, height: origHeight } },
+            }
+          }
+          // Hide/show children via hidden property (safe — no ReactFlow parentId)
+          if ((n.data as any)?._groupParent === groupId) {
+            return { ...n, hidden: newCollapsed }
+          }
+          return n
+        })
+      })
     }
     const onRename = (e: Event) => {
       const { groupId, label } = (e as CustomEvent).detail
@@ -1126,7 +1157,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
           type: nodeType,
           name: String((n.data as any)?.label || ''),
           position: n.position,
-          parentId: n.parentId || undefined,
+          parentId: (n.data as any)?._groupParent || n.parentId || undefined,
           config,
         }
       }),
