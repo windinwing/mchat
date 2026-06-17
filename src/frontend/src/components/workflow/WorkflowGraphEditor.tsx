@@ -27,6 +27,7 @@ import {
   type Connection,
   type Edge,
   type Node,
+  type NodeChange,
   type Viewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -374,6 +375,10 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
   )
 
   const [nodes, setNodes, onNodesChange] = useNodesState(toFlowNodes(initial.nodes, skills, uiLocale, t))
+
+  // Ref to always access latest nodes without recreating callbacks during drag
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
   const [edges, setEdges, onEdgesChange] = useEdgesState(toFlowEdges(initial.edges))
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
@@ -614,8 +619,38 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
   )
 
   const onNodesChangeWrapped = useCallback(
-    (changes: Parameters<typeof onNodesChange>[0]) => {
-      handleNodesChange(changes, onNodesChange)
+    (changes: NodeChange[]) => {
+      // Propagate group node drag to children — when a group moves,
+      // all children with parentId === group.id move by the same delta.
+      const enriched = [...changes]
+      for (const change of changes) {
+        if (change.type === 'position' && change.position) {
+          const draggedNode = nodesRef.current.find((n) => n.id === change.id)
+          if (
+            draggedNode &&
+            (draggedNode.data as any)?.nodeType === 'group' &&
+            !draggedNode.parentId
+          ) {
+            const dx = change.position.x - draggedNode.position.x
+            const dy = change.position.y - draggedNode.position.y
+            if (dx !== 0 || dy !== 0) {
+              for (const child of nodesRef.current) {
+                if (child.parentId === change.id) {
+                  enriched.push({
+                    type: 'position' as const,
+                    id: child.id,
+                    position: {
+                      x: child.position.x + dx,
+                      y: child.position.y + dy,
+                    },
+                  })
+                }
+              }
+            }
+          }
+        }
+      }
+      handleNodesChange(enriched, onNodesChange)
     },
     [handleNodesChange, onNodesChange],
   )
