@@ -2297,8 +2297,9 @@
     "untitledChat": "未命名对话"
   },
   "navGroup.core": "概览",
-  "navGroup.ai": "AI 与知识",
+  "navGroup.ai": "AI 与技能",
   "navGroup.dev": "开发与编排",
   "navGroup.management": "管理",
-  "navGroup.business": "商业"
+  "navGroup.business": "商业",
+  "navGroup.knowledge": "知识库"
 }

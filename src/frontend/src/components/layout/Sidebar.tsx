@@ -53,9 +53,14 @@ const adminNavGroups: NavGroup[] = [
     ],
   },
   {
-    titleKey: 'navGroup.ai',
+    titleKey: 'navGroup.knowledge',
     items: [
       { path: '/admin/knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
+    ],
+  },
+  {
+    titleKey: 'navGroup.ai',
+    items: [
       { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
       { path: '/admin/agents', labelKey: 'nav.agents', icon: Bot },
       { path: '/admin/customer-agents', labelKey: 'nav.customerAgents', icon: Headphones },
@@ -65,6 +70,7 @@ const adminNavGroups: NavGroup[] = [
     titleKey: 'navGroup.dev',
     items: [
       { path: '/admin/workflows', labelKey: 'nav.workflows', icon: WorkflowIcon },
+      { path: '/admin/workflow-center', labelKey: 'nav.workflowCenter', icon: LayoutTemplate },
       { path: '/admin/devbridge', labelKey: 'nav.devbridge', icon: Code2 },
       { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
       { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
@@ -87,7 +93,6 @@ const adminNavGroups: NavGroup[] = [
       { path: '/admin/templates', labelKey: 'nav.templates', icon: Store },
       { path: '/admin/orders', labelKey: 'nav.orders', icon: DollarSign },
       { path: '/admin/subscriptions', labelKey: 'nav.subscriptions', icon: BadgeCheck },
-      { path: '/admin/workflow-center', labelKey: 'nav.workflowCenter', icon: LayoutTemplate },
     ],
   },
 ]
@@ -209,7 +214,7 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
       {/* Nav items — grouped */}
       <nav className="flex-1 py-2 px-2 overflow-y-auto scrollbar-hide">
         {navGroups.map((group) => {
-          const isCollapsed = collapsedGroups.has(group.titleKey) && group.titleKey !== activeGroupKey
+          const isCollapsed = collapsedGroups.has(group.titleKey)
           const hasActive = group.titleKey === activeGroupKey
           return (
             <div key={group.titleKey} className="mb-0.5">
@@ -218,7 +223,7 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
                   type="button"
                   onClick={() => toggleGroup(group.titleKey)}
                   className={cn(
-                    'flex w-full items-center gap-1 px-2 py-1.5 text-xs font-semibold uppercase tracking-wide rounded transition-colors',
+                    'flex w-full items-center gap-1 px-2 py-1.5 text-sm font-semibold tracking-wide rounded transition-colors',
                     hasActive
                       ? 'text-primary-600 dark:text-primary-400'
                       : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'

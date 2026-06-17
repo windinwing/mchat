@@ -53,11 +53,16 @@ function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
       )}
       <div
         className={cn(
-          'h-full w-full rounded-xl border-2 transition-colors',
-          collapsed ? 'border-solid' : 'border-dashed',
+          'rounded-xl border-2 transition-all',
+          collapsed ? 'border-solid overflow-hidden' : 'border-dashed',
           selected && 'ring-2 ring-primary-400 ring-offset-1',
         )}
-        style={{ borderColor: color, backgroundColor: `${color}0d` }}
+        style={{
+          borderColor: color,
+          backgroundColor: `${color}0d`,
+          height: collapsed ? 32 : '100%',
+          overflow: collapsed ? 'hidden' : 'visible',
+        }}
       >
         {/* Title bar */}
         <div
@@ -112,7 +117,7 @@ function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
             />
             {showPalette && (
               <div
-                className="absolute right-0 top-full mt-1 z-50 grid grid-cols-4 gap-1 p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg"
+                className="absolute right-0 top-full mt-1 z-50 flex items-center gap-1.5 p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg"
                 onClick={(e) => e.stopPropagation()}
               >
                 {GROUP_COLORS.map((c) => (
@@ -121,7 +126,7 @@ function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
                     type="button"
                     onClick={(e) => pickColor(e, c)}
                     className={cn(
-                      'h-5 w-5 rounded-full border-2 transition-transform hover:scale-110',
+                      'h-5 w-5 rounded-full border-2 transition-transform hover:scale-125 shrink-0',
                       c === color ? 'border-gray-800 dark:border-white' : 'border-transparent',
                     )}
                     style={{ backgroundColor: c }}

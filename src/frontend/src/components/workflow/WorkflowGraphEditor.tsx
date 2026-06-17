@@ -368,20 +368,6 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
   const [propsOpen, setPropsOpen] = useState(false)
   const [selectedTab, setSelectedTab] = useState<'visual' | 'json'>('visual')
 
-  // Prevent native context menu on ReactFlow elements only (not controls/minimap)
-  useEffect(() => {
-    const el = reactFlowWrapper.current
-    if (!el) return
-    const handler = (e: Event) => {
-      const target = e.target as HTMLElement
-      if (target.closest('.react-flow__pane') || target.closest('.react-flow__node') || target.closest('.react-flow__edge')) {
-        e.preventDefault()
-      }
-    }
-    el.addEventListener('contextmenu', handler as EventListener)
-    return () => el.removeEventListener('contextmenu', handler as EventListener)
-  }, [])
-
   const initial = useMemo<WorkflowGraphValue>(
     () => value || { version: 1, nodes: [], edges: [] },
     [value],
@@ -914,22 +900,20 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
   useEffect(() => {
     const onToggle = (e: Event) => {
       const { groupId } = (e as CustomEvent).detail
-      // Single setNodes call: toggle group config AND hide/show children
-      setNodes((prev) => {
-        const group = prev.find((n) => n.id === groupId)
-        if (!group) return prev
-        const cfg = (group.data as any)?.config || {}
+      // Only toggle the group's collapsed flag — children are hidden via CSS
+      // (overflow:hidden on the group container), NOT via node.hidden property.
+      // This avoids ReactFlow re-mounting nodes/edges and breaking parent-child drag.
+      setNodes((prev) => prev.map((n) => {
+        if (n.id !== groupId) return n
+        const cfg = (n.data as any)?.config || {}
         const newCollapsed = !cfg.collapsed
-        return prev.map((n) => {
-          if (n.id === groupId) {
-            return { ...n, data: { ...n.data, config: { ...cfg, collapsed: newCollapsed } } }
-          }
-          if (n.parentId === groupId) {
-            return { ...n, hidden: newCollapsed }
-          }
-          return n
-        })
-      })
+        const origHeight = cfg.height || (n.style as any)?.height || n.height || 160
+        return {
+          ...n,
+          style: { ...(n.style as any), height: newCollapsed ? 32 : origHeight, overflow: 'hidden' },
+          data: { ...n.data, config: { ...cfg, collapsed: newCollapsed, height: origHeight } },
+        }
+      }))
     }
     const onRename = (e: Event) => {
       const { groupId, label } = (e as CustomEvent).detail

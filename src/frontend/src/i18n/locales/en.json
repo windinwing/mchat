@@ -2297,8 +2297,9 @@
     "untitledChat": "Untitled"
   },
   "navGroup.core": "Core",
-  "navGroup.ai": "AI & Knowledge",
+  "navGroup.ai": "AI & Skills",
   "navGroup.dev": "Development",
   "navGroup.management": "Management",
-  "navGroup.business": "Business"
+  "navGroup.business": "Business",
+  "navGroup.knowledge": "Knowledge"
 }
