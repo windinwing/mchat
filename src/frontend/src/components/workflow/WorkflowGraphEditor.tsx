@@ -229,6 +229,7 @@ function toFlowNodes(
     return {
       id: node.id,
       type: isGroup ? 'workflowGroup' : 'workflowNode',
+      zIndex: isGroup ? 0 : 10,
       position: node.position || { x: 100, y: 100 },
       style: node.parentId ? undefined : (node.type === 'batch' ? { width: 320, height: 240 } : isGroup ? { width: groupW, height: groupH, overflow: config.collapsed ? 'hidden' : undefined } : undefined),
       width: (node.type === 'batch' && !node.parentId) ? 320 : isGroup ? groupW : undefined,
@@ -895,6 +896,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
     const groupNode: Node = {
       id: groupId,
       type: 'workflowGroup',
+      zIndex: 0,
       position: { x: bounds.x, y: bounds.y },
       style: { width: bounds.width, height: bounds.height },
       width: bounds.width,
