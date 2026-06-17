@@ -620,37 +620,10 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
 
   const onNodesChangeWrapped = useCallback(
     (changes: NodeChange[]) => {
-      // Propagate group node drag to children — when a group moves,
-      // all children with parentId === group.id move by the same delta.
-      const enriched = [...changes]
-      for (const change of changes) {
-        if (change.type === 'position' && change.position) {
-          const draggedNode = nodesRef.current.find((n) => n.id === change.id)
-          if (
-            draggedNode &&
-            (draggedNode.data as any)?.nodeType === 'group' &&
-            !draggedNode.parentId
-          ) {
-            const dx = change.position.x - draggedNode.position.x
-            const dy = change.position.y - draggedNode.position.y
-            if (dx !== 0 || dy !== 0) {
-              for (const child of nodesRef.current) {
-                if (child.parentId === change.id) {
-                  enriched.push({
-                    type: 'position' as const,
-                    id: child.id,
-                    position: {
-                      x: child.position.x + dx,
-                      y: child.position.y + dy,
-                    },
-                  })
-                }
-              }
-            }
-          }
-        }
-      }
-      handleNodesChange(enriched, onNodesChange)
+      // ReactFlow's built-in parent-child handles dragging children when the
+      // group moves (children with parentId are positioned relative to parent).
+      // We just pass through — no manual delta needed.
+      handleNodesChange(changes, onNodesChange)
     },
     [handleNodesChange, onNodesChange],
   )
