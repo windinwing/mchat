@@ -931,13 +931,19 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
   useEffect(() => {
     const onToggle = (e: Event) => {
       const { groupId } = (e as CustomEvent).detail
-      setNodes((prev) => {
-        const group = prev.find((n) => n.id === groupId)
-        if (!group) return prev
-        const cfg = (group.data as any)?.config || {}
-        const newCollapsed = !cfg.collapsed
-        const origHeight = cfg.height || (group.style as any)?.height || group.height || 160
-        return prev.map((n) => {
+      // Compute new collapsed state from current nodes
+      const group = nodesRef.current.find((n) => n.id === groupId)
+      if (!group) return
+      const cfg = (group.data as any)?.config || {}
+      const newCollapsed = !cfg.collapsed
+      const origHeight = cfg.height || (group.style as any)?.height || group.height || 160
+      const childIds = new Set(
+        nodesRef.current.filter((n) => (n.data as any)?._groupParent === groupId).map((n) => n.id),
+      )
+
+      // Update nodes: toggle group height/overflow + children hidden
+      setNodes((prev) =>
+        prev.map((n) => {
           if (n.id === groupId) {
             return {
               ...n,
@@ -946,13 +952,22 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
               data: { ...n.data, config: { ...cfg, collapsed: newCollapsed, height: origHeight } },
             }
           }
-          // Hide/show children via hidden property (safe — no ReactFlow parentId)
-          if ((n.data as any)?._groupParent === groupId) {
+          if (childIds.has(n.id)) {
             return { ...n, hidden: newCollapsed }
           }
           return n
-        })
-      })
+        }),
+      )
+
+      // Update edges: explicitly toggle visibility for edges connected to children
+      setEdges((prev) =>
+        prev.map((edge) => {
+          if (childIds.has(edge.source) || childIds.has(edge.target)) {
+            return { ...edge, hidden: newCollapsed }
+          }
+          return edge
+        }),
+      )
     }
     const onRename = (e: Event) => {
       const { groupId, label } = (e as CustomEvent).detail
