@@ -368,6 +368,20 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
   const [propsOpen, setPropsOpen] = useState(false)
   const [selectedTab, setSelectedTab] = useState<'visual' | 'json'>('visual')
 
+  // Prevent native context menu on ReactFlow elements only (not controls/minimap)
+  useEffect(() => {
+    const el = reactFlowWrapper.current
+    if (!el) return
+    const handler = (e: Event) => {
+      const target = e.target as HTMLElement
+      if (target.closest('.react-flow__pane') || target.closest('.react-flow__node') || target.closest('.react-flow__edge')) {
+        e.preventDefault()
+      }
+    }
+    el.addEventListener('contextmenu', handler as EventListener)
+    return () => el.removeEventListener('contextmenu', handler as EventListener)
+  }, [])
+
   const initial = useMemo<WorkflowGraphValue>(
     () => value || { version: 1, nodes: [], edges: [] },
     [value],
@@ -900,24 +914,18 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
   useEffect(() => {
     const onToggle = (e: Event) => {
       const { groupId } = (e as CustomEvent).detail
-      setNodes((prev) => prev.map((n) => {
-        if (n.id !== groupId) return n
-        const cfg = (n.data as any)?.config || {}
-        const collapsed = !cfg.collapsed
-        return {
-          ...n,
-          data: { ...n.data, config: { ...cfg, collapsed } },
-          // Hide/show children
-        }
-      }))
-      // Toggle children visibility
+      // Single setNodes call: toggle group config AND hide/show children
       setNodes((prev) => {
         const group = prev.find((n) => n.id === groupId)
-        const collapsed = (group?.data as any)?.config?.collapsed
-        if (collapsed === undefined) return prev
+        if (!group) return prev
+        const cfg = (group.data as any)?.config || {}
+        const newCollapsed = !cfg.collapsed
         return prev.map((n) => {
+          if (n.id === groupId) {
+            return { ...n, data: { ...n.data, config: { ...cfg, collapsed: newCollapsed } } }
+          }
           if (n.parentId === groupId) {
-            return { ...n, hidden: collapsed }
+            return { ...n, hidden: newCollapsed }
           }
           return n
         })
@@ -1262,7 +1270,6 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
         <div
           ref={reactFlowWrapper}
           tabIndex={0}
-          onContextMenu={(e) => e.preventDefault()}
           className={cn(
             'min-h-0 min-w-0 flex-1 bg-white dark:bg-gray-900',
             !isPointerTool && '[&_.react-flow__pane]:cursor-grab [&_.react-flow__pane:active]:cursor-grabbing',

@@ -218,7 +218,7 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
                   type="button"
                   onClick={() => toggleGroup(group.titleKey)}
                   className={cn(
-                    'flex w-full items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded transition-colors',
+                    'flex w-full items-center gap-1 px-2 py-1.5 text-xs font-semibold uppercase tracking-wide rounded transition-colors',
                     hasActive
                       ? 'text-primary-600 dark:text-primary-400'
                       : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'

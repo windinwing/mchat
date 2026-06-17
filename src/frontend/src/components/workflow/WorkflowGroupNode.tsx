@@ -4,14 +4,8 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const GROUP_COLORS = [
-  '#64748b',
-  '#3b82f6',
-  '#22c55e',
-  '#f59e0b',
-  '#a855f7',
-  '#ef4444',
-  '#06b6d4',
-  '#ec4899',
+  '#64748b', '#3b82f6', '#22c55e', '#f59e0b',
+  '#a855f7', '#ef4444', '#06b6d4', '#ec4899',
 ]
 
 type GroupNodeData = {
@@ -26,34 +20,23 @@ function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
   const collapsed = d.config?.collapsed || false
   const [editing, setEditing] = useState(false)
   const [label, setLabel] = useState(d.label)
+  const [showPalette, setShowPalette] = useState(false)
 
-  const toggleCollapse = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      // Dispatch a custom event the editor listens to
-      window.dispatchEvent(
-        new CustomEvent('mchat-group-toggle', { detail: { groupId: id } }),
-      )
-    },
-    [id],
-  )
-
-  const cycleColor = useCallback((e: React.MouseEvent) => {
+  const toggleCollapse = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    const current = d.config?.color || '#64748b'
-    const idx = GROUP_COLORS.indexOf(current)
-    const next = GROUP_COLORS[(idx + 1) % GROUP_COLORS.length]
-    window.dispatchEvent(
-      new CustomEvent('mchat-group-color', { detail: { groupId: id, color: next } }),
-    )
-  }, [id, d.config?.color])
+    window.dispatchEvent(new CustomEvent('mchat-group-toggle', { detail: { groupId: id } }))
+  }, [id])
+
+  const pickColor = useCallback((e: React.MouseEvent, c: string) => {
+    e.stopPropagation()
+    setShowPalette(false)
+    window.dispatchEvent(new CustomEvent('mchat-group-color', { detail: { groupId: id, color: c } }))
+  }, [id])
 
   const commitLabel = useCallback(() => {
     setEditing(false)
     if (label !== d.label) {
-      window.dispatchEvent(
-        new CustomEvent('mchat-group-rename', { detail: { groupId: id, label } }),
-      )
+      window.dispatchEvent(new CustomEvent('mchat-group-rename', { detail: { groupId: id, label } }))
     }
   }, [id, label, d.label])
 
@@ -74,19 +57,13 @@ function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
           collapsed ? 'border-solid' : 'border-dashed',
           selected && 'ring-2 ring-primary-400 ring-offset-1',
         )}
-        style={{
-          borderColor: color,
-          backgroundColor: `${color}0d`,
-        }}
+        style={{ borderColor: color, backgroundColor: `${color}0d` }}
       >
         {/* Title bar */}
         <div
           className="flex items-center gap-1.5 px-2 py-1 rounded-t-xl select-none"
           style={{ backgroundColor: `${color}1a` }}
-          onDoubleClick={(e) => {
-            e.stopPropagation()
-            setEditing(true)
-          }}
+          onDoubleClick={(e) => { e.stopPropagation(); setEditing(true) }}
         >
           <button
             type="button"
@@ -94,11 +71,9 @@ function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
             className="shrink-0 rounded p-0.5 hover:bg-black/5 dark:hover:bg-white/10"
             title={collapsed ? 'Expand' : 'Collapse'}
           >
-            {collapsed ? (
-              <ChevronRight className="w-3.5 h-3.5" style={{ color }} />
-            ) : (
-              <ChevronDown className="w-3.5 h-3.5" style={{ color }} />
-            )}
+            {collapsed
+              ? <ChevronRight className="w-3.5 h-3.5" style={{ color }} />
+              : <ChevronDown className="w-3.5 h-3.5" style={{ color }} />}
           </button>
 
           {editing ? (
@@ -109,10 +84,7 @@ function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
               onBlur={commitLabel}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') commitLabel()
-                if (e.key === 'Escape') {
-                  setLabel(d.label)
-                  setEditing(false)
-                }
+                if (e.key === 'Escape') { setLabel(d.label); setEditing(false) }
               }}
               onClick={(e) => e.stopPropagation()}
               className="flex-1 min-w-0 bg-transparent border-b border-primary-400 text-xs font-semibold outline-none"
@@ -123,27 +95,44 @@ function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
             <p
               className="flex-1 min-w-0 truncate text-xs font-semibold cursor-text"
               style={{ color }}
-              onDoubleClick={(e) => {
-                e.stopPropagation()
-                setEditing(true)
-              }}
+              onDoubleClick={(e) => { e.stopPropagation(); setEditing(true) }}
             >
               {d.label || 'Group'}
             </p>
           )}
 
-          <button
-            type="button"
-            onClick={cycleColor}
-            className="shrink-0 h-3.5 w-3.5 rounded-full border border-white/50 shadow-sm"
-            style={{ backgroundColor: color }}
-            title="Cycle color"
-          />
+          {/* Color picker */}
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setShowPalette((v) => !v) }}
+              className="h-3.5 w-3.5 rounded-full border border-white/50 shadow-sm"
+              style={{ backgroundColor: color }}
+              title="Pick color"
+            />
+            {showPalette && (
+              <div
+                className="absolute right-0 top-full mt-1 z-50 grid grid-cols-4 gap-1 p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {GROUP_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={(e) => pickColor(e, c)}
+                    className={cn(
+                      'h-5 w-5 rounded-full border-2 transition-transform hover:scale-110',
+                      c === color ? 'border-gray-800 dark:border-white' : 'border-transparent',
+                    )}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
 
           {d.groupChildCount != null && d.groupChildCount > 0 && (
-            <span className="shrink-0 text-[10px] text-gray-400">
-              {d.groupChildCount}
-            </span>
+            <span className="shrink-0 text-[10px] text-gray-400">{d.groupChildCount}</span>
           )}
         </div>
       </div>
@@ -163,10 +152,7 @@ export function computeGroupBounds(
   padding = 40,
 ): { x: number; y: number; width: number; height: number } {
   if (nodes.length === 0) return { x: 0, y: 0, width: 200, height: 120 }
-  let minX = Infinity
-  let minY = Infinity
-  let maxX = -Infinity
-  let maxY = -Infinity
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const n of nodes) {
     const w = (n.style as any)?.width || n.width || 180
     const h = (n.style as any)?.height || n.height || 60
@@ -177,7 +163,7 @@ export function computeGroupBounds(
   }
   return {
     x: minX - padding,
-    y: minY - padding - 24, // extra for title bar
+    y: minY - padding - 24,
     width: maxX - minX + padding * 2,
     height: maxY - minY + padding * 2 + 24,
   }
