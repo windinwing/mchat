@@ -778,7 +778,6 @@ export function WorkflowsPage() {
           <Button
             leftIcon={<Plus className="w-4 h-4" />}
             onClick={openCreate}
-            disabled={entitlements !== null && !entitlements.can_create_workflow}
           >
             {t('workflows.newWorkflow')}
           </Button>
@@ -876,7 +875,7 @@ export function WorkflowsPage() {
                       leftIcon={<Play className="w-3.5 h-3.5" />}
                       isLoading={!!runningMap[row.id]}
                       onClick={() => openRunDialog(row)}
-                      disabled={!hasGraph}
+                      disabled={!hasGraph || (entitlements !== null && !entitlements.can_run_workflow)}
                     >
                       {t('workflows.runOnce')}
                     </Button>

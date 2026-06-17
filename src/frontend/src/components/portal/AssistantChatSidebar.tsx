@@ -120,6 +120,8 @@ export function AssistantChatSidebar({
       }
       await load()
       navigate(buildChatUrl(chatBasePath, conv.id, channelId, scopeType, scopeId))
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t('portal.newChatFailed', 'Failed to start chat'), { type: 'error' })
     } finally {
       setCreating(false)
     }

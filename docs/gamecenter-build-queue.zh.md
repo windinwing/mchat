@@ -118,8 +118,8 @@ GAMECENTER_BUILD_AGENT_TOKEN=<setup 脚本输出的 token>
 
 | 变量 | 说明 |
 |------|------|
-| `GAMECENTER_SOURCE_ROOT` | 例：`/opt/xiaoxiao/gamecenter/src` |
-| `GAMECENTER_EXTRA_SOURCE_ROOTS` | 例：`/opt/xiaoxiao/gamecenter/newsrc` |
+| `GAMECENTER_SOURCE_ROOT` | 例：`/opt/xiaoxiao/gamecenter/src`（支持 `src/<分类>/<slug>/` 分层发现） |
+| `GAMECENTER_EXTRA_SOURCE_ROOTS` | 通常留空（改造后仅用 `src` 单根） |
 
 ---
 
@@ -300,7 +300,7 @@ grep GAMECENTER_BUILD_QUEUE_ENABLED /opt/xiaoxiao/mchat/.env
 | 短信/登录/聊天卡住 | API 是否在跑同步编译？`pgrep -af gamecenter-remote` 是否挂在 **uvicorn 子进程** 下；应只在 worker 下 |
 | patch 后显示「已入队」一直 `queued` | `systemctl --user status mchat-build-worker`；`LLEN mchat:build:queue` |
 | 长期 `running` | `stdout.log` 是否增长；Windows Cocos 是否卡；`pkill` + 重启 worker |
-| `failed` exit 23 | 路径 `src/` vs `newsrc/`，见 `gamecenter-local-build-guide.zh.md` |
+| `failed` exit 23 | 远端 resolve 路径错误：确认 `source_root` 指向 `src` 且 `GAMECENTER_WORKSPACE` 指向 xcx，见 `gamecenter-local-build-guide.zh.md` |
 | Cocos 2.x 失败 | 检查 `--use-gl=swiftshader` 标志是否生效；确认编译机 `swiftshader/` DLL 存在；详见 `docs/gamecenter-windows-build-agent.zh.md` |
 | 试玩不更新 | 强刷；查 `build/web-mobile/index.html` mtime；nginx 缓存 |
 

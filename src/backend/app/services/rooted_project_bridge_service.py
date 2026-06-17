@@ -155,26 +155,72 @@ class RootedProjectBridgeService:
         self._ensure_enabled()
         seen: set[str] = set()
         items: list[DiscoveredProject] = []
+        skip_names = {"cocos-code-all-batch"}
+
+        def should_skip(name: str) -> bool:
+            return name.startswith("_") or name in skip_names
+
+        def resolve_container(container: Path) -> tuple[str, Path] | None:
+            if not container.is_dir() or should_skip(container.name):
+                return None
+            if self._is_cocos_project_dir(container):
+                return container.name, container
+            nested = [
+                child
+                for child in sorted(container.iterdir(), key=lambda p: p.name.lower())
+                if child.is_dir() and not child.name.startswith("_") and self._is_cocos_project_dir(child)
+            ]
+            if len(nested) == 1:
+                return container.name, nested[0]
+            if len(nested) > 1:
+                # Multiple Cocos sub-projects: prefer the one with a build (aligns with xcx).
+                with_build = [c for c in nested if (c / "build" / "web-mobile" / "index.html").is_file()]
+                return container.name, (with_build[0] if with_build else nested[0])
+            return None
+
+        def scan_children(parent: Path) -> None:
+            """Scan a category/grouping directory for slug containers."""
+            for child in sorted(parent.iterdir(), key=lambda p: p.name.lower()):
+                if not child.is_dir() or should_skip(child.name):
+                    continue
+                if child.name in seen:
+                    continue
+                if self.config.project_allowlist is not None and child.name not in self.config.project_allowlist:
+                    continue
+                resolved = resolve_container(child)
+                if resolved is None:
+                    continue
+                slug, project_dir = resolved
+                if slug in seen:
+                    continue
+                seen.add(slug)
+                items.append(DiscoveredProject(slug=slug, path=project_dir, source_root=root))
+
         for root in self._all_source_roots():
             for entry in sorted(root.iterdir(), key=lambda p: p.name.lower()):
-                if not entry.is_dir() or entry.name.startswith("_"):
+                if not entry.is_dir() or should_skip(entry.name):
                     continue
                 if entry.name in seen:
                     continue
+
+                # Preset category directories (post-restructure): src/<category>/<slug>/
+                # Always scan children — never treat the category dir itself as a slug,
+                # even if it contains exactly one direct Cocos project.
+                if entry.name in self._PRESET_CATEGORIES:
+                    scan_children(entry)
+                    continue
+
                 if self.config.project_allowlist is not None and entry.name not in self.config.project_allowlist:
                     continue
-                if self._is_cocos_project_dir(entry):
-                    seen.add(entry.name)
-                    items.append(DiscoveredProject(slug=entry.name, path=entry, source_root=root))
+
+                direct = resolve_container(entry)
+                if direct is not None:
+                    slug, project_dir = direct
+                    seen.add(slug)
+                    items.append(DiscoveredProject(slug=slug, path=project_dir, source_root=root))
                     continue
-                nested = [
-                    child
-                    for child in sorted(entry.iterdir(), key=lambda p: p.name.lower())
-                    if child.is_dir() and not child.name.startswith("_") and self._is_cocos_project_dir(child)
-                ]
-                if len(nested) == 1:
-                    seen.add(entry.name)
-                    items.append(DiscoveredProject(slug=entry.name, path=nested[0], source_root=root))
+
+                scan_children(entry)
         return items
 
     def _discover_project_dirs(self) -> list[Path]:
@@ -186,40 +232,111 @@ class RootedProjectBridgeService:
         (root / "builds").mkdir(parents=True, exist_ok=True)
         return root
 
+    def _resolve_slug_container(self, outer: Path, root: Path) -> Path | None:
+        """Resolve a slug container dir to its Cocos project dir.
+
+        Handles both flat (src/<slug>) and nested (src/<category>/<slug>) layouts.
+        When a container holds multiple Cocos sub-projects, prefers the one with
+        a build/web-mobile/index.html (aligns with xcx service._nested_game_dir).
+        """
+        if not outer.is_dir():
+            return None
+        root_resolved = root.resolve()
+        resolved_outer = outer.resolve()
+        if self._is_cocos_project_dir(resolved_outer):
+            try:
+                resolved_outer.relative_to(root_resolved)
+            except ValueError:
+                return None
+            return resolved_outer
+        nested = [
+            child.resolve()
+            for child in sorted(resolved_outer.iterdir(), key=lambda p: p.name.lower())
+            if child.is_dir() and not child.name.startswith("_") and self._is_cocos_project_dir(child)
+        ]
+        if not nested:
+            return None
+        # Multiple matches: prefer the one with build output.
+        if len(nested) > 1:
+            with_build = [c for c in nested if (c / "build" / "web-mobile" / "index.html").is_file()]
+            if with_build:
+                nested = with_build
+        target = nested[0]
+        try:
+            target.relative_to(root_resolved)
+        except ValueError:
+            return None
+        return target
+
+    def _find_discovered(self, slug: str) -> DiscoveredProject | None:
+        for item in self._discover_projects():
+            if item.slug == slug:
+                return item
+        return None
+
+    @staticmethod
+    def _category_for_discovered(discovered: DiscoveredProject) -> str:
+        """Return the GameCenter directory-category id for a discovered project.
+
+        For nested layout (src/<category>/<slug>/...) returns <category> if preset.
+        For flat layout (src/<slug>/...) returns 'misc'.
+        """
+        try:
+            rel = discovered.path.resolve().relative_to(discovered.source_root.resolve())
+        except ValueError:
+            return "misc"
+        parts = rel.parts
+        slug_idx: int | None = None
+        for i, part in enumerate(parts):
+            if part == discovered.slug:
+                slug_idx = i
+                break
+        if slug_idx is None or slug_idx == 0:
+            return "misc"
+        category = parts[0]
+        return category if category in RootedProjectBridgeService._PRESET_CATEGORIES else "misc"
+
+    def _category_for_slug(self, slug: str) -> str:
+        """Directory-category for a slug (auto-detected from on-disk layout)."""
+        discovered = self._find_discovered(slug)
+        if discovered is None:
+            return "misc"
+        return self._category_for_discovered(discovered)
+
     def _project_dir(self, slug: str) -> Path:
         safe_slug = _validate_slug(slug)
         if self.config.project_allowlist is not None and safe_slug not in self.config.project_allowlist:
             raise HTTPException(status_code=403, detail="Project not allowed")
         for root in self._all_source_roots():
-            outer = (root / safe_slug).resolve()
-            if not outer.is_dir():
-                continue
-            candidates: list[Path] = []
-            if self._is_cocos_project_dir(outer):
-                candidates.append(outer)
-            else:
-                nested = [
-                    child.resolve()
-                    for child in sorted(outer.iterdir(), key=lambda p: p.name.lower())
-                    if child.is_dir() and not child.name.startswith("_") and self._is_cocos_project_dir(child)
-                ]
-                if len(nested) == 1:
-                    candidates.append(nested[0])
-            for target in candidates:
-                try:
-                    target.relative_to(root.resolve())
-                except ValueError:
-                    continue
+            # Nested layout (post-restructure): src/<category>/<slug>/
+            for category in self._PRESET_CATEGORIES:
+                target = self._resolve_slug_container(root / category / safe_slug, root)
+                if target is not None:
+                    return target
+            # Legacy flat layout: src/<slug>/
+            target = self._resolve_slug_container(root / safe_slug, root)
+            if target is not None:
                 return target
+        # Fallback: full discovery (handles non-preset categories or unusual layouts)
+        discovered = self._find_discovered(safe_slug)
+        if discovered is not None:
+            return discovered.path
         raise HTTPException(status_code=404, detail="Project not found")
 
-    def _play_urls(self, slug: str) -> list[str]:
+    def _play_urls(self, slug: str, *, category: str | None = None) -> list[str]:
         bases: list[str] = []
         if self.config.playable_base_urls:
             bases.extend(str(item).strip() for item in self.config.playable_base_urls if str(item).strip())
         elif self.config.playable_base_url:
             bases.append(self.config.playable_base_url.strip())
-        return [f"{base.rstrip('/')}/{slug}/" for base in bases]
+        # GameCenter :5099 / xyx serve playables at /<category>/<slug>/ (post-restructure).
+        # Custom providers keep the legacy /<slug>/ scheme unless they mirror GC's layout.
+        if self.config.provider_key == "gamecenter":
+            cat = category if category is not None else self._category_for_slug(slug)
+            suffix = f"/{cat}/{slug}/"
+        else:
+            suffix = f"/{slug}/"
+        return [f"{base.rstrip('/')}{suffix}" for base in bases]
 
     @staticmethod
     def _timestamp(path: Path) -> datetime | None:
@@ -273,6 +390,8 @@ class RootedProjectBridgeService:
 
     _META_FILE = "game.meta.json"
     _CATEGORIES = {"game", "puzzle", "action", "rpg", "strategy", "casual", "tool", "web", "other"}
+    # GameCenter directory taxonomy (post-restructure): src/<category>/<slug>/
+    _PRESET_CATEGORIES = ("misc", "casual", "match3", "puzzle", "parkour", "action")
 
     def _read_game_meta(self, project_dir: Path, slug: str) -> dict:
         """Read game.meta.json, or auto-derive minimal metadata."""
@@ -300,7 +419,8 @@ class RootedProjectBridgeService:
         for discovered in self._discover_projects():
             project_dir = discovered.path
             meta = self._read_game_meta(project_dir, discovered.slug)
-            play_urls = self._play_urls(discovered.slug)
+            category = self._category_for_discovered(discovered)
+            play_urls = self._play_urls(discovered.slug, category=category)
             games.append({
                 "slug": discovered.slug,
                 "name": meta.get("name") or discovered.slug,
@@ -1049,11 +1169,19 @@ class RootedProjectBridgeService:
 
     _TEMPLATES = DEVBRIDGE_TEMPLATES
 
-    def create_project(self, slug: str, template: str, *, provider_key: str | None = None) -> dict:
+    def create_project(self, slug: str, template: str, *, provider_key: str | None = None, category: str | None = None) -> dict:
         slug_safe = _validate_slug(slug)
         actual_provider = provider_key or self.config.provider_key
         source_root = self.config.source_root
-        project_dir = source_root / slug_safe
+        # GameCenter projects live under src/<category>/<slug>/ (post-restructure).
+        # Default to 'misc' for the built-in gamecenter provider; custom providers stay flat.
+        if actual_provider == "gamecenter":
+            cat = (category or "").strip() or "misc"
+            if cat not in self._PRESET_CATEGORIES:
+                raise HTTPException(status_code=400, detail=f"Invalid category '{cat}'. Allowed: {', '.join(self._PRESET_CATEGORIES)}")
+            project_dir = source_root / cat / slug_safe
+        else:
+            project_dir = source_root / slug_safe
         if project_dir.exists():
             raise HTTPException(status_code=409, detail=f"Project already exists: {slug_safe}")
 

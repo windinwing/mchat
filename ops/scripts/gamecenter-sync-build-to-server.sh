@@ -24,10 +24,13 @@ else
   HOST_IP="$HOST_RAW"
 fi
 REMOTE_ROOT="${REMOTE_GAMECENTER_ROOT:-/opt/xiaoxiao/gamecenter}"
-REMOTE_PARENT="${REMOTE_PROJECT_PARENT:-newsrc}"
+REMOTE_PARENT="${REMOTE_PROJECT_PARENT:-src}"
 REMOTE_PLAYABLES="${REMOTE_PLAYABLES_ROOT:-/opt/xiaoxiao/gamecenter/playables}"
 REMOTE_MCHAT="${REMOTE_MCHAT:-/opt/xiaoxiao/mchat}"
 LOCAL_GC="${LOCAL_GAMECENTER:-$HOME/dev/gamecenter-server}"
+GAMECENTER_WORKSPACE="${GAMECENTER_WORKSPACE:-$HOME/dev/xcx}"
+
+# gc_local_source_relpath and gc_play_path are provided by gamecenter-lib.sh
 
 if [[ -z "$SLUG" ]]; then
   echo "usage: $0 [ssh_host] <slug> [local_project_dir]" >&2
@@ -40,11 +43,17 @@ if [[ -z "$PROJECT_DIR" ]]; then
   )"
   if [[ -n "$REMOTE_PROJECT_HINT" ]]; then
     OUTER_HINT="$(gc_slug_outer_from_project_dir "$REMOTE_PROJECT_HINT" "$SLUG" "$REMOTE_ROOT" || true)"
-    if [[ -n "$OUTER_HINT" ]]; then
+    if [[ -n "$OUTER_HINT" && "$OUTER_HINT" == "${REMOTE_ROOT}/src/"* ]]; then
+      REL="${OUTER_HINT#${REMOTE_ROOT}/src/}"
+      OUTER="$LOCAL_GC/src/$REL"
+    elif [[ -n "$OUTER_HINT" ]]; then
       REMOTE_PARENT="$(basename "$(dirname "$OUTER_HINT")")"
+      OUTER="$LOCAL_GC/$REMOTE_PARENT/$SLUG"
     fi
   fi
-  OUTER="$LOCAL_GC/$REMOTE_PARENT/$SLUG"
+  if [[ -z "${OUTER:-}" ]]; then
+    OUTER="$LOCAL_GC/$REMOTE_PARENT/$SLUG"
+  fi
   PROJECT_DIR="$(gc_resolve_nested_project_dir "$OUTER")"
 fi
 
@@ -63,8 +72,23 @@ REMOTE_PROJECT_DIR="$(
   ssh "$RSYNC_HOST" "python3 '$REMOTE_MCHAT/ops/scripts/resolve-gamecenter-project.py' '$REMOTE_MCHAT' '$SLUG' 2>/dev/null || true"
 )"
 if [[ -z "$REMOTE_PROJECT_DIR" ]]; then
-  REMOTE_PROJECT_DIR="${REMOTE_ROOT}/${REMOTE_PARENT}/${SLUG}"
-  echo "Warning: using fallback remote project path: $REMOTE_PROJECT_DIR" >&2
+  source_relpath="$(gc_local_source_relpath "$SLUG" 2>/dev/null || true)"
+  if [[ -n "$source_relpath" ]]; then
+    local_outer="${GAMECENTER_WORKSPACE}/src/${source_relpath}"
+    remote_outer="${REMOTE_ROOT}/src/${source_relpath}"
+    if [[ "$PROJECT_DIR" == "$local_outer" ]]; then
+      REMOTE_PROJECT_DIR="$remote_outer"
+    elif [[ "$PROJECT_DIR" == "$local_outer/"* ]]; then
+      rel="${PROJECT_DIR#"$local_outer"/}"
+      REMOTE_PROJECT_DIR="${remote_outer}/${rel}"
+    else
+      REMOTE_PROJECT_DIR="$remote_outer"
+    fi
+    echo "Remote project dir (from local source_relpath): $REMOTE_PROJECT_DIR"
+  else
+    REMOTE_PROJECT_DIR="${REMOTE_ROOT}/${REMOTE_PARENT}/${SLUG}"
+    echo "Warning: using fallback remote project path: $REMOTE_PROJECT_DIR" >&2
+  fi
 else
   echo "Remote project dir: $REMOTE_PROJECT_DIR"
 fi
@@ -110,6 +134,12 @@ if [[ -n "$INDEX_MTIME" ]]; then
   echo "  index.html mtime:  $INDEX_MTIME"
 fi
 echo ""
+source_relpath="$(gc_local_source_relpath "$SLUG" 2>/dev/null || true)"
+if [[ -n "$source_relpath" ]]; then
+  PLAY_PATH="/${source_relpath}/"
+else
+  PLAY_PATH="/${SLUG}/"
+fi
 echo "Hard refresh (Cmd+Shift+R):"
-echo "  http://${HOST_IP}:5099/${SLUG}/"
-echo "  https://xyx.9235.net/${SLUG}/"
+echo "  http://${HOST_IP}:5099${PLAY_PATH}"
+echo "  https://xyx.9235.net${PLAY_PATH}"

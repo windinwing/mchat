@@ -118,7 +118,7 @@ function ProviderFields({
           className="w-full min-h-[72px] rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
           value={extraRootsText}
           onChange={(e) => onExtraRootsChange(e.target.value)}
-          placeholder="/opt/xiaoxiao/gamecenter/newsrc"
+          placeholder="/opt/xiaoxiao/gamecenter/src"
         />
       </div>
       <div>

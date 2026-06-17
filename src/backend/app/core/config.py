@@ -151,7 +151,7 @@ class Settings(BaseSettings):
     # GameCenter bridge (read-only MVP)
     gamecenter_bridge_enabled: bool = False
     gamecenter_source_root: str = "/Users/xiaoxiao/dev/xcx/src"
-    # Comma-separated extra source roots (e.g. newsrc) scanned after source_root
+    # Comma-separated extra source roots scanned after source_root (usually empty post-restructure)
     gamecenter_extra_source_roots: str = ""
     # Comma-separated project folder allowlist; empty = auto-discover all valid projects
     gamecenter_project_allowlist: str = ""

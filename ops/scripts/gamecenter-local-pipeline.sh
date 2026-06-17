@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-shot: pull project from server -> build on this Mac -> push back to server.
-# Usage: gamecenter-local-pipeline.sh <host> <project_slug> [--force] [--skip-pull]
+# Usage: gamecenter-local-pipeline.sh <host> <project_slug> [--force] [--skip-pull] [--skip-push] [--skip-build] [--pull-only]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,6 +16,7 @@ SLUG="${2:-}"
 FORCE_BUILD=0
 SKIP_PULL=0
 SKIP_PUSH=0
+SKIP_BUILD=0
 
 shift $(( $# > 0 ? 1 : 0 )) 2>/dev/null || true
 shift $(( $# > 0 ? 1 : 0 )) 2>/dev/null || true
@@ -24,6 +25,8 @@ while [[ $# -gt 0 ]]; do
     --force) FORCE_BUILD=1; shift ;;
     --skip-pull) SKIP_PULL=1; shift ;;
     --skip-push) SKIP_PUSH=1; shift ;;
+    --skip-build) SKIP_BUILD=1; shift ;;
+    --pull-only) SKIP_BUILD=1; SKIP_PUSH=1; shift ;;
     *)
       echo "unknown option: $1" >&2
       exit 1
@@ -32,8 +35,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$HOST_RAW" || -z "$SLUG" ]]; then
-  echo "usage: $0 <host> <project_slug> [--force] [--skip-pull] [--skip-push]" >&2
+  echo "usage: $0 <host> <project_slug> [--force] [--skip-pull] [--skip-push] [--skip-build] [--pull-only]" >&2
   echo "example: $0 10.98.8.15 pkg0002-3-x-3-8-3ts --force" >&2
+  echo "         $0 10.98.8.15 cat --pull-only   # rsync only, no build/push" >&2
   exit 1
 fi
 
@@ -48,7 +52,7 @@ fi
 
 LOCAL_GC="${LOCAL_GAMECENTER:-$HOME/dev/gamecenter-server}"
 REMOTE_ROOT="${REMOTE_GAMECENTER_ROOT:-/opt/xiaoxiao/gamecenter}"
-REMOTE_PARENT="${REMOTE_PROJECT_PARENT:-newsrc}"
+REMOTE_PARENT="${REMOTE_PROJECT_PARENT:-src}"
 REMOTE_MCHAT="${REMOTE_MCHAT:-/opt/xiaoxiao/mchat}"
 
 REMOTE_PROJECT_DIR="$(gc_remote_project_dir "$HOST_RAW" "$SLUG" "$REMOTE_MCHAT" || true)"
@@ -57,10 +61,8 @@ if [[ -n "$REMOTE_PROJECT_DIR" ]]; then
 fi
 if [[ -z "${REMOTE_OUTER:-}" ]]; then
   REMOTE_OUTER="${REMOTE_ROOT}/${REMOTE_PARENT}/${SLUG}"
-else
-  REMOTE_PARENT="$(basename "$(dirname "$REMOTE_OUTER")")"
 fi
-LOCAL_OUTER="$LOCAL_GC/$REMOTE_PARENT/$SLUG"
+LOCAL_OUTER="$(gc_local_outer_for_remote "$REMOTE_OUTER" "$REMOTE_ROOT" "$SLUG")"
 
 echo "========================================"
 echo "GameCenter local pipeline"
@@ -120,6 +122,18 @@ if [[ "$SKIP_PULL" -eq 0 && -n "$REMOTE_PROJECT_DIR" ]]; then
   fi
 fi
 
+if [[ "$SKIP_BUILD" -eq 1 ]]; then
+  echo ""
+  echo "==> [2/3] Build skipped (--skip-build / --pull-only)"
+  echo "==> [3/3] Push skipped (--skip-push / --pull-only)"
+  echo ""
+  echo "========================================"
+  echo "Pull done. Local project: $PROJECT_DIR"
+  echo "  outer: $LOCAL_OUTER"
+  echo "========================================"
+  exit 0
+fi
+
 echo ""
 echo "==> [2/3] Local Cocos build"
 BUILD_ARGS=("$PROJECT_DIR")
@@ -174,6 +188,7 @@ echo "Done. Verify upload:"
 bash "$SCRIPT_DIR/gamecenter-verify-playable.sh" "$HOST_RAW" "$SLUG" || true
 echo ""
 echo "Open playable (hard refresh Cmd+Shift+R):"
-echo "  http://${HOST_LABEL%%@*}:5099/${SLUG}/"
-echo "  https://xyx.9235.net/${SLUG}/"
+PLAY_PATH="$(gc_play_path "$SLUG")"
+echo "  http://${HOST_LABEL%%@*}:5099${PLAY_PATH}"
+echo "  https://xyx.9235.net${PLAY_PATH}"
 echo "========================================"

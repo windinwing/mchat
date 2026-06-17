@@ -305,7 +305,7 @@
     "title": "DevBridge settings",
     "subtitle": "Configure provider parameters in the admin UI (overrides .env defaults). New providers must be registered in the server registry.",
     "gamecenterTitle": "GameCenter provider",
-    "gamecenterHint": "Source roots, extra roots (e.g. newsrc), Cocos path, playable URLs. Restools image workflows are unchanged.",
+    "gamecenterHint": "Source root (src, supports src/<category>/<slug>/ discovery), Cocos path, playable URLs. Restools image workflows are unchanged.",
     "multiProviderHint": "GameCenter is built in. Use custom providers below to add more source roots without code changes.",
     "customProvidersTitle": "Generic providers (config only)",
     "customProvidersHint": "Set key, source root, and build command to use another bridge in DevBridge. Group allowlists are per provider. Chat agent tools still use GameCenter names today.",

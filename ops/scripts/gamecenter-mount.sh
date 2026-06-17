@@ -24,5 +24,5 @@ echo "Mounting ${USER}@${HOST}:${REMOTE_ROOT} -> $MOUNT"
 sshfs "${USER}@${HOST}:${REMOTE_ROOT}" "$MOUNT" -o volname=gamecenter-server,follow_symlinks,reconnect,ServerAliveInterval=15
 
 echo "Mounted. Example project:"
-echo "  ls \"$MOUNT/newsrc\""
+echo "  ls \"$MOUNT/src\""
 echo "Local edit + build, then: ops/scripts/gamecenter-push-playable.sh $HOST <slug>"

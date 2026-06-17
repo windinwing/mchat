@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Loader2, CheckCircle2, XCircle, Clock, FileOutput, X, RotateCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import api from '@/lib/api'
+import { toast } from '@/components/ui/Toast'
 
 interface RunItem {
   id: string
@@ -74,8 +75,8 @@ export function WorkflowRunOverlay({ open, onClose, workflowId }: WorkflowRunOve
     try {
       await api.post(`/workflows/runs/${run.id}/resume`, {})
       await load()
-    } catch {
-      // ignore
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t('workflows.toastResumeFailed', '恢复失败'), { type: 'error' })
     } finally {
       setRerunning(false)
     }

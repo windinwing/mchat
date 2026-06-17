@@ -4,6 +4,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/gamecenter-lib.sh"
 HOST_RAW="${1:-10.98.8.15}"
 SLUG="${2:-}"
 SSH_USER="${SSH_USER:-xiaoxiao}"
@@ -47,4 +49,6 @@ ssh "$SSH_TARGET" "grep -o 'ver:1\\.[0-9]*' '${REMOTE_BUILD}/assets/main/index.j
 
 echo ""
 echo "==> HTTP probe"
-curl -sI "http://${HOST_IP}:5099/${SLUG}/" | head -5 || true
+PLAY_PATH="$(gc_play_path "$SLUG")"
+echo "  probing: http://${HOST_IP}:5099${PLAY_PATH}"
+curl -sI "http://${HOST_IP}:5099${PLAY_PATH}" | head -5 || true

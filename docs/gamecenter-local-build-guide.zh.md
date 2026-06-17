@@ -8,22 +8,25 @@
 
 | 位置 | 路径 | 谁写 | 谁读 |
 |------|------|------|------|
-| 服务器源码（Agent 改这里） | `/opt/xiaoxiao/gamecenter/newsrc/<slug>/<嵌套工程>/` | DevBridge Agent | pipeline 拉取 |
-| 服务器试玩（:5099） | 同上项目的 `build/webop-mobile/` | pipeline 推送 | GameCenter gunicorn |
+| 服务器源码（Agent 改这里） | `/opt/xiaoxiao/gamecenter/src/<分类>/<slug>/<嵌套工程>/` | DevBridge Agent | pipeline 拉取 |
+| 服务器试玩（:5099） | 同上项目的 `build/web-mobile/` | pipeline 推送 | GameCenter gunicorn |
 | 服务器 playables | `/opt/xiaoxiao/gamecenter/playables/<slug>/current` | pipeline / DevBridge publish | 部分 nginx 入口 |
-| 本机工作区 | `~/dev/gamecenter-server/newsrc/<slug>/` | rsync 拉取 | 本机 Cocos 编译 |
+| 本机工作区 | `~/dev/gamecenter-server/src/<分类>/<slug>/` | rsync 拉取 | 本机 Cocos 编译 |
+
+> 分层改造后源码按 `src/<category>/<slug>/` 组织（分类：misc / casual / match3 / puzzle / parkour / action）。
+> 试玩 URL 变为 `/<category>/<slug>/`（如 `/misc/cat/`、`/puzzle/pkg0002-3-x-3-8-3ts/`）。旧 `/<slug>/` 仍 301 重定向。
 
 **DevBridge 配置（服务器）：**
 
 - `source_root`: `/opt/xiaoxiao/gamecenter/src`
-- `extra_source_roots`: `["/opt/xiaoxiao/gamecenter/newsrc"]` ← **pkg0002 实际在这里**
-- Agent `patch` 写入的是 **resolve 出来的嵌套工程目录**，不是随便一个外层文件夹。
+- `extra_source_roots`: `[]`（改造后留空，不再需要 newsrc）
+- Agent `patch` 写入的是 **resolve 出来的嵌套工程目录**（`src/<分类>/<slug>/` 下可能还有一层 nested Cocos 工程），不是随便一个外层文件夹。
 
 **常见误解：**
 
 1. **「pull 没拉代码」** — rsync 是增量的，若本机已与服务器一致，日志里可能只显示 `0 file(s) updated`，这是正常的，不代表没执行拉取。
 2. **「改了源码试玩没变」** — 可能是：① Cocos `library/` 缓存未重编；② 浏览器缓存；③ 看的是旧版本标记（如 `ver:1.0` 一直存在）；④ 服务器上 DevBridge `build_command` 在无 Cocos 时**复用旧 build**。
-3. **`:5099` 不读 playables** — 必须更新 `newsrc/.../build/web-mobile`，只 publish 到 playables 不够。
+3. **`:5099` 不读 playables** — 必须更新 `src/<分类>/<slug>/.../build/web-mobile`，只 publish 到 playables 不够。
 
 ---
 
@@ -40,10 +43,11 @@ cp ops/scripts/gamecenter-local.env.example ops/scripts/gamecenter-local.env
 ```bash
 export GAMECENTER_COCOS_CREATOR_BIN="/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/MacOS/CocosCreator"
 export LOCAL_GAMECENTER="$HOME/dev/gamecenter-server"
+export GAMECENTER_WORKSPACE="/Users/$USER/dev/xcx"
 export SSH_USER="xiaoxiao"
 # 一般不用改：
 # export REMOTE_GAMECENTER_ROOT="/opt/xiaoxiao/gamecenter"
-# export REMOTE_PROJECT_PARENT="newsrc"
+# export REMOTE_PROJECT_PARENT="src"
 ```
 
 ### 2.2 SSH 免密
@@ -87,7 +91,7 @@ ssh xiaoxiao@10.98.8.15 'echo ok'
 
 步骤说明：
 
-1. **[1/3] Pull** — 从 `10.98.8.15:/opt/xiaoxiao/gamecenter/newsrc/pkg0002-.../` 拉到本机  
+1. **[1/3] Pull** — 从 `10.98.8.15:/opt/xiaoxiao/gamecenter/src/<分类>/pkg0002-.../` 拉到本机  
    - 排除：`build/`、`library/`、`temp/`（build 在本机生成，library 在本机缓存）
    - 输出 `pull summary: N file(s) updated`；**N=0 表示已与服务器同步**
    - 自动用 `UILoading.ts` 做 **md5 校验**（不一致则中止，避免用旧代码编译）
@@ -105,8 +109,10 @@ ssh xiaoxiao@10.98.8.15 'echo ok'
 
 试玩地址（**必须强刷 Cmd+Shift+R**）：
 
-- http://10.98.8.15:5099/pkg0002-3-x-3-8-3ts/
-- https://xyx.9235.net/pkg0002-3-x-3-8-3ts/
+- http://10.98.8.15:5099/puzzle/pkg0002-3-x-3-8-3ts/
+- https://xyx.9235.net/puzzle/pkg0002-3-x-3-8-3ts/
+
+> 试玩 URL 现为 `/<分类>/<slug>/`。脚本末尾自动从 xcx workspace 的 `source_relpath` 推导正确路径。
 
 ### 4.2 怀疑没拉到服务器最新代码
 
@@ -124,20 +130,20 @@ ssh xiaoxiao@10.98.8.15 'echo ok'
 
 ```bash
 ssh xiaoxiao@10.98.8.15 \
-  "grep -n '你的标记' /opt/xiaoxiao/gamecenter/newsrc/pkg0002-3-x-3-8-3ts/*/assets/scripts/ui/UIMain.ts"
+  "grep -n '你的标记' /opt/xiaoxiao/gamecenter/src/puzzle/pkg0002-3-x-3-8-3ts/*/assets/scripts/ui/UIMain.ts"
 ```
 
 ### 4.3 分步执行（调试）
 
 ```bash
-# 只拉
+# 只拉（分类路径以实际 source_relpath 为准，如 puzzle/pkg0002-...）
 rsync -avz --exclude build/ --exclude library/ --exclude temp/ \
-  xiaoxiao@10.98.8.15:/opt/xiaoxiao/gamecenter/newsrc/pkg0002-3-x-3-8-3ts/ \
-  ~/dev/gamecenter-server/newsrc/pkg0002-3-x-3-8-3ts/
+  xiaoxiao@10.98.8.15:/opt/xiaoxiao/gamecenter/src/puzzle/pkg0002-3-x-3-8-3ts/ \
+  ~/dev/gamecenter-server/src/puzzle/pkg0002-3-x-3-8-3ts/
 
 # 只编
 ./ops/scripts/gamecenter-local-build-project.sh \
-  ~/dev/gamecenter-server/newsrc/pkg0002-3-x-3-8-3ts --force
+  ~/dev/gamecenter-server/src/puzzle/pkg0002-3-x-3-8-3ts --force
 
 # 只推（确认本地源码已与服务器一致后再推，否则会覆盖服务器上的 Agent 修改）
 ./ops/scripts/gamecenter-sync-build-to-server.sh 10.98.8.15 pkg0002-3-x-3-8-3ts
@@ -223,7 +229,7 @@ flock /tmp/cocos-build.lock \
 {
   "gamecenter": {
     "source_root": "/opt/xiaoxiao/gamecenter/src",
-    "extra_source_roots": ["/opt/xiaoxiao/gamecenter/newsrc"],
+    "extra_source_roots": [],
     "build_command": "ssh -o BatchMode=yes build@<macmini-ip> 'bash /opt/mchat/ops/scripts/gamecenter-local-pipeline.sh 10.98.8.15 {slug} --force'",
     "cocos_creator_bin": "",
     "playables_root": "/opt/xiaoxiao/gamecenter/playables",
@@ -231,6 +237,9 @@ flock /tmp/cocos-build.lock \
   }
 }
 ```
+
+> `source_root` 指向 `src` 根目录（非 `src/misc`）。DevBridge 会递归发现 `src/<分类>/<slug>/` 下所有项目。
+> `extra_source_roots` 改造后留空（不再需要 newsrc）。
 
 > 在未接 Mac mini 之前，服务器上的 `build_command` 若指向 `gamecenter-bridge-build.sh` 且未配置 Cocos，**只会复用旧 build**，看起来「构建成功」但试玩不变。
 
@@ -333,11 +342,11 @@ python3 /opt/xiaoxiao/mchat/ops/scripts/resolve-gamecenter-project.py \
 
 ```text
 用户在群组聊天 patch
-    → 10.98.8.15 写入 newsrc 源码
+    → 10.98.8.15 写入 src/<分类>/<slug>/ 源码
     → （自动）build_command SSH 到编译机
     → 编译机 gamecenter-local-pipeline.sh 拉源码→编→推
     → 10.98.8.15 build/web-mobile 更新
-    → http://10.98.8.15:5099/<slug>/ 生效
+    → http://10.98.8.15:5099/<分类>/<slug>/ 生效
 ```
 
 ### 9.2 一次性配置（三块）

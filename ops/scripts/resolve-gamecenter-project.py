@@ -86,6 +86,33 @@ def _is_cocos_project_dir(path: Path) -> bool:
     return isinstance(creator, dict) and bool(creator.get("version"))
 
 
+def _should_skip_scan_dir(name: str) -> bool:
+    return name.startswith("_") or name in {"cocos-code-all-batch"}
+
+
+# GameCenter directory taxonomy (post-restructure): src/<category>/<slug>/
+_PRESET_CATEGORIES = ("misc", "casual", "match3", "puzzle", "parkour", "action")
+
+
+def _resolve_slug_container(container: Path) -> tuple[str, Path] | None:
+    if not container.is_dir() or _should_skip_scan_dir(container.name):
+        return None
+    if _is_cocos_project_dir(container):
+        return container.name, container
+    nested = [
+        child
+        for child in sorted(container.iterdir(), key=lambda p: p.name.lower())
+        if child.is_dir() and not child.name.startswith("_") and _is_cocos_project_dir(child)
+    ]
+    if len(nested) == 1:
+        return container.name, nested[0]
+    if len(nested) > 1:
+        # Multiple Cocos sub-projects: prefer the one with a build (aligns with xcx).
+        with_build = [c for c in nested if (c / "build" / "web-mobile" / "index.html").is_file()]
+        return container.name, (with_build[0] if with_build else nested[0])
+    return None
+
+
 def _discover_projects(settings: dict) -> list[tuple[str, Path]]:
     roots: list[Path] = []
     for item in [settings.get("source_root"), *settings.get("extra_source_roots", [])]:
@@ -100,34 +127,52 @@ def _discover_projects(settings: dict) -> list[tuple[str, Path]]:
     items: list[tuple[str, Path]] = []
     allowlist = settings.get("allowlist")
 
+    def scan_children(parent: Path) -> None:
+        for child in sorted(parent.iterdir(), key=lambda p: p.name.lower()):
+            if not child.is_dir() or _should_skip_scan_dir(child.name):
+                continue
+            if child.name in seen:
+                continue
+            if allowlist is not None and child.name not in allowlist:
+                continue
+            resolved = _resolve_slug_container(child)
+            if resolved is None:
+                continue
+            slug, project_dir = resolved
+            if slug in seen:
+                continue
+            seen.add(slug)
+            items.append((slug, project_dir))
+
     for root in roots:
         try:
-            entries = sorted(root.iterdir(), key=lambda p: p.name.lower())
+            top_entries = sorted(root.iterdir(), key=lambda p: p.name.lower())
         except OSError:
             continue
-        for entry in entries:
-            if not entry.is_dir() or entry.name.startswith("_"):
+
+        for entry in top_entries:
+            if not entry.is_dir() or _should_skip_scan_dir(entry.name):
                 continue
             if entry.name in seen:
                 continue
+
+            # Preset category directories (post-restructure): src/<category>/<slug>/
+            # Always scan children — never treat the category dir itself as a slug.
+            if entry.name in _PRESET_CATEGORIES:
+                scan_children(entry)
+                continue
+
             if allowlist is not None and entry.name not in allowlist:
                 continue
-            if _is_cocos_project_dir(entry):
-                seen.add(entry.name)
-                items.append((entry.name, entry))
+
+            direct = _resolve_slug_container(entry)
+            if direct is not None:
+                slug, project_dir = direct
+                seen.add(slug)
+                items.append((slug, project_dir))
                 continue
-            try:
-                children = sorted(entry.iterdir(), key=lambda p: p.name.lower())
-            except OSError:
-                continue
-            nested = [
-                child
-                for child in children
-                if child.is_dir() and not child.name.startswith("_") and _is_cocos_project_dir(child)
-            ]
-            if len(nested) == 1:
-                seen.add(entry.name)
-                items.append((entry.name, nested[0]))
+
+            scan_children(entry)
     return items
 
 

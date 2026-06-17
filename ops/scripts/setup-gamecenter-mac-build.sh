@@ -92,8 +92,11 @@ LOCAL_GAMECENTER=${LOCAL_GC}
 
 # Server paths
 REMOTE_GAMECENTER_ROOT=/opt/xiaoxiao/gamecenter
-REMOTE_PROJECT_PARENT=newsrc
+REMOTE_PROJECT_PARENT=src
 REMOTE_MCHAT=/opt/xiaoxiao/mchat
+
+# xcx workspace (used by sync scripts to resolve source_relpath: src/<category>/<slug>)
+GAMECENTER_WORKSPACE=/Users/${MAC_USER}/dev/xcx
 
 # Cocos Creator binary (first detected; edit if you have multiple versions)
 ENVEOF

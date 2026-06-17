@@ -23,6 +23,26 @@ gc_resolve_nested_project_dir() {
   printf '%s\n' "$outer"
 }
 
+# Derive the local outer slug dir from a remote outer path.
+# Mirrors the pipeline's LOCAL_OUTER logic: maps ${REMOTE_ROOT}/src/<rel> → $LOCAL_GC/src/<rel>.
+# Usage: gc_local_outer_for_remote <remote_outer> [remote_root] [slug]
+gc_local_outer_for_remote() {
+  local remote_outer="${1:-}"
+  local remote_root="${2:-${REMOTE_GAMECENTER_ROOT:-/opt/xiaoxiao/gamecenter}}"
+  local local_gc="${LOCAL_GAMECENTER:-$HOME/dev/gamecenter-server}"
+  local remote_parent="${REMOTE_PROJECT_PARENT:-src}"
+  local slug="${3:-}"
+
+  if [[ -n "$remote_outer" && "$remote_outer" == "${remote_root}/src/"* ]]; then
+    local rel="${remote_outer#${remote_root}/src/}"
+    printf '%s\n' "$local_gc/src/$rel"
+  elif [[ -n "$slug" ]]; then
+    printf '%s\n' "$local_gc/$remote_parent/$slug"
+  else
+    return 1
+  fi
+}
+
 # Outer slug directory for rsync (walk up from nested Cocos project dir).
 gc_slug_outer_from_project_dir() {
   local project_dir="${1:-}"
@@ -112,4 +132,40 @@ gc_find_build_output() {
     return 0
   fi
   return 1
+}
+
+# Resolve source_relpath for a slug from the xcx workspace (e.g. "misc/cat", "puzzle/pkg0002-...").
+# Requires GAMECENTER_WORKSPACE to point at the xcx checkout (default: ~/dev/xcx).
+# Prints empty string on failure.
+gc_local_source_relpath() {
+  local slug="${1:-}"
+  local workspace="${GAMECENTER_WORKSPACE:-$HOME/dev/xcx}"
+  [[ -n "$slug" && -d "$workspace/gamecenter" ]] || return 1
+  python3 - "$workspace" "$slug" <<'PY' 2>/dev/null || true
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+slug = sys.argv[2]
+sys.path.insert(0, str(workspace / "gamecenter"))
+try:
+    import service
+    print(service.get_source_relpath(slug))
+except Exception:
+    pass
+PY
+}
+
+# Compute GameCenter :5099 / xyx play path for a slug: /<source_relpath>/
+# (e.g. "/misc/cat/", "/puzzle/pkg0002-3-x-3-8-3ts/").
+# Falls back to "/<slug>/" if source_relpath cannot be resolved from the xcx workspace.
+gc_play_path() {
+  local slug="${1:-}"
+  local relpath
+  relpath="$(gc_local_source_relpath "$slug" 2>/dev/null || true)"
+  if [[ -n "$relpath" ]]; then
+    printf '/%s/\n' "$relpath"
+  else
+    printf '/%s/\n' "$slug"
+  fi
 }

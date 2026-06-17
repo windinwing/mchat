@@ -238,12 +238,23 @@ def _fmt_build(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _play_urls_for_slug(slug: str) -> list[str]:
-    cfg = _gc_settings()
-    bases = [str(item).strip() for item in (cfg.get("playable_base_urls") or []) if str(item).strip()]
-    if not bases and cfg.get("playable_base_url"):
-        bases = [str(cfg.get("playable_base_url")).strip()]
-    return [f"{base.rstrip('/')}/{slug}/" for base in bases]
+def _play_urls_for_slug(slug: str, *, service: Any = None) -> list[str]:
+    """Generate play URLs for a slug using the bridge service (category-aware).
+
+    Post-restructure the URL is /<category>/<slug>/ (e.g. /misc/cat/).
+    Falls back to legacy /<slug>/ if the service cannot resolve the category.
+    """
+    if service is not None and hasattr(service, "_play_urls"):
+        return service._play_urls(slug)
+    try:
+        svc = _resolve_bridge_service("gamecenter")
+        return svc._play_urls(slug)
+    except Exception:
+        cfg = _gc_settings()
+        bases = [str(item).strip() for item in (cfg.get("playable_base_urls") or []) if str(item).strip()]
+        if not bases and cfg.get("playable_base_url"):
+            bases = [str(cfg.get("playable_base_url")).strip()]
+        return [f"{base.rstrip('/')}/{slug}/" for base in bases]
 
 
 def _try_auto_build_after_patch(
@@ -264,7 +275,7 @@ def _try_auto_build_after_patch(
             actor_user_id=user_id,
             summary=(summary or "auto build after patch").strip(),
         )
-        result["play_urls"] = _play_urls_for_slug(slug)
+        result["play_urls"] = _play_urls_for_slug(slug, service=service)
         return result
     except HTTPException as exc:
         return {"error": str(exc.detail)}
@@ -1117,7 +1128,7 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
             actor_user_id=user_id,
             summary=str(args.get("summary") or "") or None,
         )
-        result["play_urls"] = _play_urls_for_slug(str(args.get("slug") or ""))
+        result["play_urls"] = _play_urls_for_slug(str(args.get("slug") or ""), service=service)
         return {"ok": True, "content": _fmt_build(result), **result}
     if name == "get_gamecenter_build_progress":
         slug = str(args.get("slug") or "")
@@ -1133,7 +1144,7 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
             latest_id = str(builds[0].get("id") or "")
             if latest_id:
                 stdout_tail, stderr_tail = _read_build_log_tail(data_root, slug, latest_id)
-        play_urls = _play_urls_for_slug(slug)
+        play_urls = _play_urls_for_slug(slug, service=service)
         content = _fmt_build_progress(
             slug,
             project=project,
@@ -1171,7 +1182,7 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
             project=project,
             builds=builds,
             changes=changes,
-            play_urls=_play_urls_for_slug(slug),
+            play_urls=_play_urls_for_slug(slug, service=service),
         )
         return {"ok": True, "content": content, "builds": builds}
     if name == "publish_gamecenter_project_build":
@@ -1297,7 +1308,7 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
 
     if name == "build_devbridge_project":
         result = service.build_project(str(args.get("slug") or ""), actor_user_id=user_id, summary=str(args.get("summary") or "") or None)
-        result["play_urls"] = _play_urls_for_slug(str(args.get("slug") or ""))
+        result["play_urls"] = _play_urls_for_slug(str(args.get("slug") or ""), service=service)
         return {"ok": True, "content": _fmt_build(result), **result}
 
     if name == "search_devbridge_project_files":
@@ -1368,7 +1379,7 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
             except Exception:
                 pass
         files = result.get("created_files", [])
-        play_urls = _play_urls_for_slug(slug)
+        play_urls = _play_urls_for_slug(slug, service=project_service)
         content = f"✅ 项目 `{result['slug']}` 已创建（{result['template_description']}）\n- 模板: {result['template']}\n- 路径: `{result['project_dir']}`\n- 已自动加入管理列表"
         if play_urls:
             content += f"\n- 试玩地址: {play_urls[0]}"

@@ -237,10 +237,11 @@ async def create_provider_project(
 ):
     slug = str(request.get("slug") or "").strip()
     template = str(request.get("template") or "cocos-empty").strip()
+    category = str(request.get("category") or "").strip() or None
     if not slug:
         raise HTTPException(status_code=400, detail="slug is required")
     provider = get_devbridge_provider(provider_key)
-    return provider.service_factory().create_project(slug, template, provider_key=provider_key)
+    return provider.service_factory().create_project(slug, template, provider_key=provider_key, category=category)
 
 
 @router.post("/providers/{provider_key}/projects/{slug}/upload")

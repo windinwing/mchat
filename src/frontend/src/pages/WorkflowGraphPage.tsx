@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Layers, Clock, Loader2 } from 'lucide-react'
 import { WorkflowGraphEditor, type WorkflowGraphValue } from '@/components/workflow/WorkflowGraphEditor'
@@ -7,6 +7,7 @@ import { WorkflowTemplateGallery } from '@/components/workflow/WorkflowTemplateG
 import { WorkflowRunOverlay } from '@/components/workflow/WorkflowRunOverlay'
 import { WorkflowSidebar } from '@/components/workflow/WorkflowSidebar'
 import type { PresetItem } from '@/components/workflow/WorkflowSidebar'
+import { toast } from '@/components/ui/Toast'
 import api from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
 import { getPatentPresetTitle, getPatentPresetDescription, buildPatentWorkflowPresets } from '@/lib/patentWorkflowPresets'
@@ -22,6 +23,9 @@ export function WorkflowGraphPage() {
   const { t, i18n } = useTranslation()
   const { workflowId } = useParams<{ workflowId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  const isPortal = location.pathname.startsWith('/portal')
+  const workflowsPath = isPortal ? '/portal/workflows' : '/admin/workflows'
   const user = useAuthStore((s) => s.user)
   const locale = i18n.language || 'zh'
 
@@ -54,9 +58,9 @@ export function WorkflowGraphPage() {
         ])
         setWorkflow(wf)
         setSkills(sk || [])
-      } catch {
-        // navigate back on error
-        navigate('/admin/workflows')
+      } catch (err) {
+        toast(err instanceof Error ? err.message : t('workflows.toastLoadFailed', '加载失败'), { type: 'error' })
+        navigate(workflowsPath)
       } finally {
         setLoading(false)
       }
@@ -71,8 +75,8 @@ export function WorkflowGraphPage() {
       try {
         await api.patch(`/workflows/${workflowId}`, { graph_json: graph })
         setWorkflow((prev) => (prev ? { ...prev, graph_json: graph } : prev))
-      } catch {
-        // ignore
+      } catch (err) {
+        toast(err instanceof Error ? err.message : t('workflows.toastSaveFailed', '保存失败'), { type: 'error' })
       } finally {
         setSaving(false)
       }
@@ -96,7 +100,7 @@ export function WorkflowGraphPage() {
         onSave={handleSave}
         workflowId={workflowId}
         workflowName={workflow?.name}
-        onBack={() => navigate('/admin/workflows')}
+        onBack={() => navigate(workflowsPath)}
         presets={presets}
         headerExtra={
           <>

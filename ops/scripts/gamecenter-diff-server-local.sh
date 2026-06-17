@@ -16,7 +16,7 @@ SLUG="${2:-}"
 REL_FILE="${3:-assets/scripts/ui/UILoading.ts}"
 SSH_USER="${SSH_USER:-xiaoxiao}"
 REMOTE_MCHAT="${REMOTE_MCHAT:-/opt/xiaoxiao/mchat}"
-REMOTE_PARENT="${REMOTE_PROJECT_PARENT:-newsrc}"
+REMOTE_PARENT="${REMOTE_PROJECT_PARENT:-src}"
 LOCAL_GC="${LOCAL_GAMECENTER:-$HOME/dev/gamecenter-server}"
 
 if [[ "$HOST_RAW" == *@* ]]; then
@@ -32,13 +32,11 @@ if [[ -z "$SLUG" ]]; then
 fi
 
 REMOTE_PROJECT="$(gc_remote_project_dir "$HOST_RAW" "$SLUG" "$REMOTE_MCHAT" || true)"
+REMOTE_ROOT="${REMOTE_GAMECENTER_ROOT:-/opt/xiaoxiao/gamecenter}"
 if [[ -n "$REMOTE_PROJECT" ]]; then
-  REMOTE_OUTER="$(gc_slug_outer_from_project_dir "$REMOTE_PROJECT" "$SLUG" "${REMOTE_GAMECENTER_ROOT:-/opt/xiaoxiao/gamecenter}" || true)"
-  if [[ -n "$REMOTE_OUTER" ]]; then
-    REMOTE_PARENT="$(basename "$(dirname "$REMOTE_OUTER")")"
-  fi
+  REMOTE_OUTER="$(gc_slug_outer_from_project_dir "$REMOTE_PROJECT" "$SLUG" "$REMOTE_ROOT" || true)"
 fi
-LOCAL_OUTER="$LOCAL_GC/$REMOTE_PARENT/$SLUG"
+LOCAL_OUTER="$(gc_local_outer_for_remote "${REMOTE_OUTER:-}" "$REMOTE_ROOT" "$SLUG")"
 LOCAL_PROJECT="$(gc_resolve_nested_project_dir "$LOCAL_OUTER")"
 
 echo "slug:           $SLUG"
