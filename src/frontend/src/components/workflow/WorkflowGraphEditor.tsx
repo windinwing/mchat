@@ -1346,7 +1346,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
             zoomOnPinch
             zoomOnDoubleClick={false}
             panOnScroll={false}
-            panOnDrag={isPointerTool ? [1, 2] : true}
+            panOnDrag={isPointerTool ? [1] : true}
             selectionOnDrag={isPointerTool}
             selectionKeyCode={isPointerTool ? 'Shift' : null}
             nodesDraggable={isPointerTool}
@@ -1385,6 +1385,13 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
             onNodeContextMenu={(e, node) => {
               if (!isPointerTool) return
               e.preventDefault()
+              // If the right-clicked node is part of a multi-selection, show
+              // a multi-node context menu (with Group option) instead of single-node
+              const selectedCount = nodes.filter((n) => n.selected).length
+              if (selectedCount >= 2 && node.selected) {
+                setContextMenu({ kind: 'pane', x: e.clientX, y: e.clientY, flowX: 0, flowY: 0 })
+                return
+              }
               setSelectedNodeId(node.id)
               setSelectedEdgeId(null)
               setPropsOpen(true)

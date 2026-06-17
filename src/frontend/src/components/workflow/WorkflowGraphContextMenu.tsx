@@ -67,6 +67,14 @@ export function WorkflowGraphContextMenu({
     >
       {menu.kind === 'node' ? (
         <>
+          {onGroupSelected && (selectedCount || 0) >= 2 && (
+            <>
+              <button type="button" className={itemClass} onClick={() => { onGroupSelected(); onClose() }}>
+                {t('workflows.ctxGroupSelected', 'Group Selected')} ({selectedCount})
+              </button>
+              <div className="mx-2 my-1 border-t border-gray-100 dark:border-gray-800" />
+            </>
+          )}
           <button type="button" className={itemClass} onClick={() => { onDuplicateNode(menu.nodeId); onClose() }}>
             {t('workflows.ctxDuplicateNode')}
           </button>
