@@ -936,8 +936,11 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
       const cfg = (group.data as any)?.config || {}
       const newCollapsed = !cfg.collapsed
       const origHeight = cfg.height || (group.style as any)?.height || group.height || 160
+      const childIds = new Set(
+        nodesRef.current.filter((n) => (n.data as any)?._groupParent === groupId).map((n) => n.id),
+      )
 
-      // Only update nodes — edges stay visible at all times
+      // Update nodes: fade children + shrink group
       setNodes((prev) =>
         prev.map((n) => {
           if (n.id === groupId) {
@@ -948,8 +951,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
               data: { ...n.data, config: { ...cfg, collapsed: newCollapsed, height: origHeight } },
             }
           }
-          // Fade children out/in via opacity (NOT hidden) so edges stay visible
-          if ((n.data as any)?._groupParent === groupId) {
+          if (childIds.has(n.id)) {
             return {
               ...n,
               style: newCollapsed
@@ -960,6 +962,54 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
             }
           }
           return n
+        }),
+      )
+
+      // Update edges: when collapsing, redirect endpoints from children to the group
+      // node so edges visually attach to the group frame (not empty space).
+      // Internal edges (both endpoints inside the group) are hidden.
+      setEdges((prev) =>
+        prev.map((edge) => {
+          const sourceInGroup = childIds.has(edge.source)
+          const targetInGroup = childIds.has(edge.target)
+          if (!sourceInGroup && !targetInGroup) return edge
+
+          if (newCollapsed) {
+            // Collapsing — redirect or hide
+            if (sourceInGroup && targetInGroup) {
+              // Internal edge — hide
+              return { ...edge, hidden: true }
+            }
+            // External edge — redirect endpoint to group, save original
+            return {
+              ...edge,
+              data: {
+                ...(edge.data as any),
+                _origSource: sourceInGroup ? edge.source : undefined,
+                _origTarget: targetInGroup ? edge.target : undefined,
+              },
+              source: sourceInGroup ? groupId : edge.source,
+              target: targetInGroup ? groupId : edge.target,
+              hidden: false,
+            }
+          } else {
+            // Expanding — restore original endpoints
+            const data = edge.data as any
+            if (data?._origSource || data?._origTarget) {
+              return {
+                ...edge,
+                source: data._origSource || edge.source,
+                target: data._origTarget || edge.target,
+                data: { ...data, _origSource: undefined, _origTarget: undefined },
+                hidden: false,
+              }
+            }
+            // Was an internal edge — unhide
+            if (sourceInGroup && targetInGroup) {
+              return { ...edge, hidden: false }
+            }
+            return edge
+          }
         }),
       )
     }
