@@ -1,6 +1,5 @@
 import { memo, useState, useCallback } from 'react'
 import { NodeProps, NodeResizer, type Node } from '@xyflow/react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const GROUP_COLORS = [
@@ -10,22 +9,16 @@ const GROUP_COLORS = [
 
 type GroupNodeData = {
   label: string
-  config?: { color?: string; collapsed?: boolean }
+  config?: { color?: string }
   groupChildCount?: number
 }
 
 function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
   const d = data as GroupNodeData
   const color = d.config?.color || '#64748b'
-  const collapsed = d.config?.collapsed || false
   const [editing, setEditing] = useState(false)
   const [label, setLabel] = useState(d.label)
   const [showPalette, setShowPalette] = useState(false)
-
-  const toggleCollapse = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    window.dispatchEvent(new CustomEvent('mchat-group-toggle', { detail: { groupId: id } }))
-  }, [id])
 
   const pickColor = useCallback((e: React.MouseEvent, c: string) => {
     e.stopPropagation()
@@ -42,27 +35,19 @@ function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
 
   return (
     <>
-      {!collapsed && (
-        <NodeResizer
-          isVisible={selected}
-          minWidth={160}
-          minHeight={100}
-          lineClassName="!border-primary-400"
-          handleClassName="!h-2.5 !w-2.5 !rounded !border !border-primary-500 !bg-white"
-        />
-      )}
+      <NodeResizer
+        isVisible={selected}
+        minWidth={160}
+        minHeight={100}
+        lineClassName="!border-primary-400"
+        handleClassName="!h-2.5 !w-2.5 !rounded !border !border-primary-500 !bg-white"
+      />
       <div
         className={cn(
-          'rounded-xl border-2 transition-all',
-          collapsed ? 'border-solid overflow-hidden' : 'border-dashed',
+          'h-full w-full rounded-xl border-2 border-dashed transition-colors',
           selected && 'ring-2 ring-primary-400 ring-offset-1',
         )}
-        style={{
-          borderColor: color,
-          backgroundColor: `${color}0d`,
-          height: collapsed ? 32 : '100%',
-          overflow: collapsed ? 'hidden' : 'visible',
-        }}
+        style={{ borderColor: color, backgroundColor: `${color}0d` }}
       >
         {/* Title bar */}
         <div
@@ -70,17 +55,6 @@ function WorkflowGroupNodeComponent({ id, data, selected }: NodeProps) {
           style={{ backgroundColor: `${color}1a` }}
           onDoubleClick={(e) => { e.stopPropagation(); setEditing(true) }}
         >
-          <button
-            type="button"
-            onClick={toggleCollapse}
-            className="shrink-0 rounded p-0.5 hover:bg-black/5 dark:hover:bg-white/10"
-            title={collapsed ? 'Expand' : 'Collapse'}
-          >
-            {collapsed
-              ? <ChevronRight className="w-3.5 h-3.5" style={{ color }} />
-              : <ChevronDown className="w-3.5 h-3.5" style={{ color }} />}
-          </button>
-
           {editing ? (
             <input
               type="text"
@@ -151,7 +125,6 @@ export const groupNodeTypes = {
   workflowGroup: WorkflowGroupNode,
 }
 
-/** Calculate bounding box of nodes for group creation */
 export function computeGroupBounds(
   nodes: Node[],
   padding = 40,

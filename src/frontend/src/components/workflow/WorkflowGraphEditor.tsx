@@ -927,42 +927,8 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
     })
   }, [nodes, pushHistory, setNodes, t])
 
-  // Listen for group node events (toggle collapse, rename, color change)
+  // Listen for group node events (rename, color change)
   useEffect(() => {
-    const onToggle = (e: Event) => {
-      const { groupId } = (e as CustomEvent).detail
-      const group = nodesRef.current.find((n) => n.id === groupId)
-      if (!group) return
-      const cfg = (group.data as any)?.config || {}
-      const newCollapsed = !cfg.collapsed
-      const origHeight = cfg.height || (group.style as any)?.height || group.height || 160
-
-      setNodes((prev) =>
-        prev.map((n) => {
-          if (n.id === groupId) {
-            return {
-              ...n,
-              style: { ...(n.style as any), height: newCollapsed ? 32 : origHeight, overflow: 'hidden' },
-              height: newCollapsed ? 32 : origHeight,
-              data: { ...n.data, config: { ...cfg, collapsed: newCollapsed, height: origHeight } },
-            }
-          }
-          if ((n.data as any)?._groupParent === groupId) {
-            return {
-              ...n,
-              style: newCollapsed
-                ? { ...(n.style as any), opacity: 0, pointerEvents: 'none' }
-                : { ...(n.style as any), opacity: undefined, pointerEvents: undefined },
-              selectable: !newCollapsed,
-              draggable: !newCollapsed,
-            }
-          }
-          return n
-        }),
-      )
-      // Edges: untouched — always visible, endpoints stay at child positions
-      // (which overlap with the group frame area).
-    }
     const onRename = (e: Event) => {
       const { groupId, label } = (e as CustomEvent).detail
       setNodes((prev) => prev.map((n) =>
@@ -977,11 +943,9 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
         return { ...n, data: { ...n.data, config: { ...cfg, color } } }
       }))
     }
-    window.addEventListener('mchat-group-toggle', onToggle)
     window.addEventListener('mchat-group-rename', onRename)
     window.addEventListener('mchat-group-color', onColor)
     return () => {
-      window.removeEventListener('mchat-group-toggle', onToggle)
       window.removeEventListener('mchat-group-rename', onRename)
       window.removeEventListener('mchat-group-color', onColor)
     }
