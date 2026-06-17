@@ -1,35 +1,125 @@
-import React, { useState } from 'react'
-import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { useState, useMemo } from 'react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  LayoutDashboard,
-  MessageSquare,
   BookOpen,
-  Puzzle,
   Bot,
-  Settings,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  Code2,
+  Container,
+  DollarSign,
+  FolderOpen,
   Globe,
-  X,
-  MessageCircle,
   Headphones,
   Home,
-  Users,
-  Lock,
-  Store,
-  DollarSign,
-  BadgeCheck,
-  Clock3,
-  Workflow,
+  LayoutDashboard,
   LayoutTemplate,
-  FolderOpen,
-  Container,
-  Code2,
+  Lock,
+  MessageCircle,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Puzzle,
+  Settings,
+  Store,
+  BadgeCheck,
+  Users,
+  Workflow as WorkflowIcon,
+  X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Badge } from '@/components/ui/Badge'
 import { useAuthStore } from '@/stores/auth'
+
+interface NavItem {
+  path: string
+  labelKey: string
+  icon: React.ComponentType<{ className?: string }>
+  exact?: boolean
+}
+
+interface NavGroup {
+  titleKey: string
+  items: NavItem[]
+}
+
+const adminNavGroups: NavGroup[] = [
+  {
+    titleKey: 'navGroup.core',
+    items: [
+      { path: '/admin', labelKey: 'nav.dashboard', icon: LayoutDashboard, exact: true },
+      { path: '/admin/conversations', labelKey: 'nav.conversations', icon: MessageSquare },
+    ],
+  },
+  {
+    titleKey: 'navGroup.ai',
+    items: [
+      { path: '/admin/knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
+      { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
+      { path: '/admin/agents', labelKey: 'nav.agents', icon: Bot },
+      { path: '/admin/customer-agents', labelKey: 'nav.customerAgents', icon: Headphones },
+    ],
+  },
+  {
+    titleKey: 'navGroup.dev',
+    items: [
+      { path: '/admin/workflows', labelKey: 'nav.workflows', icon: WorkflowIcon },
+      { path: '/admin/devbridge', labelKey: 'nav.devbridge', icon: Code2 },
+      { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
+      { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
+      { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
+    ],
+  },
+  {
+    titleKey: 'navGroup.management',
+    items: [
+      { path: '/admin/settings', labelKey: 'nav.settings', icon: Settings },
+      { path: '/admin/channels', labelKey: 'nav.channels', icon: Globe },
+      { path: '/admin/users', labelKey: 'nav.users', icon: Users },
+      { path: '/admin/roles', labelKey: 'nav.roles', icon: Lock },
+      { path: '/admin/groups', labelKey: 'nav.groups', icon: Users },
+    ],
+  },
+  {
+    titleKey: 'navGroup.business',
+    items: [
+      { path: '/admin/templates', labelKey: 'nav.templates', icon: Store },
+      { path: '/admin/orders', labelKey: 'nav.orders', icon: DollarSign },
+      { path: '/admin/subscriptions', labelKey: 'nav.subscriptions', icon: BadgeCheck },
+      { path: '/admin/workflow-center', labelKey: 'nav.workflowCenter', icon: LayoutTemplate },
+    ],
+  },
+]
+
+const agentNavGroups: NavGroup[] = [
+  {
+    titleKey: 'navGroup.core',
+    items: [
+      { path: '/admin', labelKey: 'nav.dashboard', icon: LayoutDashboard, exact: true },
+      { path: '/admin/conversations', labelKey: 'nav.conversations', icon: MessageSquare },
+    ],
+  },
+  {
+    titleKey: 'navGroup.ai',
+    items: [
+      { path: '/admin/knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
+      { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
+      { path: '/admin/agents', labelKey: 'nav.agents', icon: Bot },
+      { path: '/admin/customer-agents', labelKey: 'nav.customerAgents', icon: Headphones },
+    ],
+  },
+  {
+    titleKey: 'navGroup.dev',
+    items: [
+      { path: '/admin/workflows', labelKey: 'nav.workflows', icon: WorkflowIcon },
+      { path: '/admin/devbridge', labelKey: 'nav.devbridge', icon: Code2 },
+      { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
+      { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
+      { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
+    ],
+  },
+]
 
 interface SidebarProps {
   onClose?: () => void
@@ -42,56 +132,45 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
   const { t } = useTranslation()
   const user = useAuthStore((s) => s.user)
   const [collapsed, setCollapsed] = useState(false)
+  const navGroups = user?.role === 'admin' ? adminNavGroups : agentNavGroups
+
+  // Collapse state per group (persisted)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('mchat-nav-collapsed')
+      return saved ? new Set(JSON.parse(saved)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      localStorage.setItem('mchat-nav-collapsed', JSON.stringify([...next]))
+      return next
+    })
+  }
+
+  const isActive = (item: NavItem) => {
+    if (item.exact) return location.pathname === item.path
+    return location.pathname.startsWith(item.path)
+  }
+
+  // Auto-expand group containing active route
+  const activeGroupKey = useMemo(() => {
+    for (const g of navGroups) {
+      if (g.items.some(isActive)) return g.titleKey
+    }
+    return null
+  }, [navGroups, location.pathname])
 
   const handleToggle = () => {
     const next = !collapsed
     setCollapsed(next)
     onCollapseChange?.(next)
-  }
-
-  const adminNav = [
-    { path: '/admin', labelKey: 'nav.dashboard', icon: LayoutDashboard, exact: true as const },
-    { path: '/admin/conversations', labelKey: 'nav.conversations', icon: MessageSquare },
-    { path: '/admin/knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
-    { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
-    { path: '/admin/devbridge', labelKey: 'nav.devbridge', icon: Code2 },
-    { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow },
-    { path: '/admin/workflow-center', labelKey: 'nav.workflowCenter', icon: LayoutTemplate },
-    { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
-    { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
-    { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
-    { path: '/admin/agents', labelKey: 'nav.agents', icon: Bot },
-    { path: '/admin/customer-agents', labelKey: 'nav.customerAgents', icon: Headphones },
-    { path: '/admin/settings', labelKey: 'nav.settings', icon: Settings },
-    { path: '/admin/channels', labelKey: 'nav.channels', icon: Globe },
-    { path: '/admin/users', labelKey: 'nav.users', icon: Users },
-    { path: '/admin/roles', labelKey: 'nav.roles', icon: Lock },
-    { path: '/admin/groups', labelKey: 'nav.groups', icon: Users },
-    { path: '/admin/templates', labelKey: 'nav.templates', icon: Store },
-    { path: '/admin/orders', labelKey: 'nav.orders', icon: DollarSign },
-    { path: '/admin/subscriptions', labelKey: 'nav.subscriptions', icon: BadgeCheck },
-  ]
-
-  const agentNav = [
-    { path: '/admin', labelKey: 'nav.dashboard', icon: LayoutDashboard, exact: true as const },
-    { path: '/admin/agents', labelKey: 'nav.agents', icon: Bot },
-    { path: '/admin/conversations', labelKey: 'nav.conversations', icon: MessageSquare },
-    { path: '/admin/skills', labelKey: 'nav.skills', icon: Puzzle },
-    { path: '/admin/devbridge', labelKey: 'nav.devbridge', icon: Code2 },
-    { path: '/admin/workflows', labelKey: 'nav.workflows', icon: Workflow },
-    { path: '/admin/workflow-center', labelKey: 'nav.workflowCenter', icon: LayoutTemplate },
-    { path: '/admin/workspace', labelKey: 'nav.workspace', icon: Container },
-    { path: '/admin/files', labelKey: 'nav.files', icon: FolderOpen },
-    { path: '/admin/schedules', labelKey: 'nav.schedules', icon: Clock3 },
-    { path: '/admin/customer-agents', labelKey: 'nav.customerAgents', icon: Headphones },
-    { path: '/admin/knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
-  ]
-
-  const navItems = user?.role === 'admin' ? adminNav : agentNav
-
-  const isActive = (item: (typeof navItems)[number]) => {
-    if ('exact' in item && item.exact) return location.pathname === item.path
-    return location.pathname.startsWith(item.path)
   }
 
   return (
@@ -127,47 +206,70 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
         )}
       </div>
 
-      {/* Nav items */}
-      <nav className="flex-1 py-4 px-2 overflow-y-auto scrollbar-hide">
-        <ul className="space-y-1">
-          {navItems.map((item) => (
-            <li key={item.path}>
-              <button
-                type="button"
-                onClick={() => { navigate(item.path); onClose?.() }}
-                className={cn(
-                  'w-full flex items-center gap-3 rounded-lg text-sm font-medium transition-colors',
-                  collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',
-                  isActive(item)
-                    ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
-                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700',
-                )}
-                title={collapsed ? t(item.labelKey) : undefined}
-              >
-                <item.icon className="w-5 h-5 shrink-0" />
-                {!collapsed && (
-                  <>
-                    <span className="flex-1 text-left truncate">{t(item.labelKey)}</span>
-                  </>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
+      {/* Nav items — grouped */}
+      <nav className="flex-1 py-2 px-2 overflow-y-auto scrollbar-hide">
+        {navGroups.map((group) => {
+          const isCollapsed = collapsedGroups.has(group.titleKey) && group.titleKey !== activeGroupKey
+          const hasActive = group.titleKey === activeGroupKey
+          return (
+            <div key={group.titleKey} className="mb-0.5">
+              {!collapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.titleKey)}
+                  className={cn(
+                    'flex w-full items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded transition-colors',
+                    hasActive
+                      ? 'text-primary-600 dark:text-primary-400'
+                      : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
+                  )}
+                >
+                  {isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  <span>{t(group.titleKey)}</span>
+                </button>
+              )}
+              {(!isCollapsed || collapsed) && (
+                <ul className={cn('space-y-0.5', !collapsed && 'mt-0.5')}>
+                  {group.items.map((item) => (
+                    <li key={item.path}>
+                      <button
+                        type="button"
+                        onClick={() => { navigate(item.path); onClose?.() }}
+                        className={cn(
+                          'w-full flex items-center gap-3 rounded-lg text-sm font-medium transition-colors',
+                          collapsed ? 'justify-center px-2 py-2' : 'px-3 py-1.5',
+                          isActive(item)
+                            ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+                            : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700',
+                        )}
+                        title={collapsed ? t(item.labelKey) : undefined}
+                      >
+                        <item.icon className="w-4 h-4 shrink-0" />
+                        {!collapsed && (
+                          <span className="flex-1 text-left truncate">{t(item.labelKey)}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )
+        })}
       </nav>
 
       {/* Footer */}
-      <div className={cn('border-t border-gray-200 dark:border-gray-700 space-y-2', collapsed ? 'px-1 py-3' : 'px-3 py-4')}>
+      <div className={cn('border-t border-gray-200 dark:border-gray-700 space-y-1', collapsed ? 'px-1 py-2' : 'px-2 py-3')}>
         <Link to="/" className={cn(
           'flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors',
-          collapsed ? 'justify-center px-1 py-2' : 'px-3 py-2',
+          collapsed ? 'justify-center px-1 py-2' : 'px-3 py-1.5',
         )} title={t('common.home')}>
           <Home className="w-4 h-4 shrink-0" />
           {!collapsed && <span>{t('common.home')}</span>}
         </Link>
         <a href="/widget/demo" target="_blank" rel="noopener noreferrer" className={cn(
           'flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors',
-          collapsed ? 'justify-center px-1 py-2' : 'px-3 py-2',
+          collapsed ? 'justify-center px-1 py-2' : 'px-3 py-1.5',
         )} title={t('nav.widgetPreview')}>
           <MessageCircle className="w-4 h-4 shrink-0" />
           {!collapsed && <span>{t('nav.widgetPreview')}</span>}

@@ -1382,7 +1382,8 @@
     "nodeOutputs": "节点输出",
     "builtin": "内置",
     "nodes": "节点",
-    "edges": "连线"
+    "edges": "连线",
+    "ctxGroupSelected": "组合选中节点"
   },
   "workflowCenter": {
     "title": "工作流方案中心",
@@ -2294,5 +2295,10 @@
     "deleteChatConfirm": "确定删除这条对话？消息将无法恢复。",
     "deleteChatFailed": "删除失败",
     "untitledChat": "未命名对话"
-  }
+  },
+  "navGroup.core": "概览",
+  "navGroup.ai": "AI 与知识",
+  "navGroup.dev": "开发与编排",
+  "navGroup.management": "管理",
+  "navGroup.business": "商业"
 }

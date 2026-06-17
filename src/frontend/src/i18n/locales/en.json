@@ -1383,7 +1383,8 @@
     "nodeOutputs": "Node Outputs",
     "builtin": "Built-in",
     "nodes": "nodes",
-    "edges": "edges"
+    "edges": "edges",
+    "ctxGroupSelected": "Group Selected"
   },
   "workflowCenter": {
     "title": "Workflow template hub",
@@ -2294,5 +2295,10 @@
     "deleteChatConfirm": "Delete this conversation? Messages cannot be recovered.",
     "deleteChatFailed": "Delete failed",
     "untitledChat": "Untitled"
-  }
+  },
+  "navGroup.core": "Core",
+  "navGroup.ai": "AI & Knowledge",
+  "navGroup.dev": "Development",
+  "navGroup.management": "Management",
+  "navGroup.business": "Business"
 }

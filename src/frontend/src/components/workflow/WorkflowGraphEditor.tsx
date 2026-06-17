@@ -877,21 +877,22 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
       },
     }
     setNodes((prev) => {
-      let updated = [...prev.filter((n) => !n.selected), groupNode]
-      // Reparent selected nodes into the group
-      updated = updated.map((n) => {
-        if (selected.some((s) => s.id === n.id)) {
-          return {
-            ...n,
-            parentId: groupId,
-            extent: 'parent' as const,
-            position: { x: n.position.x - bounds.x, y: n.position.y - bounds.y },
-            selected: false,
+      const selectedIds = new Set(selected.map((s) => s.id))
+      return [
+        ...prev.map((n) => {
+          if (selectedIds.has(n.id)) {
+            return {
+              ...n,
+              parentId: groupId,
+              extent: 'parent' as const,
+              position: { x: n.position.x - bounds.x, y: n.position.y - bounds.y },
+              selected: false,
+            }
           }
-        }
-        return n
-      })
-      return updated
+          return n
+        }),
+        groupNode,
+      ]
     })
   }, [nodes, pushHistory, setNodes, t])
 
@@ -1261,6 +1262,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
         <div
           ref={reactFlowWrapper}
           tabIndex={0}
+          onContextMenu={(e) => e.preventDefault()}
           className={cn(
             'min-h-0 min-w-0 flex-1 bg-white dark:bg-gray-900',
             !isPointerTool && '[&_.react-flow__pane]:cursor-grab [&_.react-flow__pane:active]:cursor-grabbing',
