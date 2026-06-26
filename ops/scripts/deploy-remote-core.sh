@@ -140,6 +140,11 @@ for patent_skill in patent-search patent-transaction patent-disclosure patent-re
   sync_skill_dir "$patent_skill"
 done
 
+# StockIntelligence skills（每个内嵌 si_common，独立可加载）
+for stock_skill in stock-quote stock-capital stock-fundamentals stock-research stock-news stock-announcement stock-sentiment stock-analysis; do
+  sync_skill_dir "$stock_skill"
+done
+
 echo "==> Refresh tenant patent-search copies (Widget uses tenant workspace skills)"
 ssh "$REMOTE" "set -euo pipefail
 REMOTE_DIR='${REMOTE_DIR}'
@@ -157,6 +162,7 @@ echo "==> Remote setup (Core backend: app.main:app)"
 ssh "$REMOTE" "chmod +x ${REMOTE_DIR}/ops/scripts/gamecenter-*.sh ${REMOTE_DIR}/ops/scripts/resolve-gamecenter-project.py ${REMOTE_DIR}/ops/deploy/remote-setup.sh && bash ${REMOTE_DIR}/ops/deploy/remote-setup.sh"
 
 echo ""
-echo "Core deployed to http://mchat.chat"
-echo "  Admin:  http://mchat.chat/admin"
-echo "  API:    http://mchat.chat/docs"
+echo "Core deployed to ${REMOTE} (${REMOTE_DIR})"
+echo "  生产域名: http://mchat.9235.net (Admin: /admin, API: /docs)"
+echo "  Admin:  http://${REMOTE}/admin"
+echo "  API:    http://${REMOTE}/docs"

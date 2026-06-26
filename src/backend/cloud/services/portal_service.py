@@ -253,6 +253,9 @@ class PortalService:
                 self.db, template.default_skill_ids or []
             ),
             knowledge_base_ids=knowledge_base_ids or None,
+            # Copy the publishing-account quota from the template so the
+            # entitlements gate can enforce it per-subscription.
+            max_publishing_accounts=getattr(template, "max_publishing_accounts", 0) or 0,
             position="right",
             enabled=True,
             widget_session_ttl_hours=24,

@@ -30,6 +30,12 @@ class ChannelTemplate(Base):
     )
     trial_days: Mapped[int] = mapped_column(Integer, nullable=False, default=14)
 
+    # Publishing add-on: max outbound publisher accounts (xiaohongshu/feishu/...)
+    # this plan grants. 0 = not a publishing plan (no publishing access).
+    max_publishing_accounts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+
     is_published: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )

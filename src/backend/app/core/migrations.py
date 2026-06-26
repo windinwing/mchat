@@ -101,6 +101,14 @@ def apply_schema_patches(conn: Connection) -> list[str]:
             except Exception:
                 pass
             applied.append("customer_configs.short_code")
+        if "max_publishing_accounts" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE customer_configs "
+                    "ADD COLUMN max_publishing_accounts INTEGER NOT NULL DEFAULT 0"
+                )
+            )
+            applied.append("customer_configs.max_publishing_accounts")
 
     # Expand users.role column for custom role names
     if "users" in inspect(conn).get_table_names():
@@ -347,6 +355,14 @@ def apply_schema_patches(conn: Connection) -> list[str]:
                     )
                 )
             applied.append("channel_templates.integration_schema")
+        if "max_publishing_accounts" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE channel_templates "
+                    "ADD COLUMN max_publishing_accounts INTEGER NOT NULL DEFAULT 0"
+                )
+            )
+            applied.append("channel_templates.max_publishing_accounts")
 
     if "portal_orders" in inspect(conn).get_table_names():
         po_cols = _column_names(conn, "portal_orders")

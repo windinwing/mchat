@@ -8,6 +8,8 @@ from app.data.patent_workflow_showcase import (
     apply_showcase_to_template,
     filter_showcase_templates,
 )
+from app.data.publish_workflow_templates import PUBLISH_WORKFLOW_TEMPLATES
+from app.data.stock_workflow_templates import STOCK_TEMPLATES
 
 PATENT_REPORT_MULTIDIM: dict[str, Any] = {
     "id": "patent_report_multidim",
@@ -727,6 +729,303 @@ BATCH_URL_FETCH_EN: dict[str, Any] = {
     },
 }
 
+# -- Content auto-publish (read uploads → write copy → publish to channel) ----
+# Demonstrates the full content-distribution pipeline. Pairs with the
+# read-uploads / content-writer / publish-content skills. Bind a Schedule to
+# run it daily; the {yyyy.MM.dd} path token auto-resolves to "today".
+
+TEA_DAILY_PUBLISH: dict[str, Any] = {
+    "id": "tea_daily_publish",
+    "locale": "zh",
+    "name": "茶叶日报多渠道推送",
+    "description": "读取当日上传区 tea/{yyyy.MM.dd} 资料 → AI 生成文案 → 并行发布到飞书群 + 小红书。配合定时器每日自动运行。两条渠道独立，互不影响。",
+    "category": "publish",
+    "graph_json": {
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": "推送参数",
+                "position": {"x": 40, "y": 220},
+                "config": {
+                    "input_fields": [
+                        {
+                            "key": "topic",
+                            "label": "今日主题",
+                            "placeholder": "白茶·白毫银针 上市",
+                            "required": True,
+                        },
+                        {
+                            "key": "style",
+                            "label": "文案风格",
+                            "placeholder": "xiaohongshu / wechat_mp / feishu",
+                            "required": False,
+                        },
+                        {
+                            "key": "webhook_url",
+                            "label": "飞书机器人 Webhook",
+                            "placeholder": "https://open.feishu.cn/open-apis/bot/v2/hook/...",
+                            "required": True,
+                        },
+                        {
+                            "key": "xhs_image_path",
+                            "label": "小红书配图绝对路径(可选)",
+                            "placeholder": "/abs/path/to/tea.jpg；留空则仅飞书",
+                            "required": False,
+                        },
+                    ],
+                },
+            },
+            {
+                "id": "read",
+                "type": "skill",
+                "name": "读取当日资料",
+                "position": {"x": 320, "y": 220},
+                "config": {
+                    "skill_name": "read-uploads",
+                    "workflow_role": "source",
+                    "timeout_seconds": 30,
+                    "payload_template": {
+                        "subdir": "user",
+                        "path": "tea/{yyyy.MM.dd}",
+                        "pattern": "*.md",
+                        "format": "content",
+                    },
+                },
+            },
+            {
+                "id": "writer",
+                "type": "skill",
+                "name": "AI 生成文案",
+                "position": {"x": 600, "y": 220},
+                "config": {
+                    "skill_name": "content-writer",
+                    "workflow_role": "action",
+                    "timeout_seconds": 180,
+                    "payload_template": {
+                        "topic": "${input.topic}",
+                        "material": "${nodes.read.content}",
+                        "style": "${input.style}",
+                    },
+                },
+            },
+            {
+                "id": "publish_feishu",
+                "type": "skill",
+                "name": "发布到飞书",
+                "position": {"x": 900, "y": 80},
+                "config": {
+                    "skill_name": "publish-content",
+                    "workflow_role": "action",
+                    "timeout_seconds": 60,
+                    "payload_template": {
+                        "provider": "feishu",
+                        "channel_config": {
+                            "webhook_url": "${input.webhook_url}",
+                            "msg_type": "text",
+                        },
+                        "title": "${nodes.writer.title}",
+                        "content": "${nodes.writer.content}",
+                    },
+                },
+            },
+            {
+                "id": "publish_xhs",
+                "type": "skill",
+                "name": "发布到小红书",
+                "position": {"x": 900, "y": 360},
+                "config": {
+                    "skill_name": "publish-content",
+                    "workflow_role": "action",
+                    "timeout_seconds": 300,
+                    "payload_template": {
+                        "provider": "playwright_client",
+                        "channel_config": {
+                            "platform": "xiaohongshu",
+                            "timeout_seconds": 240,
+                        },
+                        "title": "${nodes.writer.title}",
+                        "content": "${nodes.writer.content}",
+                        "media": [
+                            {"type": "image", "path": "${input.xhs_image_path}"},
+                        ],
+                    },
+                },
+            },
+            {
+                "id": "merge",
+                "type": "merge",
+                "name": "汇总结果",
+                "position": {"x": 1200, "y": 220},
+                "config": {},
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "完成",
+                "position": {"x": 1440, "y": 220},
+                "config": {},
+            },
+        ],
+        "edges": [
+            {"id": "e_start_read", "source": "start", "target": "read"},
+            {"id": "e_read_writer", "source": "read", "target": "writer"},
+            {"id": "e_writer_feishu", "source": "writer", "target": "publish_feishu"},
+            {"id": "e_writer_xhs", "source": "writer", "target": "publish_xhs"},
+            {"id": "e_feishu_merge", "source": "publish_feishu", "target": "merge"},
+            {"id": "e_xhs_merge", "source": "publish_xhs", "target": "merge"},
+            {"id": "e_merge_end", "source": "merge", "target": "end"},
+        ],
+    },
+}
+
+TEA_DAILY_PUBLISH_EN: dict[str, Any] = {
+    "id": "tea_daily_publish_en",
+    "locale": "en",
+    "name": "Tea Daily Multi-Channel Publish",
+    "description": "Read today's tea/{yyyy.MM.dd} uploads → AI writes a post → publish in parallel to a Feishu group + Xiaohongshu. Two independent channels. Pair with a Schedule for daily runs.",
+    "category": "publish",
+    "graph_json": {
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "name": "Publish Parameters",
+                "position": {"x": 40, "y": 220},
+                "config": {
+                    "input_fields": [
+                        {
+                            "key": "topic",
+                            "label": "Today's topic",
+                            "placeholder": "New harvest: Silver Needle white tea",
+                            "required": True,
+                        },
+                        {
+                            "key": "style",
+                            "label": "Copy style",
+                            "placeholder": "xiaohongshu / wechat_mp / feishu",
+                            "required": False,
+                        },
+                        {
+                            "key": "webhook_url",
+                            "label": "Feishu bot webhook",
+                            "placeholder": "https://open.feishu.cn/open-apis/bot/v2/hook/...",
+                            "required": True,
+                        },
+                        {
+                            "key": "xhs_image_path",
+                            "label": "Xiaohongshu image path (optional)",
+                            "placeholder": "/abs/path/to/tea.jpg; leave empty for Feishu only",
+                            "required": False,
+                        },
+                    ],
+                },
+            },
+            {
+                "id": "read",
+                "type": "skill",
+                "name": "Read today's material",
+                "position": {"x": 320, "y": 220},
+                "config": {
+                    "skill_name": "read-uploads",
+                    "workflow_role": "source",
+                    "timeout_seconds": 30,
+                    "payload_template": {
+                        "subdir": "user",
+                        "path": "tea/{yyyy.MM.dd}",
+                        "pattern": "*.md",
+                        "format": "content",
+                    },
+                },
+            },
+            {
+                "id": "writer",
+                "type": "skill",
+                "name": "AI copy writing",
+                "position": {"x": 600, "y": 220},
+                "config": {
+                    "skill_name": "content-writer",
+                    "workflow_role": "action",
+                    "timeout_seconds": 180,
+                    "payload_template": {
+                        "topic": "${input.topic}",
+                        "material": "${nodes.read.content}",
+                        "style": "${input.style}",
+                    },
+                },
+            },
+            {
+                "id": "publish_feishu",
+                "type": "skill",
+                "name": "Publish to Feishu",
+                "position": {"x": 900, "y": 80},
+                "config": {
+                    "skill_name": "publish-content",
+                    "workflow_role": "action",
+                    "timeout_seconds": 60,
+                    "payload_template": {
+                        "provider": "feishu",
+                        "channel_config": {
+                            "webhook_url": "${input.webhook_url}",
+                            "msg_type": "text",
+                        },
+                        "title": "${nodes.writer.title}",
+                        "content": "${nodes.writer.content}",
+                    },
+                },
+            },
+            {
+                "id": "publish_xhs",
+                "type": "skill",
+                "name": "Publish to Xiaohongshu",
+                "position": {"x": 900, "y": 360},
+                "config": {
+                    "skill_name": "publish-content",
+                    "workflow_role": "action",
+                    "timeout_seconds": 300,
+                    "payload_template": {
+                        "provider": "playwright_client",
+                        "channel_config": {
+                            "platform": "xiaohongshu",
+                            "timeout_seconds": 240,
+                        },
+                        "title": "${nodes.writer.title}",
+                        "content": "${nodes.writer.content}",
+                        "media": [
+                            {"type": "image", "path": "${input.xhs_image_path}"},
+                        ],
+                    },
+                },
+            },
+            {
+                "id": "merge",
+                "type": "merge",
+                "name": "Merge results",
+                "position": {"x": 1200, "y": 220},
+                "config": {},
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "name": "Done",
+                "position": {"x": 1440, "y": 220},
+                "config": {},
+            },
+        ],
+        "edges": [
+            {"id": "e_start_read", "source": "start", "target": "read"},
+            {"id": "e_read_writer", "source": "read", "target": "writer"},
+            {"id": "e_writer_feishu", "source": "writer", "target": "publish_feishu"},
+            {"id": "e_writer_xhs", "source": "writer", "target": "publish_xhs"},
+            {"id": "e_feishu_merge", "source": "publish_feishu", "target": "merge"},
+            {"id": "e_xhs_merge", "source": "publish_xhs", "target": "merge"},
+            {"id": "e_merge_end", "source": "merge", "target": "end"},
+        ],
+    },
+}
+
 _BUILTIN_TEMPLATES: dict[str, dict[str, Any]] = {
     PATENT_REPORT_MULTIDIM["id"]: PATENT_REPORT_MULTIDIM,
     PATENT_REPORT_MULTIDIM_EN["id"]: PATENT_REPORT_MULTIDIM_EN,
@@ -736,6 +1035,10 @@ _BUILTIN_TEMPLATES: dict[str, dict[str, Any]] = {
     WEB_FETCH_EN["id"]: WEB_FETCH_EN,
     BATCH_URL_FETCH["id"]: BATCH_URL_FETCH,
     BATCH_URL_FETCH_EN["id"]: BATCH_URL_FETCH_EN,
+    TEA_DAILY_PUBLISH["id"]: TEA_DAILY_PUBLISH,
+    TEA_DAILY_PUBLISH_EN["id"]: TEA_DAILY_PUBLISH_EN,
+    **PUBLISH_WORKFLOW_TEMPLATES,
+    **STOCK_TEMPLATES,
 }
 
 

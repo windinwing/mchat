@@ -42,7 +42,7 @@ class Channel(Base):
         "ChannelWorkflowBinding",
         back_populates="channel",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="select",
     )
 
     def __repr__(self) -> str:

@@ -69,6 +69,17 @@ export function defaultPayloadForSkill(skill: WorkflowSkillOption, upstreamNodeI
   const category = inferSkillCategory(skill)
   const isPatentSearch = skill.name === 'patent-search'
   const isPatentReport = skill.name === 'patent-report'
+  const isStockCollector = skill.name.startsWith('stock-') && skill.name !== 'stock-analysis'
+  const isStockAnalysis = skill.name === 'stock-analysis'
+  if (isStockCollector) {
+    return { code: '${input.code}' }
+  }
+  if (isStockAnalysis) {
+    return {
+      code: '${input.code}',
+      sections: '${nodes.merge.sections}',
+    }
+  }
   switch (category) {
     case 'search':
       if (isPatentSearch) {
@@ -161,7 +172,8 @@ export interface InputFieldDef {
   label: string
   placeholder?: string
   required?: boolean
-  type?: 'text' | 'number' | 'multiline' | 'file'
+  type?: 'text' | 'number' | 'multiline' | 'file' | 'publishing_account' | 'select'
+  options?: { value: string; label: string }[]
 }
 
 /** True when graph includes patent-report chart/export nodes. */
@@ -224,7 +236,7 @@ export function extractStartInputFields(
       label: String(f.label || f.key || ''),
       placeholder: f.placeholder ? String(f.placeholder) : undefined,
       required: Boolean(f.required),
-      type: (f.type === 'number' ? 'number' : f.type === 'multiline' ? 'multiline' : f.type === 'file' ? 'file' : 'text') as InputFieldDef['type'],
+      type: (f.type === 'number' ? 'number' : f.type === 'multiline' ? 'multiline' : f.type === 'file' ? 'file' : f.type === 'publishing_account' ? 'publishing_account' : f.type === 'select' ? 'select' : 'text') as InputFieldDef['type'],
     })).filter((f) => f.key)
   }
 

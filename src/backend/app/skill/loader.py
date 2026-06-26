@@ -269,6 +269,14 @@ class SkillLoader:
                 val = stripped.split(":", 1)[1].strip().strip('"').strip("'")
                 if val:
                     config["workflow_role"] = val
+            elif stripped.startswith("outputs:"):
+                outputs_str = stripped.split(":", 1)[1].strip()
+                if outputs_str:
+                    try:
+                        import json
+                        config["outputs"] = json.loads(outputs_str)
+                    except json.JSONDecodeError:
+                        pass
             elif stripped.startswith("scope:"):
                 config["scope"] = stripped.split(":", 1)[1].strip().strip('"').strip("'")
             elif stripped.startswith("requires_admin:"):

@@ -1,0 +1,6 @@
+# publisher-client 依赖
+# 独立于 MChat 后端，跑在客户机（mac mini 等）上
+
+playwright>=1.40
+# tomli 仅 py<3.11 需要（3.11+ 内置 tomllib）
+tomli>=2.0; python_version < "3.11"

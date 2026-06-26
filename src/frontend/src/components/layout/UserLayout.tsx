@@ -16,6 +16,8 @@ import {
   Workflow,
   Clock3,
   LayoutTemplate,
+  Send,
+  BarChart3,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import { Avatar } from '@/components/ui/Avatar'
@@ -29,6 +31,8 @@ const navItems = [
   { path: '/portal/dashboard', label: 'portal.dashboard', icon: LayoutDashboard },
   { path: '/portal/templates', label: 'portal.templates', icon: ShoppingBag },
   { path: '/portal/channels', label: 'portal.myChannels', icon: MessageSquare },
+  { path: '/portal/publishing-accounts', label: 'portal.publishingAccounts', icon: Send },
+  { path: '/portal/send-records', label: 'portal.sendRecords', icon: BarChart3 },
   { path: '/portal/workflows', label: 'portal.workflowsNav', icon: Workflow },
   { path: '/portal/workflow-center', label: 'portal.workflowCenterNav', icon: LayoutTemplate },
   { path: '/portal/schedules', label: 'portal.schedulesNav', icon: Clock3 },

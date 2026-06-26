@@ -24,6 +24,8 @@ import {
   Puzzle,
   Settings,
   Store,
+  Send,
+  BarChart3,
   BadgeCheck,
   Users,
   Workflow as WorkflowIcon,
@@ -82,6 +84,8 @@ const adminNavGroups: NavGroup[] = [
     items: [
       { path: '/admin/settings', labelKey: 'nav.settings', icon: Settings },
       { path: '/admin/channels', labelKey: 'nav.channels', icon: Globe },
+      { path: '/admin/publishing-accounts', labelKey: 'nav.publishingAccounts', icon: Send },
+      { path: '/admin/send-records', labelKey: 'nav.sendRecords', icon: BarChart3 },
       { path: '/admin/users', labelKey: 'nav.users', icon: Users },
       { path: '/admin/roles', labelKey: 'nav.roles', icon: Lock },
       { path: '/admin/groups', labelKey: 'nav.groups', icon: Users },

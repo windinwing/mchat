@@ -196,6 +196,8 @@ class OpenAIProvider(LLMProvider):
 
         self.client = AsyncOpenAI(**client_kwargs)
         self.model = ai_config.model
+        self.api_base = base or ""
+        self.provider_name = (ai_config.provider or "").lower()
 
     async def stream_chat(
         self,
@@ -210,10 +212,22 @@ class OpenAIProvider(LLMProvider):
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": True,
-            "stream_options": {"include_usage": True},
         }
+        # stream_options (usage in stream) is OpenAI-specific; some providers
+        # (zhipu/glm) reject it with "API 调用参数有误" (code 1210). Only send
+        # it for providers known to support it.
+        _supports_usage = self.api_base and any(
+            h in self.api_base for h in ("openai.com", "deepseek.com")
+        )
+        if self.provider_name in ("openai", "deepseek") or _supports_usage:
+            kwargs["stream_options"] = {"include_usage": True}
         if tools:
-            kwargs["tools"] = tools
+            # Some providers (zhipu/glm coding endpoint) reject the OpenAI tools
+            # schema with "API 调用参数有误" (code 1210). Skip tools for them —
+            # the model still works for plain chat, just without function calling.
+            _supports_tools = self.provider_name not in ("zhipu", "zhipu-coding")
+            if _supports_tools:
+                kwargs["tools"] = tools
 
         try:
             stream = await self.client.chat.completions.create(**kwargs)
@@ -457,6 +471,8 @@ class OpenAICompatibleProvider(OpenAIProvider):
             base_url=base,
         )
         self.model = ai_config.model
+        self.api_base = base or ""
+        self.provider_name = (ai_config.provider or "").lower()
 
 
 def _effective_api_base(ai_config: AIConfig) -> str:

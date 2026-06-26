@@ -54,8 +54,11 @@ async def metrics():
     import sys
     import time
 
+    from app.core.skills_pool import pool_stats
+
     return {
         "uptime": time.time(),
         "python_version": sys.version,
         "platform": sys.platform,
+        "skills_pool": pool_stats(),
     }

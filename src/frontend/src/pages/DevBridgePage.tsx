@@ -90,6 +90,19 @@ interface DevBridgeBuild {
   summary?: string | null
 }
 
+interface DevBridgeBuildProgress {
+  slug: string
+  latest_build?: DevBridgeBuild | null
+  builds: DevBridgeBuild[]
+  stdout_tail?: string
+  stderr_tail?: string
+  source_version?: string | null
+  bundle_version?: string | null
+  version_match?: boolean
+  is_active?: boolean
+  play_urls?: string[]
+}
+
 interface DevBridgeRelease {
   id: string
   status?: string
@@ -124,6 +137,8 @@ export function DevBridgePage() {
   const [showChanges, setShowChanges] = useState(false)
   const [editingContent, setEditingContent] = useState('')
   const [builds, setBuilds] = useState<DevBridgeBuild[]>([])
+  const [buildProgress, setBuildProgress] = useState<DevBridgeBuildProgress | null>(null)
+  const [loadingBuildProgress, setLoadingBuildProgress] = useState(false)
   const [releases, setReleases] = useState<DevBridgeRelease[]>([])
   const [loadingBuilds, setLoadingBuilds] = useState(false)
   const [loadingReleases, setLoadingReleases] = useState(false)
@@ -258,6 +273,25 @@ export function DevBridgePage() {
     }
   }, [])
 
+  const loadBuildProgress = useCallback(async (providerKey: string, slug: string) => {
+    setLoadingBuildProgress(true)
+    try {
+      const data = await api.get<DevBridgeBuildProgress>(
+        `/devbridge/providers/${providerKey}/projects/${slug}/build-progress`,
+      )
+      setBuildProgress(data)
+      if (data?.builds?.length) {
+        setBuilds(data.builds)
+      }
+      return data
+    } catch {
+      setBuildProgress(null)
+      return null
+    } finally {
+      setLoadingBuildProgress(false)
+    }
+  }, [])
+
   const loadReleases = useCallback(async (providerKey: string, slug: string) => {
     setLoadingReleases(true)
     try {
@@ -311,7 +345,10 @@ export function DevBridgePage() {
     setEditingContent('')
     void loadProjectDetail(selectedProvider, project.slug)
     void loadFiles(selectedProvider, project.slug, '')
-    if (provider?.capabilities.includes('build:list')) void loadBuilds(selectedProvider, project.slug)
+    if (provider?.capabilities.includes('build:list')) {
+      void loadBuilds(selectedProvider, project.slug)
+      void loadBuildProgress(selectedProvider, project.slug)
+    }
     if (provider?.capabilities.includes('release:list')) void loadReleases(selectedProvider, project.slug)
   }
 
@@ -358,6 +395,25 @@ export function DevBridgePage() {
     }
   }
 
+  useEffect(() => {
+    if (!selectedProvider || !selectedProject || !buildProgress?.is_active) return
+    const timer = window.setInterval(() => {
+      void loadBuildProgress(selectedProvider, selectedProject.slug)
+      void loadProjectDetail(selectedProvider, selectedProject.slug)
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [selectedProvider, selectedProject, buildProgress?.is_active, loadBuildProgress, loadProjectDetail])
+
+  const buildStatusLabel = (status: string) => {
+    const map: Record<string, string> = {
+      queued: t('devbridge.buildStatusQueued'),
+      running: t('devbridge.buildStatusRunning'),
+      built: t('devbridge.buildStatusBuilt'),
+      failed: t('devbridge.buildStatusFailed'),
+    }
+    return map[status] || status
+  }
+
   const handleBuild = async () => {
     if (!selectedProvider || !selectedProject) return
     setBuilding(true)
@@ -365,6 +421,7 @@ export function DevBridgePage() {
       await api.post(`/devbridge/providers/${selectedProvider}/projects/${selectedProject.slug}/build`, {})
       toast(t('devbridge.buildStarted'), { type: 'success' })
       void loadBuilds(selectedProvider, selectedProject.slug)
+      void loadBuildProgress(selectedProvider, selectedProject.slug)
       void loadProjects(selectedProvider)
       if (selectedProject) void loadProjectDetail(selectedProvider, selectedProject.slug)
     } catch (err) {
@@ -767,6 +824,76 @@ export function DevBridgePage() {
                       </div>
                     )}
                   </div>
+
+                  {canBuild && buildProgress && (
+                    <div
+                      className={cn(
+                        'rounded-lg border p-3 text-xs space-y-2',
+                        buildProgress.is_active
+                          ? 'border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40'
+                          : buildProgress.latest_build?.status === 'failed'
+                            ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/40'
+                            : 'border-gray-200 dark:border-gray-700',
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+                          {buildProgress.is_active && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />}
+                          {t('devbridge.buildProgressTitle')}
+                          {buildProgress.latest_build && (
+                            <Badge variant={buildProgress.is_active ? 'default' : buildProgress.latest_build.status === 'built' ? 'success' : 'default'}>
+                              {buildStatusLabel(buildProgress.latest_build.status)}
+                            </Badge>
+                          )}
+                        </div>
+                        {selectedProvider && selectedProject && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            leftIcon={loadingBuildProgress ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                            onClick={() => void loadBuildProgress(selectedProvider, selectedProject.slug)}
+                            disabled={loadingBuildProgress}
+                          >
+                            {t('devbridge.refreshProgress')}
+                          </Button>
+                        )}
+                      </div>
+                      {(buildProgress.source_version || buildProgress.bundle_version) && (
+                        <div className="text-gray-600 dark:text-gray-400">
+                          {t('devbridge.sourceVersion')}: {buildProgress.source_version || '—'}
+                          {' · '}
+                          {t('devbridge.bundleVersion')}: {buildProgress.bundle_version || '—'}
+                          {buildProgress.version_match === false && (
+                            <span className="text-amber-600 dark:text-amber-400 ml-1">{t('devbridge.versionMismatch')}</span>
+                          )}
+                        </div>
+                      )}
+                      {buildProgress.is_active && (
+                        <div className="text-gray-500 dark:text-gray-400">{t('devbridge.buildProgressPolling')}</div>
+                      )}
+                      {buildProgress.stdout_tail && (
+                        <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] bg-white/70 dark:bg-gray-900/70 rounded p-2 border border-gray-200 dark:border-gray-700">
+                          {buildProgress.stdout_tail}
+                        </pre>
+                      )}
+                      {buildProgress.stderr_tail && (
+                        <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-red-700 dark:text-red-300 bg-white/70 dark:bg-gray-900/70 rounded p-2 border border-red-200 dark:border-red-900">
+                          {buildProgress.stderr_tail}
+                        </pre>
+                      )}
+                      {buildProgress.play_urls?.[0] && buildProgress.latest_build?.status === 'built' && (
+                        <a
+                          href={buildProgress.play_urls[0]}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-primary-600 hover:underline"
+                        >
+                          <Play className="w-3 h-3" />
+                          {buildProgress.play_urls[0]}
+                        </a>
+                      )}
+                    </div>
+                  )}
 
                   {showChanges && (
                     <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">

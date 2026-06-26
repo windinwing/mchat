@@ -7,7 +7,7 @@ import asyncio
 import logging
 import os
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -134,10 +134,15 @@ async def _execute_skill_for_user(
         blocked = tenant_facing_skill_error(skill)
         if blocked:
             return {"error": blocked}
+    # Fall back to the global default when the node did not set a timeout,
+    # so a single hung skill can never permanently occupy a pool slot.
+    effective_timeout = timeout_s if timeout_s > 0 else settings.skill_default_timeout_seconds
     ctx = await build_automation_workspace_context(db, user_id)
     async with workspace_execution_scope(ctx):
-        if timeout_s > 0:
-            return await asyncio.wait_for(execute_skill(skill, payload), timeout=timeout_s)
+        if effective_timeout > 0:
+            return await asyncio.wait_for(
+                execute_skill(skill, payload), timeout=effective_timeout
+            )
         return await execute_skill(skill, payload)
 
 
@@ -227,7 +232,10 @@ def _json_safe(value: Any, *, _seen: set[int] | None = None) -> Any:
         _seen = set()
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
+    # datetime.date 含 datetime.datetime；统一转 isoformat，避免 MySQL JSON 列拒绝 date
     if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
         return value.isoformat()
     oid = id(value)
     if oid in _seen:
@@ -1889,11 +1897,26 @@ class WorkflowService:
         approval_flags = {
             row.node_id: True for row in run.approvals if row.status == "approved"
         }
+        # Also surface each approval's decision_payload so downstream nodes can
+        # reference the user's choice (e.g. which of 4 candidates was selected)
+        # via ${approvals.<node_id>.<key>}. Without this, approve only passes a
+        # boolean and the selection is lost.
+        approval_decisions = {
+            row.node_id: (row.decision_payload or {})
+            for row in run.approvals
+            if row.status == "approved" and row.decision_payload
+        }
         if approval_flags:
             merged_payload["approvals"] = {
                 **(merged_payload.get("approvals") or {}),
                 **approval_flags,
             }
+        if approval_decisions:
+            for nid, decision in approval_decisions.items():
+                merged_payload["approvals"][nid] = {
+                    **(merged_payload["approvals"].get(nid) if isinstance(merged_payload.get("approvals"), dict) and isinstance(merged_payload["approvals"].get(nid), dict) else {}),
+                    **decision,
+                }
 
         resume_state = {}
         if isinstance(run.output_payload, dict):

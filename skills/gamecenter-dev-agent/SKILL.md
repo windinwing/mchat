@@ -43,4 +43,5 @@ config:
 
 ## 编译与试玩
 
-用户问编译/发布/试玩是否更新时，必须调用 `get_gamecenter_build_progress(slug)`，对比版本号后再下结论。
+- patch / build 触发后台编译后，**聊天 SSE 会自动每 3 秒刷新进度**，直到 `built` / `failed`（无需反复问「进度如何」）
+- 用户主动问编译/发布/试玩是否更新时，可调用 `get_gamecenter_build_progress(slug)` 核对版本号

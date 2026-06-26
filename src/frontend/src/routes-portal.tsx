@@ -18,6 +18,8 @@ const PortalTemplateDetail = lazyNamed(
   'TemplateDetailPage',
 )
 const PortalMyChannels = lazyNamed(() => import('./pages/portal/MyChannelsPage'), 'MyChannelsPage')
+const PublishingAccountsPage = lazyNamed(() => import('./pages/PublishingAccountsPage'), 'PublishingAccountsPage')
+const PortalSendRecords = lazyNamed(() => import('./pages/portal/SendRecordsPage'), 'SendRecordsPage')
 const PortalChannelDetail = lazyNamed(
   () => import('./pages/portal/ChannelDetailPage'),
   'ChannelDetailPage',
@@ -102,6 +104,14 @@ export function PortalRoutes() {
       <Route
         path="/portal/channels"
         element={<UserLayout><PageSuspense><PortalMyChannels /></PageSuspense></UserLayout>}
+      />
+      <Route
+        path="/portal/publishing-accounts"
+        element={<UserLayout><PageSuspense><PublishingAccountsPage /></PageSuspense></UserLayout>}
+      />
+      <Route
+        path="/portal/send-records"
+        element={<UserLayout><PageSuspense><PortalSendRecords /></PageSuspense></UserLayout>}
       />
       <Route
         path="/portal/groups"

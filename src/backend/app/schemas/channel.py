@@ -6,10 +6,21 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class ChannelCreate(BaseModel):
-    """Create a new channel."""
+    """Create a new channel.
+
+    channel_type covers BOTH inbound chat channels (web_widget/wechat/...) and
+    outbound publisher channels (feishu/xiaohongshu-via-playwright_client/...).
+    Publisher channels store their credentials in ``config`` (encrypted at rest
+    by channel_service for sensitive keys).
+    """
     name: str = Field(..., min_length=1, max_length=100)
     channel_type: str = Field(
-        ..., pattern=r"^(web_widget|wechat|dingtalk|whatsapp|telegram|slack|line|custom)$"
+        ...,
+        pattern=(
+            r"^(web_widget|wechat|dingtalk|whatsapp|telegram|slack|line|custom"
+            r"|feishu|wecom|wechat_mp|discord|telegram_channel"
+            r"|twitter_x|facebook|linkedin|playwright_client)$"
+        ),
     )
     config: dict | None = None
     enabled: bool = False

@@ -54,6 +54,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize database
     await init_db()
 
+    # Start dedicated thread pool for skill execution (isolated from default pool
+    # used by uploads/search/embeddings, so long-running skills don't starve them)
+    from app.core.skills_pool import start_skills_pool
+    start_skills_pool()
+
     # Create default admin user
     from app.core.database import async_session_factory
     from app.services.auth_service import AuthService
@@ -97,6 +102,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Shutdown
     logger.info("Shutting down mchat backend server...")
+    from app.core.skills_pool import stop_skills_pool
+    stop_skills_pool()
     await close_db()
     await milvus_client.close()
     await es_knowledge_client.close()

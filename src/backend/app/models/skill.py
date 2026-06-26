@@ -51,9 +51,9 @@ class Skill(Base):
         "SkillSchedule",
         back_populates="skill",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="select",
     )
-    workflow_steps = relationship("SkillWorkflowStep", back_populates="skill", lazy="selectin")
+    workflow_steps = relationship("SkillWorkflowStep", back_populates="skill", lazy="select")
 
     def __repr__(self) -> str:
         return (

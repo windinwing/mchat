@@ -1676,6 +1676,15 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                             </div>
                             {(() => {
                             const selSkill = skills.find((s) => s.name === String(selectedNodeConfig.skill_name || ''))
+                            // 构造上游节点 → 其 skill 的 outputs schema 映射，供绑定芯片按真实输出路径生成
+                            const upstreamSkillOutputs: Record<string, any> = {}
+                            for (const id of upstreamForSelected) {
+                              const upNode = nodes.find((n) => n.id === id)
+                              const upSkillName = String((upNode?.data as any)?.config?.skill_name || '')
+                              const upSkill = skills.find((s) => s.name === upSkillName)
+                              const outs = (upSkill?.config as any)?.outputs
+                              if (outs) upstreamSkillOutputs[id] = outs
+                            }
                             return (
                             <PayloadMapper
                               skillName={String(selectedNodeConfig.skill_name || '')}
@@ -1684,6 +1693,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                               payload={(selectedNodeConfig.payload_template || {}) as Record<string, unknown>}
                               onChange={(next) => updateNodeConfig('payload_template', next)}
                               workflowFields={(selSkill?.config as any)?.workflow_fields}
+                              upstreamSkillOutputs={upstreamSkillOutputs}
                             />)})()}
                           </>
                         ) : null}

@@ -840,6 +840,26 @@ async def process_message(
                     if patent_search_enable_summary(patent_skill) and patent_search_ok:
                         patent_search_for_summary = True
 
+                if isinstance(tool_result, dict):
+                    try:
+                        from app.bot.gamecenter_bridge_extensions import (
+                            should_stream_gamecenter_build_progress,
+                            stream_build_progress_in_chat,
+                        )
+
+                        watch_slug = should_stream_gamecenter_build_progress(
+                            tool_name, tool_result, tool_args
+                        )
+                        if watch_slug:
+                            async for progress_chunk in stream_build_progress_in_chat(watch_slug):
+                                full_response += progress_chunk
+                                yield progress_chunk
+                    except Exception as exc:
+                        logger.warning("GameCenter build progress stream failed: {}", exc)
+                        err_chunk = f"\n\n⚠️ 编译进度跟踪中断: {exc}\n\n"
+                        full_response += err_chunk
+                        yield err_chunk
+
             if patent_search_for_export or has_upload_file_assets(tool_turn_assets):
                 synthesis_done = True
                 break

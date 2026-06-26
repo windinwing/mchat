@@ -38,7 +38,7 @@ def _load_settings(repo_root: Path) -> dict:
         if not path.is_file():
             continue
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         except Exception:
             continue
         if isinstance(payload, dict):

@@ -40,7 +40,7 @@ read_project_cocos_version() {
     local py=""
     for py in python python3; do
       command -v "$py" >/dev/null 2>&1 || continue
-      "$py" -c "import json; d=json.load(open('${pkg//\'/\\\'}')); c=d.get('creator') or {}; print(str(c.get('version','')).strip())" 2>/dev/null && return 0
+      "$py" -c "import json; d=json.load(open('${pkg//\'/\\\'}', encoding='utf-8', errors='replace')); c=d.get('creator') or {}; print(str(c.get('version','')).strip())" 2>/dev/null && return 0
     done
   fi
 }

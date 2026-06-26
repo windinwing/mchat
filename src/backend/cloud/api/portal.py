@@ -336,3 +336,217 @@ async def get_channel_daily_memory(
         date=date_key,
         content=service.read_daily_file(date_key),
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Publishing accounts (portal)
+# Publisher accounts are Channel rows whose channel_type is a publisher type.
+# Portal users manage them through these dedicated endpoints (not /api/channels
+# which needs CHANNELS_WRITE). A publishing-plan gate enforces the per-user
+# account quota (e.g. 5 or 10).
+# ─────────────────────────────────────────────────────────────────────────────
+
+from app.publish.entitlements import (  # noqa: E402
+    PUBLISHER_CHANNEL_TYPES,
+    ensure_can_manage_publishing_accounts,
+    ensure_within_publishing_quota,
+    get_publishing_entitlement,
+)
+from app.schemas.channel import ChannelCreate  # noqa: E402
+from app.services.channel_service import ChannelService  # noqa: E402
+from sqlalchemy import select as sa_select  # noqa: E402
+
+
+@router.get("/publishing-accounts")
+async def list_publishing_accounts(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List the current user's publisher accounts."""
+    all_channels = await ChannelService(db).list_channels(current_user.id)
+    return [c for c in all_channels if c.channel_type in PUBLISHER_CHANNEL_TYPES]
+
+
+@router.get("/publishing-accounts/entitlement")
+async def publishing_accounts_entitlement(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the user's publishing quota (max/current/remaining)."""
+    ent = await get_publishing_entitlement(db, current_user.id)
+    return {
+        "allowed": ent.allowed,
+        "max_accounts": ent.max_accounts,
+        "current_count": ent.current_count,
+        "remaining": ent.remaining,
+    }
+
+
+@router.post("/publishing-accounts", status_code=status.HTTP_201_CREATED)
+async def create_publishing_account(
+    body: ChannelCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a publisher account (plan-gated + quota-checked). Only publisher
+    channel_types are allowed."""
+    ct = (body.channel_type or "").strip()
+    if ct not in PUBLISHER_CHANNEL_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"仅支持发布类账号，不支持 channel_type={ct}",
+        )
+    await ensure_within_publishing_quota(db, current_user.id)
+    return await ChannelService(db).create_channel(current_user.id, body)
+
+
+@router.put("/publishing-accounts/{account_id}")
+async def update_publishing_account(
+    account_id: str,
+    body: ChannelCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a publisher account (must belong to the current user)."""
+    existing = await ChannelService(db).get_channel(account_id, current_user.id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    if existing.channel_type not in PUBLISHER_CHANNEL_TYPES:
+        raise HTTPException(status_code=400, detail="仅支持发布类账号")
+    await ensure_can_manage_publishing_accounts(db, current_user.id)
+    return await ChannelService(db).update_channel(account_id, current_user.id, body)
+
+
+@router.delete("/publishing-accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_publishing_account(
+    account_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a publisher account."""
+    existing = await ChannelService(db).get_channel(account_id, current_user.id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    await ChannelService(db).delete_channel(account_id, current_user.id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Send records (publish history + stats)
+# ─────────────────────────────────────────────────────────────────────────────
+
+from sqlalchemy import func as sa_func  # noqa: E402
+from app.models.publish_record import PublishRecord  # noqa: E402
+
+
+@router.get("/send-records")
+async def list_send_records(
+    provider: str | None = None,
+    success: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List the user's publish send records (paginated, filterable)."""
+    q = sa_select(PublishRecord).where(PublishRecord.user_id == current_user.id)
+    if provider:
+        q = q.where(PublishRecord.provider == provider)
+    if success is not None:
+        q = q.where(PublishRecord.success == success)
+    q = q.order_by(PublishRecord.created_at.desc()).limit(min(limit, 200)).offset(offset)
+    result = await db.execute(q)
+    rows = result.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "provider": r.provider,
+            "channel_id": r.channel_id,
+            "title": r.title,
+            "content_preview": r.content_preview,
+            "success": r.success,
+            "remote_url": r.remote_url,
+            "error_message": r.error_message,
+            "status": r.status,
+            "media_type": r.media_type,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "sent_at": r.sent_at.isoformat() if r.sent_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/send-records/stats")
+async def send_records_stats(
+    days: int = 7,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregate stats: total/success/failed + breakdown by provider."""
+    from datetime import datetime, timezone, timedelta
+
+    since = datetime.now(timezone.utc) - timedelta(days=min(days, 90))
+    base = sa_select(PublishRecord).where(
+        PublishRecord.user_id == current_user.id,
+        PublishRecord.created_at >= since,
+    )
+    total_r = await db.execute(sa_select(sa_func.count()).select_from(base.subquery()))
+    total = total_r.scalar() or 0
+    ok_r = await db.execute(
+        sa_select(sa_func.count()).select_from(
+            base.where(PublishRecord.success).subquery()
+        )
+    )
+    ok = ok_r.scalar() or 0
+    prov_r = await db.execute(
+        sa_select(PublishRecord.provider, sa_func.count(), sa_func.sum(PublishRecord.success))
+        .where(PublishRecord.user_id == current_user.id, PublishRecord.created_at >= since)
+        .group_by(PublishRecord.provider)
+    )
+    by_provider = {
+        row[0]: {"total": row[1], "success": int(row[2] or 0)}
+        for row in prov_r
+    }
+    return {
+        "days": days,
+        "total": total,
+        "success": ok,
+        "failed": total - ok,
+        "success_rate": round(ok / total * 100, 1) if total else 0,
+        "by_provider": by_provider,
+    }
+
+
+@router.get("/send-records/{record_id}")
+async def get_send_record(
+    record_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a single send record's full detail (including complete content)."""
+    result = await db.execute(
+        sa_select(PublishRecord).where(
+            PublishRecord.id == record_id,
+            PublishRecord.user_id == current_user.id,
+        )
+    )
+    r = result.scalar_one_or_none()
+    if r is None:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    return {
+        "id": r.id,
+        "provider": r.provider,
+        "channel_id": r.channel_id,
+        "title": r.title,
+        "content_preview": r.content_preview,
+        "success": r.success,
+        "remote_url": r.remote_url,
+        "remote_id": r.remote_id,
+        "error_message": r.error_message,
+        "error_code": r.error_code,
+        "status": r.status,
+        "media_type": r.media_type,
+        "workflow_run_id": r.workflow_run_id,
+        "workflow_name": r.workflow_name,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "sent_at": r.sent_at.isoformat() if r.sent_at else None,
+    }

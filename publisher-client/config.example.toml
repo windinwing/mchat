@@ -1,0 +1,38 @@
+# MChat publisher-client 配置
+# 复制本文件为 config.toml 并填写
+
+# 启用的平台（顶层）——需对应的 runner 实现
+platforms = ["xiaohongshu", "douyin"]
+
+[center]
+# MChat 后端地址（cloud 模式同此）
+url = "http://localhost:3001"
+# 管理员 JWT token（登录后从 /api/auth/login 获取；长期使用建议用 API key）
+token = ""
+
+[client]
+# 本客户机标识（多台机器时区分）
+id = "mac-mini-01"
+
+[poll]
+# 轮询间隔（秒）
+interval_seconds = 15
+
+[playwright]
+# 浏览器数据目录（持久化登录态/cookies/指纹，每平台独立 profile）
+browser_data_dir = "browser_data"
+# 是否显示浏览器窗口（调试时 false 改 true）
+headless = false
+# 每步操作的随机延迟范围（秒），模拟人节奏
+min_delay = 1.5
+max_delay = 4.0
+
+# ---- 定时触发工作流（可选，用 --schedule 启动）----
+# 客户机侧轻量定时器：按固定间隔触发中心的 workflow run-once。
+# 对精度要求高时改用后端 worker（WORKER_ENABLED=true + SkillSchedule cron）。
+# [[schedule]] 可重复多个。
+# 示例：每 1440 分钟(每天)触发茶叶日报 workflow
+# [[schedule]]
+# workflow_id = "茶叶日报 workflow 的 id（从 Admin → Workflows 创建后获取）"
+# every_minutes = 1440
+# payload = { topic = "今日白茶上新", style = "xiaohongshu", webhook_url = "https://open.feishu.cn/...", xhs_image_path = "/abs/path/tea.jpg" }

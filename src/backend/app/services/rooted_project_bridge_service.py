@@ -115,6 +115,22 @@ def _candidate_relpaths(slug: str, relpath: str, readable_roots: tuple[str, ...]
     return variants
 
 
+def _read_text_safe(path: Path, encoding: str = "utf-8") -> str:
+    """容错读取文本文件。
+
+    Cocos 项目文件（.prefab/.scene/.meta/.ts）可能含 GBK 编码的中文内容，
+    直接 read_text(encoding="utf-8") 会抛 UnicodeDecodeError 中断构建流程。
+    这里 UTF-8 优先，失败回退 GBK/GB18030，最终兜底 replace（不抛异常）。
+    """
+    raw = path.read_bytes()
+    for enc in (encoding, "gb18030", "gbk", "latin-1"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode(encoding, errors="replace")
+
+
 class RootedProjectBridgeService:
     def __init__(self, config: RootedProjectBridgeConfig) -> None:
         self.config = config
@@ -144,7 +160,7 @@ class RootedProjectBridgeService:
         package_json = path / "package.json"
         if package_json.is_file():
             try:
-                payload = json.loads(package_json.read_text(encoding="utf-8"))
+                payload = json.loads(_read_text_safe(package_json))
             except Exception:
                 return False
             creator = payload.get("creator")
@@ -398,7 +414,7 @@ class RootedProjectBridgeService:
         meta_path = project_dir / self._META_FILE
         if meta_path.is_file():
             try:
-                return json.loads(meta_path.read_text(encoding="utf-8"))
+                return json.loads(_read_text_safe(meta_path))
             except Exception:
                 pass
         # Auto-derive from project structure
@@ -579,7 +595,7 @@ class RootedProjectBridgeService:
         if size > self.config.max_read_bytes:
             raise HTTPException(status_code=413, detail="File too large for preview")
         try:
-            content = target.read_text(encoding="utf-8")
+            content = _read_text_safe(target)
         except UnicodeDecodeError as exc:
             raise HTTPException(status_code=400, detail="File is not UTF-8 text") from exc
         return GamecenterFileReadResponse(
@@ -600,7 +616,7 @@ class RootedProjectBridgeService:
             create_if_missing=True,
         )
         is_new = not target.exists()
-        before_text = target.read_text(encoding="utf-8") if target.is_file() else ""
+        before_text = _read_text_safe(target) if target.is_file() else ""
         if before_text == content:
             rel = target.relative_to(project_dir).as_posix()
             return {
@@ -644,7 +660,7 @@ class RootedProjectBridgeService:
             if not meta_path.is_file():
                 continue
             try:
-                items.append(json.loads(meta_path.read_text(encoding="utf-8")))
+                items.append(json.loads(_read_text_safe(meta_path)))
             except Exception:
                 continue
         return items
@@ -657,9 +673,9 @@ class RootedProjectBridgeService:
         before_path = change_root / "before.txt"
         if not meta_path.is_file() or not before_path.is_file():
             raise HTTPException(status_code=404, detail="Change record not found")
-        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        metadata = json.loads(_read_text_safe(meta_path))
         target = self._resolve_writable_path(project_dir, metadata["path"], slug=slug)
-        target.write_text(before_path.read_text(encoding="utf-8"), encoding="utf-8")
+        target.write_text(_read_text_safe(before_path), encoding="utf-8")
         metadata["status"] = "reverted"
         metadata["reverted_at"] = datetime.now().isoformat(timespec="seconds")
         metadata["reverted_by"] = actor_user_id
@@ -879,7 +895,7 @@ class RootedProjectBridgeService:
         meta_path = build_root / "metadata.json"
         if not meta_path.is_file():
             raise HTTPException(status_code=404, detail="Build metadata not found")
-        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        metadata = json.loads(_read_text_safe(meta_path))
         metadata["status"] = "running"
         metadata["started_at"] = datetime.now().isoformat(timespec="seconds")
         self._write_build_metadata(build_root, metadata)
@@ -914,10 +930,90 @@ class RootedProjectBridgeService:
             if not meta_path.is_file():
                 continue
             try:
-                items.append(json.loads(meta_path.read_text(encoding="utf-8")))
+                items.append(json.loads(_read_text_safe(meta_path)))
             except Exception:
                 continue
         return items
+
+    def _read_build_log_tail(self, slug: str, build_id: str, *, max_chars: int = 4000) -> tuple[str, str]:
+        build_dir = self._project_state_root(slug) / "builds" / build_id
+        stdout = ""
+        stderr = ""
+        stdout_path = build_dir / "stdout.log"
+        stderr_path = build_dir / "stderr.log"
+        if stdout_path.is_file():
+            stdout = stdout_path.read_text(encoding="utf-8", errors="replace")[-max_chars:].strip()
+        if stderr_path.is_file():
+            stderr = stderr_path.read_text(encoding="utf-8", errors="replace")[-max_chars:].strip()
+        return stdout, stderr
+
+    @staticmethod
+    def _read_version_snapshot(project_dir: Path) -> tuple[str, str]:
+        import re
+
+        source_labels: list[str] = []
+        for name in ("UIMain.ts", "UILoading.ts"):
+            path = project_dir / "assets/scripts/ui" / name
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+                source_labels.extend(re.findall(r"ver:1\.\d+", text))
+            except OSError:
+                continue
+        bundle_labels: list[str] = []
+        bundle_js = project_dir / "build/web-mobile/assets/main/index.js"
+        if bundle_js.is_file():
+            try:
+                text = bundle_js.read_text(encoding="utf-8", errors="replace")
+                bundle_labels = sorted(set(re.findall(r"ver:1\.\d+", text)))
+            except OSError:
+                pass
+        return (
+            ", ".join(sorted(set(source_labels))) if source_labels else "",
+            ", ".join(bundle_labels) if bundle_labels else "",
+        )
+
+    def get_build_progress(self, slug: str) -> dict:
+        """Latest build status, log tails, and source vs bundle version snapshot."""
+        project = self.get_project(slug)
+        builds = self.list_builds(slug)
+        changes = self.list_changes(slug)
+        latest = builds[0] if builds else None
+        stdout_tail = ""
+        stderr_tail = ""
+        if latest and latest.get("id"):
+            stdout_tail, stderr_tail = self._read_build_log_tail(slug, str(latest["id"]))
+        project_dir = Path(project.path)
+        source_version, bundle_version = self._read_version_snapshot(project_dir)
+        status = str(latest.get("status") or "") if latest else ""
+        return {
+            "slug": slug,
+            "project": {
+                "path": project.path,
+                "has_build": project.has_build,
+                "source_updated_at": project.source_updated_at.isoformat(timespec="seconds")
+                if project.source_updated_at
+                else None,
+                "build_updated_at": project.build_updated_at.isoformat(timespec="seconds")
+                if project.build_updated_at
+                else None,
+            },
+            "latest_build": latest,
+            "builds": builds[:5],
+            "changes": changes[:5],
+            "stdout_tail": stdout_tail,
+            "stderr_tail": stderr_tail,
+            "play_urls": self._play_urls(slug),
+            "source_version": source_version or None,
+            "bundle_version": bundle_version or None,
+            "version_match": (
+                not source_version
+                or not bundle_version
+                or source_version == bundle_version
+            ),
+            "is_active": status in {"queued", "running"},
+        }
 
     def _playable_project_root(self, slug: str) -> Path:
         assert self.config.playables_root is not None
@@ -962,7 +1058,7 @@ class RootedProjectBridgeService:
         meta_path = build_root / "metadata.json"
         if not meta_path.is_file():
             raise HTTPException(status_code=404, detail="Build record not found")
-        build_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        build_meta = json.loads(_read_text_safe(meta_path))
         snapshot_dir = build_meta.get("snapshot_dir")
         if not snapshot_dir or not Path(snapshot_dir).is_dir():
             raise HTTPException(status_code=400, detail="Build snapshot not available for publish")
@@ -1030,7 +1126,7 @@ class RootedProjectBridgeService:
             }
             if meta_path.is_file():
                 try:
-                    payload.update(json.loads(meta_path.read_text(encoding="utf-8")))
+                    payload.update(json.loads(_read_text_safe(meta_path)))
                 except Exception:
                     pass
             items.append(payload)
@@ -1136,13 +1232,13 @@ class RootedProjectBridgeService:
         result: dict = {"id": change_id, "slug": slug}
         if meta_path.is_file():
             try:
-                result["metadata"] = json.loads(meta_path.read_text(encoding="utf-8"))
+                result["metadata"] = json.loads(_read_text_safe(meta_path))
             except Exception:
                 result["metadata"] = {}
         if before_path.is_file():
-            result["before"] = before_path.read_text(encoding="utf-8")
+            result["before"] = _read_text_safe(before_path)
         if after_path.is_file():
-            result["after"] = after_path.read_text(encoding="utf-8")
+            result["after"] = _read_text_safe(after_path)
         if "before" in result and "after" in result:
             before_lines = result["before"].splitlines()
             after_lines = result["after"].splitlines()

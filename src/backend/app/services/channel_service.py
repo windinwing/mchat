@@ -8,6 +8,75 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.field_encryption import decrypt_value, encrypt_value
+
+# Config keys treated as secrets and encrypted at rest. Covers all publisher +
+# inbound credential shapes. Non-matching keys (e.g. msg_type, platform) stay
+# plaintext since they are not sensitive.
+_SENSITIVE_CONFIG_KEYS = frozenset({
+    "webhook_url", "secret", "token", "bot_token", "access_token",
+    "api_key", "app_secret", "app_id", "cookie", "cookies", "refresh_token",
+    "client_secret", "page_access_token", "verify_token", "phone_number_id",
+    "encoding_aes_key", "channel_access_token", "channel_secret",
+    "author_urn", "password",
+})
+
+
+def _encrypt_config(config: dict | None) -> dict | None:
+    """Encrypt sensitive string values in a channel config dict (in place safe)."""
+    if not isinstance(config, dict):
+        return config
+    out = dict(config)
+    for key, value in list(out.items()):
+        if key in _SENSITIVE_CONFIG_KEYS and isinstance(value, str) and value:
+            out[key] = encrypt_value(value)
+    return out
+
+
+def _decrypt_config(config: dict | None) -> dict | None:
+    """Decrypt sensitive values back to plaintext for runtime use."""
+    if not isinstance(config, dict):
+        return config
+    out = dict(config)
+    for key, value in list(out.items()):
+        if key in _SENSITIVE_CONFIG_KEYS and isinstance(value, str) and value:
+            out[key] = decrypt_value(value)
+    return out
+
+
+def _mask_config(config: dict | None) -> dict | None:
+    """Mask sensitive values for API responses (show presence, hide value)."""
+    if not isinstance(config, dict):
+        return config
+    out = dict(config)
+    for key, value in list(out.items()):
+        if key in _SENSITIVE_CONFIG_KEYS and isinstance(value, str) and value:
+            # Keep a hint of whether it's set without leaking the secret.
+            out[key] = "********" if value else ""
+    return out
+
+
+def _mask_response(channel) -> object:
+    """Return a channel-like object with masked config for safe API response.
+
+    Builds a lightweight namespace so ChannelResponse.model_validate reads a
+    masked config without mutating the ORM object's encrypted config.
+    """
+    from types import SimpleNamespace
+
+    masked = SimpleNamespace(
+        id=channel.id,
+        user_id=channel.user_id,
+        name=channel.name,
+        channel_type=channel.channel_type,
+        config=_mask_config(channel.config),
+        enabled=channel.enabled,
+        is_connected=channel.is_connected,
+        created_at=channel.created_at,
+        updated_at=channel.updated_at,
+    )
+    return masked
+
 from app.models.ai_config import AIConfig
 from app.models.channel import Channel
 from app.models.conversation import Conversation
@@ -255,23 +324,43 @@ class ChannelService:
         channel = result.scalar_one_or_none()
         if channel is None:
             return None
-        return ChannelResponse.model_validate(channel)
+        return ChannelResponse.model_validate(_mask_response(channel))
+
+    async def get_channel_config(
+        self, channel_id: str, user_id: str
+    ) -> dict | None:
+        """Return the DECRYPTED config for a channel (for publish dispatch).
+
+        Unlike get_channel (which masks secrets for API responses), this returns
+        plaintext credentials so publishers can actually use them. Only call from
+        trusted server-side dispatch — never expose via API.
+        """
+        result = await self.db.execute(
+            select(Channel).where(
+                Channel.id == channel_id, Channel.user_id == user_id
+            )
+        )
+        channel = result.scalar_one_or_none()
+        if channel is None:
+            return None
+        return _decrypt_config(channel.config)
 
     async def create_channel(
         self, user_id: str, data: ChannelCreate
     ) -> ChannelResponse:
-        """Create a new channel."""
+        """Create a new channel. Sensitive config keys are encrypted at rest."""
         channel = Channel(
             user_id=user_id,
             name=data.name,
             channel_type=data.channel_type,
-            config=data.config or {},
+            config=_encrypt_config(data.config) or {},
             enabled=data.enabled,
         )
         self.db.add(channel)
         await self.db.flush()
         await self.db.refresh(channel)
-        return ChannelResponse.model_validate(channel)
+        # Return config masked for the API response (don't leak secrets).
+        return ChannelResponse.model_validate(_mask_response(channel))
 
     async def update_channel(
         self, channel_id: str, user_id: str, data: ChannelUpdate
@@ -287,12 +376,15 @@ class ChannelService:
             return None
 
         update_data = data.model_dump(exclude_unset=True)
+        # Encrypt config on update if provided.
+        if "config" in update_data and update_data["config"] is not None:
+            update_data["config"] = _encrypt_config(update_data["config"])
         for key, value in update_data.items():
             setattr(channel, key, value)
 
         await self.db.flush()
         await self.db.refresh(channel)
-        return ChannelResponse.model_validate(channel)
+        return ChannelResponse.model_validate(_mask_response(channel))
 
     async def delete_channel(
         self, channel_id: str, user_id: str

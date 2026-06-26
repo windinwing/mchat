@@ -30,6 +30,8 @@ def create_app() -> FastAPI:
     app.include_router(pay_callbacks_router, prefix="/api/pay", tags=["Pay"])
     app.include_router(payments_router, prefix="/api/portal", tags=["Portal Payments"])
     app.include_router(portal_router, prefix="/api/portal", tags=["Portal"])
+    from app.publish.drafts import router as drafts_router
+    app.include_router(drafts_router, prefix="/api/portal/drafts-api", tags=["Content Drafts"])
     app.include_router(templates_router, prefix="/api/templates", tags=["Templates"])
     app.include_router(admin_templates_router, prefix="/api", tags=["Admin Templates"])
     app.include_router(admin_orders_router, prefix="/api", tags=["Admin Orders"])

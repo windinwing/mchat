@@ -5,11 +5,16 @@ import {
   ExternalLink,
   FileSpreadsheet,
   FileText,
+  FileCode2,
   Image as ImageIcon,
+  Maximize2,
   Presentation,
 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 import { Button } from '@/components/ui/Button'
+import { Dialog } from '@/components/ui/Dialog'
 import {
   absoluteArtifactUrl,
   downloadArtifact,
@@ -34,6 +39,7 @@ const FORMAT_ICONS: Record<ReportArtifactFormat, React.ReactNode> = {
   xlsx: <FileSpreadsheet className="w-4 h-4" />,
   docx: <FileText className="w-4 h-4" />,
   pptx: <Presentation className="w-4 h-4" />,
+  md: <FileCode2 className="w-4 h-4" />,
   other: <FileText className="w-4 h-4" />,
 }
 
@@ -62,6 +68,28 @@ export function WorkflowReportPanel({ nodeRuns, outputPayload }: Props) {
     const first = officeFiles.find((f) => officeOnlinePreviewUrl(f.url))
     return first || officeFiles[0] || null
   })
+
+  // Markdown 全屏预览
+  const [mdPreview, setMdPreview] = useState<WorkflowReportArtifact | null>(null)
+  const [mdText, setMdText] = useState('')
+  const [mdLoading, setMdLoading] = useState(false)
+
+  const mdFiles = useMemo(() => officeFiles.filter((f) => f.format === 'md'), [officeFiles])
+
+  const openMdPreview = async (file: WorkflowReportArtifact) => {
+    setMdPreview(file)
+    setMdText('')
+    setMdLoading(true)
+    try {
+      const res = await fetch(absoluteArtifactUrl(file.url))
+      const text = await res.text()
+      setMdText(text)
+    } catch {
+      setMdText(t('workflows.reportMdLoadError', { defaultValue: '加载失败' }))
+    } finally {
+      setMdLoading(false)
+    }
+  }
 
   if (artifacts.length === 0 && images.length === 0 && !narrative) return null
 
@@ -136,17 +164,36 @@ export function WorkflowReportPanel({ nodeRuns, outputPayload }: Props) {
         <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
           {t('workflows.reportDownloads')}
         </p>
-        <div className="flex flex-wrap gap-2">
+        <div className="space-y-2">
           {officeFiles.map((file) => (
-            <Button
+            <div
               key={file.url}
-              size="sm"
-              variant="secondary"
-              leftIcon={FORMAT_ICONS[file.format]}
-              onClick={() => downloadArtifact(file)}
+              className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2"
             >
-              {t('workflows.reportDownloadFormat', { format: reportFormatLabel(file.format) })}
-            </Button>
+              <span className="shrink-0 text-gray-400 dark:text-gray-500">{FORMAT_ICONS[file.format]}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-gray-800 dark:text-gray-200 truncate">{file.filename}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{reportFormatLabel(file.format)}</p>
+              </div>
+              {file.format === 'md' ? (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  leftIcon={<Maximize2 className="w-4 h-4" />}
+                  onClick={() => openMdPreview(file)}
+                >
+                  {t('workflows.reportPreview', { defaultValue: '预览' })}
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                variant="secondary"
+                leftIcon={<Download className="w-4 h-4" />}
+                onClick={() => downloadArtifact(file)}
+              >
+                {t('common.download', { defaultValue: '下载' })}
+              </Button>
+            </div>
           ))}
         </div>
       </div>
@@ -197,6 +244,37 @@ export function WorkflowReportPanel({ nodeRuns, outputPayload }: Props) {
           )}
         </div>
       ) : null}
+
+      {/* Markdown 全屏预览 */}
+      <Dialog
+        open={mdPreview !== null}
+        onClose={() => setMdPreview(null)}
+        title={mdPreview?.label || mdPreview?.filename || 'Markdown'}
+        size="full"
+      >
+        <div className="flex items-center justify-between gap-2 pb-3 border-b border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{mdPreview?.filename}</p>
+          {mdPreview ? (
+            <a
+              href={absoluteArtifactUrl(mdPreview.url)}
+              download={mdPreview.filename}
+              className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+            >
+              <Download className="w-3 h-3" />
+              {t('workflows.reportDownload', { defaultValue: '下载' })}
+            </a>
+          ) : null}
+        </div>
+        <div className="mt-4 overflow-auto max-h-[calc(95vh-8rem)]">
+          {mdLoading ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t('common.loading', { defaultValue: '加载中…' })}</p>
+          ) : (
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{mdText}</ReactMarkdown>
+            </div>
+          )}
+        </div>
+      </Dialog>
     </div>
   )
 }

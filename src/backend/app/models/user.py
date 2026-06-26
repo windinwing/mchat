@@ -75,61 +75,65 @@ class User(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    # Relationships
+    # Relationships — lazy="select" (default) to avoid eagerly loading ALL of a
+    # user's messages/conversations/skills on every db.get(User). The auth
+    # middleware calls db.get(User) on EVERY request; with lazy="selectin" that
+    # fired 13+ extra queries pulling the entire messages/skills/channels tables
+    # for the user (500ms+ per request). Relations are loaded on access instead.
     ai_configs = relationship(
-        "AIConfig", back_populates="user", lazy="selectin"
+        "AIConfig", back_populates="user", lazy="select"
     )
     conversations = relationship(
-        "Conversation", back_populates="user", lazy="selectin"
+        "Conversation", back_populates="user", lazy="select"
     )
-    messages = relationship("Message", back_populates="user", lazy="selectin")
-    skills = relationship("Skill", back_populates="user", lazy="selectin")
+    messages = relationship("Message", back_populates="user", lazy="select")
+    skills = relationship("Skill", back_populates="user", lazy="select")
     knowledge_bases = relationship(
-        "KnowledgeBase", back_populates="user", lazy="selectin"
+        "KnowledgeBase", back_populates="user", lazy="select"
     )
     owned_groups = relationship(
         "Group",
         foreign_keys="Group.owner_user_id",
-        lazy="selectin",
+        lazy="select",
     )
     group_memberships = relationship(
         "GroupMember",
         foreign_keys="GroupMember.user_id",
-        lazy="selectin",
+        lazy="select",
     )
     embedding_models = relationship(
-        "EmbeddingModel", back_populates="user", lazy="selectin"
+        "EmbeddingModel", back_populates="user", lazy="select"
     )
     customer_configs = relationship(
-        "CustomerConfig", back_populates="user", lazy="selectin"
+        "CustomerConfig", back_populates="user", lazy="select"
     )
     webhook_configs = relationship(
-        "WebhookConfig", back_populates="user", lazy="selectin"
+        "WebhookConfig", back_populates="user", lazy="select"
     )
     channels = relationship(
-        "Channel", back_populates="user", lazy="selectin"
+        "Channel", back_populates="user", lazy="select"
     )
     skill_schedules = relationship(
-        "SkillSchedule", back_populates="user", lazy="selectin"
+        "SkillSchedule", back_populates="user", lazy="select"
     )
     skill_schedule_runs = relationship(
-        "SkillScheduleRun", back_populates="user", lazy="selectin"
+        "SkillScheduleRun", back_populates="user", lazy="select"
     )
-    workflows = relationship("SkillWorkflow", back_populates="user", lazy="selectin")
+    workflows = relationship("SkillWorkflow", back_populates="user", lazy="select")
     workflow_templates = relationship(
-        "SkillWorkflowTemplate", back_populates="user", lazy="selectin"
+        "SkillWorkflowTemplate", back_populates="user", lazy="select"
     )
     workflow_runs = relationship(
-        "SkillWorkflowRun", back_populates="user", lazy="selectin"
+        "SkillWorkflowRun", back_populates="user", lazy="select"
     )
     channel_workflow_bindings = relationship(
-        "ChannelWorkflowBinding", back_populates="user", lazy="selectin"
+        "ChannelWorkflowBinding", back_populates="user", lazy="select"
     )
     workflow_approvals = relationship(
         "SkillWorkflowApproval",
         foreign_keys="SkillWorkflowApproval.user_id",
         back_populates="user",
-        lazy="selectin",
+        lazy="select",
     )
 
     def __repr__(self) -> str:

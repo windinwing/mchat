@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -66,6 +68,29 @@ def _resolve_script_path(skill_dir: Path) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+def _skill_has_async_run(script_path: Path) -> bool:
+    """True when the skill script defines ``async def run()``.
+
+    Detected by parsing the source AST (cheap, no import side effects) so we can
+    route async skills to a direct ``await`` instead of the thread pool. Falls
+    back to False on any parse error — synchronous execution remains the safe
+    default.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(script_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "run"
+        ):
+            return True
+    return False
 
 
 def _normalize_tool_result(result: Any) -> Any:
@@ -138,7 +163,8 @@ async def _execute_python_tool(skill: Skill, args: dict[str, Any]) -> Any:
     skill_dir: Path
     if ws_ctx is not None:
         try:
-            skill_dir = ensure_skill_in_tenant(skill, ws_ctx)
+            # 文件同步操作（shutil.copytree/rmtree）不能卡 event loop，放线程
+            skill_dir = await asyncio.to_thread(ensure_skill_in_tenant, skill, ws_ctx)
         except FileNotFoundError as e:
             return {"error": str(e)}
     else:
@@ -151,7 +177,32 @@ async def _execute_python_tool(skill: Skill, args: dict[str, Any]) -> Any:
         return {"error": f"No script found in {skill_dir}"}
 
     extra_env = _skill_secrets_env_dict(skill)
-    warm_skill_export_deps(skill.name, skill_dir)
+    # pip 子进程（最长 180s）不能卡 event loop，放线程
+    await asyncio.to_thread(warm_skill_export_deps, skill.name, skill_dir)
+
+    # Fast path FIRST: skills that declare ``async def run()`` run on the main
+    # event loop regardless of workspace mode. The workspace provider path
+    # below uses subprocess/threads which can't await the coroutine, so an async
+    # skill routed through it returns a stringified coroutine instead of a
+    # result. This MUST be checked before the provider dispatch.
+    if _skill_has_async_run(script_path):
+        try:
+            with _skill_secrets_env(skill):
+                from app.utils.upload_paths import resolve_upload_root
+
+                os.environ["MCHAT_UPLOAD_DIR"] = str(resolve_upload_root())
+                from app.workspace.skill_runner import execute_skill_script
+
+                raw = execute_skill_script(script_path, args)
+                if inspect.isawaitable(raw):
+                    raw = await raw
+            return _normalize_tool_result(raw)
+        except SystemExit as e:
+            logger.error(f"Python tool '{skill.name}' sys.exit({e.code})")
+            return {"error": f"async skill 异常退出 (code {e.code})"}
+        except BaseException as e:
+            logger.error(f"Async python tool execution failed: {e}")
+            return {"error": str(e)}
 
     if ws_ctx is not None:
         provider = get_workspace_provider(ws_ctx)
@@ -175,10 +226,39 @@ async def _execute_python_tool(skill: Skill, args: dict[str, Any]) -> Any:
 
             return execute_skill_script(script_path, args)
 
-    try:
-        import asyncio
+    # Fast path: skills that declare ``async def run()`` can use the platform's
+    # native async resources (DB engine, LLM provider) on the main event loop.
+    # Running them on a worker thread via asyncio.run() would create a second
+    # loop and break ("Future attached to a different loop"). Async skills are
+    # awaited directly here — IO-bound async calls yield cooperatively, so they
+    # don't block the loop. Synchronous skills still go through the thread pool.
+    if _skill_has_async_run(script_path):
+        try:
+            with _skill_secrets_env(skill):
+                from app.utils.upload_paths import resolve_upload_root
 
-        raw = await asyncio.to_thread(_run_local)
+                os.environ["MCHAT_UPLOAD_DIR"] = str(resolve_upload_root())
+                from app.workspace.skill_runner import execute_skill_script
+
+                raw = execute_skill_script(script_path, args)
+                if inspect.isawaitable(raw):
+                    raw = await raw
+            return _normalize_tool_result(raw)
+        except SystemExit as e:
+            logger.error(f"Python tool '{skill.name}' sys.exit({e.code})")
+            return {"error": f"async skill 异常退出 (code {e.code})"}
+        except BaseException as e:
+            logger.error(f"Async python tool execution failed: {e}")
+            return {"error": str(e)}
+
+    try:
+        from app.core.skills_pool import get_skills_pool, warn_if_saturated
+
+        loop = asyncio.get_running_loop()
+        # Surface pool saturation before queuing so it's never silent (R3).
+        warn_if_saturated()
+        # skill 体跑在专用线程池，与 uploads/search 共用的默认池隔离，防饿死
+        raw = await loop.run_in_executor(get_skills_pool(), _run_local)
         return _normalize_tool_result(raw)
     except SystemExit as e:
         logger.error(f"Python tool '{skill.name}' sys.exit({e.code})")

@@ -37,10 +37,14 @@ export function TemplateDetailPage() {
 
   const handleRent = async () => {
     if (!id || !template) return
-    const needsPay =
-      template.price_monthly_cents > 0 || template.price_yearly_cents > 0
+    const hasMonthly = template.price_monthly_cents > 0
+    const hasYearly = template.price_yearly_cents > 0
+    const needsPay = hasMonthly || hasYearly
     if (needsPay) {
-      navigate(`/portal/checkout?template=${id}&period=monthly`)
+      // Pick the period that has a price. If only yearly is priced (monthly=0),
+      // use yearly — otherwise default to monthly.
+      const period = hasMonthly ? 'monthly' : 'yearly'
+      navigate(`/portal/checkout?template=${id}&period=${period}`)
       return
     }
     setRenting(true)
@@ -50,7 +54,8 @@ export function TemplateDetailPage() {
     } catch (e: any) {
       const msg = e.message || ''
       if (msg.includes('402') || msg.toLowerCase().includes('payment')) {
-        navigate(`/portal/checkout?template=${id}&period=monthly`)
+        const period = hasMonthly ? 'monthly' : 'yearly'
+        navigate(`/portal/checkout?template=${id}&period=${period}`)
         return
       }
       setError(msg || t('portal.rentFailed'))
@@ -74,7 +79,9 @@ export function TemplateDetailPage() {
   const price =
     template.price_monthly_cents > 0
       ? `¥${(template.price_monthly_cents / 100).toFixed(0)}${t('portal.monthly')}`
-      : t('portal.planFree')
+      : template.price_yearly_cents > 0
+        ? `¥${(template.price_yearly_cents / 100).toFixed(0)}${t('portal.yearly', '/年')}`
+        : t('portal.planFree')
 
   return (
     <div className="space-y-6">

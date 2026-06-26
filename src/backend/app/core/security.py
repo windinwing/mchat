@@ -1,5 +1,6 @@
 """Security utilities: password hashing and JWT tokens."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -10,11 +11,31 @@ from app.core.config import settings
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain password against its hash."""
-    return bcrypt.checkpw(
-        plain_password.encode("utf-8"),
-        hashed_password.encode("utf-8"),
-    )
+    """Verify a plain password against a bcrypt hash (CPU-intensive, ~0.2-1.5s).
+
+    NOTE: callers in async code should prefer ``verify_password_async`` so the
+    bcrypt compute runs on a worker thread and does NOT block the event loop.
+    """
+    if not plain_password or not hashed_password:
+        return False
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"),
+            hashed_password.encode("utf-8") if isinstance(hashed_password, str) else hashed_password,
+        )
+    except (ValueError, TypeError):
+        return False
+
+
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    """Async wrapper: run bcrypt on a worker thread so it doesn't block the loop.
+
+    bcrypt.checkpw is CPU-bound and takes 0.2-1.5s. Calling it inline in an async
+    endpoint freezes the entire event loop for that duration — every other
+    request (chat, websocket) stalls. Running it via to_thread yields the loop
+    so concurrency is preserved.
+    """
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:

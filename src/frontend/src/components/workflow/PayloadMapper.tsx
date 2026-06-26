@@ -16,6 +16,8 @@ interface Props {
   payload: Record<string, unknown>
   onChange: (next: Record<string, unknown>) => void
   workflowFields?: Record<string, any>
+  /** 上游各节点的 outputs JSON Schema（key=节点id）。用于按真实输出路径生成绑定芯片。 */
+  upstreamSkillOutputs?: Record<string, any>
 }
 
 function setNestedValue(obj: Record<string, unknown>, path: string, value: string) {
@@ -119,7 +121,7 @@ function ParamField({
   )
 }
 
-export function PayloadMapper({ skillName = '', fields, upstreamNodeIds, payload, onChange, workflowFields }: Props) {
+export function PayloadMapper({ skillName = '', fields, upstreamNodeIds, payload, onChange, workflowFields, upstreamSkillOutputs }: Props) {
   const { t } = useTranslation()
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
@@ -127,14 +129,29 @@ export function PayloadMapper({ skillName = '', fields, upstreamNodeIds, payload
     const vars: string[] = []
     for (const f of fields) vars.push(`input.${f.key}`)
     for (const id of upstreamNodeIds) {
-      vars.push(`nodes.${id}.patent_ids`)
-      vars.push(`nodes.${id}.sections`)
-      vars.push(`nodes.${id}.charts`)
-      vars.push(`nodes.${id}.result`)
+      const outs = upstreamSkillOutputs?.[id]
+      if (outs && typeof outs === 'object' && outs.properties) {
+        // 按声明的 outputs schema 生成可引用路径（顶层 + 嵌套对象一层）
+        for (const [key, def] of Object.entries(outs.properties as Record<string, any>)) {
+          vars.push(`nodes.${id}.${key}`)
+          // 嵌套对象（如 envelope/files）暴露其子键，便于直接引用
+          if (def && typeof def === 'object' && def.properties) {
+            for (const sub of Object.keys(def.properties as Record<string, any>)) {
+              vars.push(`nodes.${id}.${key}.${sub}`)
+            }
+          }
+        }
+      } else {
+        // 兜底：无 outputs 声明的旧 skill，保留通用路径
+        vars.push(`nodes.${id}.patent_ids`)
+        vars.push(`nodes.${id}.sections`)
+        vars.push(`nodes.${id}.charts`)
+        vars.push(`nodes.${id}.result`)
+      }
     }
     vars.push('nodes.merge.sections')
-    return vars
-  }, [fields, upstreamNodeIds])
+    return Array.from(new Set(vars))
+  }, [fields, upstreamNodeIds, upstreamSkillOutputs])
 
   const paramFields = useMemo(
     () => resolveSkillParamFields(skillName, payload, t, workflowFields),

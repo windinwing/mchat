@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import AsyncIterator
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -221,7 +223,7 @@ def _fmt_build(data: dict[str, Any]) -> str:
     cmd = str(data.get("command") or "")
     lines = [f"🔨 构建 {status_label}" + (f" · `{build_id}`" if build_id else "")]
     if status in {"queued", "running"}:
-        lines.append("可用 `get_gamecenter_build_progress` 查看进度与日志。")
+        lines.append("聊天中将自动刷新编译进度，直至完成。")
     if cmd:
         lines.append(f"<details><summary>构建命令</summary>\n\n```bash\n{cmd}\n```\n\n</details>")
     stdout = str(data.get("stdout_tail") or "").strip()
@@ -255,6 +257,128 @@ def _play_urls_for_slug(slug: str, *, service: Any = None) -> list[str]:
         if not bases and cfg.get("playable_base_url"):
             bases = [str(cfg.get("playable_base_url")).strip()]
         return [f"{base.rstrip('/')}/{slug}/" for base in bases]
+
+
+BUILD_WATCH_POLL_SECONDS = 3.0
+BUILD_WATCH_MAX_SECONDS = 7200.0
+
+_BUILD_STATUS_LABEL = {
+    "queued": "已入队",
+    "running": "编译中",
+    "built": "已完成",
+    "failed": "失败",
+}
+
+
+def _pipeline_phase_hint(stdout_tail: str) -> str:
+    for line in reversed(stdout_tail.splitlines()):
+        text = line.strip()
+        if not text:
+            continue
+        if text.startswith("==>") and len(text) < 80:
+            return text[4:].strip()
+        markers = ("[1/3]", "[2/3]", "[3/3]", "Pull", "Push", "Cocos", "BUILD", "编译", "Building")
+        if any(marker in text for marker in markers):
+            return text[:140]
+    return ""
+
+
+def _fmt_build_progress_tick(slug: str, progress: dict[str, Any]) -> str:
+    latest = progress.get("latest_build") or {}
+    status = str(latest.get("status") or "unknown")
+    label = _BUILD_STATUS_LABEL.get(status, status)
+    hint = _pipeline_phase_hint(str(progress.get("stdout_tail") or ""))
+    now = datetime.now().strftime("%H:%M:%S")
+    line = f"⏳ **编译进度** · `{slug}` · {label}"
+    if hint:
+        line += f" · {hint}"
+    line += f" · {now}\n\n"
+    return line
+
+
+def _fmt_build_progress_done(slug: str, progress: dict[str, Any]) -> str:
+    latest = progress.get("latest_build") or {}
+    status = str(latest.get("status") or "")
+    play_urls = progress.get("play_urls") or []
+    if status == "built":
+        lines = [f"✅ **编译完成** · `{slug}`"]
+        source_ver = progress.get("source_version")
+        bundle_ver = progress.get("bundle_version")
+        if source_ver or bundle_ver:
+            lines.append(f"- 版本: 源码 {source_ver or '—'} · 试玩包 {bundle_ver or '—'}")
+        if play_urls:
+            lines.append("- 试玩（强刷 Cmd+Shift+R）：" + " ".join(str(u) for u in play_urls))
+        return "\n".join(lines) + "\n\n"
+    if status == "failed":
+        stderr = str(progress.get("stderr_tail") or "").strip()[-800:]
+        block = f"❌ **编译失败** · `{slug}`"
+        if stderr:
+            block += f"\n\n```text\n{stderr}\n```"
+        return block + "\n\n"
+    return ""
+
+
+def should_stream_gamecenter_build_progress(
+    tool_name: str,
+    tool_result: Any,
+    tool_args: dict[str, Any],
+) -> str | None:
+    """Return slug when chat should poll build progress until done."""
+    if not isinstance(tool_result, dict) or not tool_result.get("ok"):
+        return None
+    if tool_name not in {"patch_gamecenter_project_file", "build_gamecenter_project"}:
+        return None
+    cfg = _gc_settings()
+    if cfg.get("watch_build_in_chat") is False:
+        return None
+    slug = str(tool_args.get("slug") or tool_result.get("project") or "").strip()
+    if not slug:
+        return None
+    build_info = tool_result.get("auto_build") if tool_name == "patch_gamecenter_project_file" else tool_result
+    if not isinstance(build_info, dict) or build_info.get("error"):
+        return None
+    status = str(build_info.get("status") or "")
+    if build_info.get("queued") or status in {"queued", "running"}:
+        return slug
+    return None
+
+
+async def stream_build_progress_in_chat(
+    slug: str,
+    *,
+    poll_seconds: float = BUILD_WATCH_POLL_SECONDS,
+    max_seconds: float = BUILD_WATCH_MAX_SECONDS,
+) -> AsyncIterator[str]:
+    """Poll DevBridge build records and yield chat-visible progress until terminal state."""
+    import asyncio
+    import time
+
+    service = _resolve_bridge_service("gamecenter")
+    started = time.monotonic()
+    last_tick = ""
+
+    yield f"\n📡 **正在跟踪编译进度**（每 {int(poll_seconds)} 秒刷新，完成后自动通知）…\n\n"
+
+    while True:
+        progress = service.get_build_progress(slug)
+        latest = progress.get("latest_build") or {}
+        status = str(latest.get("status") or "")
+        tick = _fmt_build_progress_tick(slug, progress)
+        if tick != last_tick:
+            yield tick
+            last_tick = tick
+        if status not in {"queued", "running"}:
+            done = _fmt_build_progress_done(slug, progress)
+            if done:
+                yield done
+            break
+        if time.monotonic() - started > max_seconds:
+            yield (
+                f"\n⏱️ 编译跟踪超时（>{int(max_seconds / 60)} 分钟），"
+                f"请稍后说「查 {slug} 编译进度」。\n\n"
+            )
+            break
+        await asyncio.sleep(poll_seconds)
 
 
 def _try_auto_build_after_patch(
@@ -1132,26 +1256,18 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
         return {"ok": True, "content": _fmt_build(result), **result}
     if name == "get_gamecenter_build_progress":
         slug = str(args.get("slug") or "")
-        project = _json_dump(service.get_project(slug))
-        builds = service.list_builds(slug)
-        changes = service.list_changes(slug)
-        stdout_tail = ""
-        stderr_tail = ""
-        cfg = _gc_settings()
-        data_root_raw = (cfg.get("data_root") or "").strip()
-        if builds and data_root_raw:
-            data_root = Path(data_root_raw)
-            latest_id = str(builds[0].get("id") or "")
-            if latest_id:
-                stdout_tail, stderr_tail = _read_build_log_tail(data_root, slug, latest_id)
-        play_urls = _play_urls_for_slug(slug, service=service)
+        progress = service.get_build_progress(slug)
+        project = progress.get("project") or _json_dump(service.get_project(slug))
+        builds = progress.get("builds") or service.list_builds(slug)
+        changes = progress.get("changes") or service.list_changes(slug)
+        play_urls = progress.get("play_urls") or _play_urls_for_slug(slug, service=service)
         content = _fmt_build_progress(
             slug,
             project=project,
             builds=builds,
             changes=changes,
-            stdout_tail=stdout_tail,
-            stderr_tail=stderr_tail,
+            stdout_tail=str(progress.get("stdout_tail") or ""),
+            stderr_tail=str(progress.get("stderr_tail") or ""),
             play_urls=play_urls,
         )
         return {
@@ -1161,6 +1277,7 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
             "builds": builds,
             "changes": changes[:5],
             "play_urls": play_urls,
+            **{k: v for k, v in progress.items() if k not in {"project", "builds", "changes", "play_urls"}},
         }
     if name == "list_gamecenter_project_changes":
         changes = service.list_changes(str(args.get("slug") or ""))

@@ -152,6 +152,24 @@ export function WorkflowsPage() {
   const [runInputValues, setRunInputValues] = useState<Record<string, string>>({})
   const reportTitleTouchedRef = useRef(false)
   const [runTarget, setRunTarget] = useState<WorkflowItem | null>(null)
+  const [publishingAccounts, setPublishingAccounts] = useState<{id:string;name:string;channel_type:string}[]>([])
+
+  useEffect(() => {
+    if (!runInputOpen) return
+    ;(async () => {
+      try {
+        const data = await api.get<{id:string;name:string;channel_type:string}[]>('/portal/publishing-accounts')
+        setPublishingAccounts(data || [])
+      } catch {
+        try {
+          const data = await api.get<{id:string;name:string;channel_type:string}[]>('/channels')
+          setPublishingAccounts((data || []).filter((c: any) =>
+            ['feishu','dingtalk','wecom','wechat_mp','slack','discord','telegram_channel','twitter_x','facebook','linkedin','playwright_client'].includes(c.channel_type)
+          ))
+        } catch { /* ignore */ }
+      }
+    })()
+  }, [runInputOpen])
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [creatingTemplateId, setCreatingTemplateId] = useState<string | null>(null)
   const [createFromTplOpen, setCreateFromTplOpen] = useState(false)
@@ -179,16 +197,22 @@ export function WorkflowsPage() {
     loadAll()
   }, [uiLocale])
 
-  const hasRunningJobs = runs.some((r) => r.status === 'running')
+  const hasRunningJobs = runs.some((r) => r.status === 'running' || r.status === 'paused')
 
   useEffect(() => {
-    if (!hasRunningJobs && !(selectedRunDetail?.status === 'running' && runDetailOpen)) {
+    if (!hasRunningJobs && pendingApprovals.length === 0 && !(selectedRunDetail?.status === 'running' && runDetailOpen)) {
       return
     }
     const timer = window.setInterval(async () => {
       try {
         const runData = await api.get<WorkflowRun[]>('/workflows/runs/list', { limit: '40' })
         setRuns(runData)
+        // Also refresh pending approvals so paused-workflow approvals show up
+        // without manual refresh.
+        try {
+          const approvals = await api.get<WorkflowApprovalTask[]>('/workflows/approvals/pending', { limit: '50' })
+          setPendingApprovals(approvals)
+        } catch { /* ignore */ }
         if (runDetailOpen && selectedRunDetail?.id) {
           const detail = await api.get<WorkflowRunDetail>(
             `/workflows/runs/${selectedRunDetail.id}`
@@ -200,7 +224,7 @@ export function WorkflowsPage() {
       }
     }, 3000)
     return () => window.clearInterval(timer)
-  }, [hasRunningJobs, runDetailOpen, selectedRunDetail?.id, selectedRunDetail?.status])
+  }, [hasRunningJobs, pendingApprovals.length, runDetailOpen, selectedRunDetail?.id, selectedRunDetail?.status])
 
   const refreshRuns = async () => {
     try {
@@ -705,14 +729,58 @@ export function WorkflowsPage() {
     }
   }
 
+  const [approvalCandidates, setApprovalCandidates] = useState<Record<string, any[]>>({})
+  const [selectedCandidate, setSelectedCandidate] = useState<Record<string, number>>({})
+
+  const loadApprovalCandidates = async (task: WorkflowApprovalTask) => {
+    try {
+      const run = await api.get<any>(`/workflows/runs/${task.workflow_run_id}`)
+      const payload = run?.output_payload || {}
+      // Check both outputs (completed) and engine_state.outputs (paused)
+      const outputs = payload.outputs || payload.engine_state?.outputs || {}
+      for (const [, val] of Object.entries(outputs)) {
+        const v = val as any
+        if (v?.candidates && Array.isArray(v.candidates) && v.candidates.length > 0) {
+          setApprovalCandidates((prev) => ({ ...prev, [task.id]: v.candidates }))
+          return
+        }
+      }
+      // Fallback: check node_runs for multi-content-writer result
+      const nodeRuns = payload.node_runs || []
+      for (const nr of nodeRuns) {
+        const r = nr?.result
+        if (r?.candidates && Array.isArray(r.candidates) && r.candidates.length > 0) {
+          setApprovalCandidates((prev) => ({ ...prev, [task.id]: r.candidates }))
+          return
+        }
+      }
+      toast(t('workflows.noCandidates', '未找到候选内容'), { type: 'warning' })
+    } catch (e: any) {
+      toast(t('workflows.loadCandidatesFailed', '加载候选失败'), { type: 'error', message: e?.message })
+    }
+  }
+
   const approveTask = async (task: WorkflowApprovalTask) => {
+    const candidates = approvalCandidates[task.id]
+    const selectedIdx = selectedCandidate[task.id]
+    const decision: Record<string, any> = {}
+
+    if (candidates && selectedIdx !== undefined && candidates[selectedIdx]) {
+      const chosen = candidates[selectedIdx]
+      decision.selected_index = selectedIdx
+      decision.selected_title = chosen.title
+      decision.selected_content = chosen.content
+    }
+
     try {
       await api.post(`/workflows/approvals/${task.id}/approve`, {
         comment: null,
         auto_resume: true,
-        decision_payload: {},
+        decision_payload: decision,
       })
       toast(t('workflows.toastApprovalApproved'), { type: 'success' })
+      setApprovalCandidates((prev) => { const n = { ...prev }; delete n[task.id]; return n })
+      setSelectedCandidate((prev) => { const n = { ...prev }; delete n[task.id]; return n })
       await loadAll()
     } catch (err: any) {
       toast(t('workflows.toastApprovalActionFailed'), { type: 'error', message: err.message })
@@ -796,23 +864,69 @@ export function WorkflowsPage() {
         <CardContent className="p-0">
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
               {pendingApprovals.map((task) => (
-                <div key={task.id} className="px-6 py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {task.workflow_name}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                      {task.node_name || task.node_id} · {formatDate(task.created_at)}
-                    </p>
+                <div key={task.id} className="px-6 py-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                        {task.workflow_name}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                        {task.node_name || task.node_id} · {formatDate(task.created_at)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button size="sm" variant="secondary" onClick={() => approveTask(task)}>
+                        {t('workflows.approve')}
+                      </Button>
+                      <Button size="sm" variant="danger" onClick={() => rejectTask(task)}>
+                        {t('workflows.reject')}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button size="sm" variant="secondary" onClick={() => approveTask(task)}>
-                      {t('workflows.approve')}
+                  {/* N-pick-1 candidates */}
+                  {approvalCandidates[task.id] && approvalCandidates[task.id].length > 1 && (
+                    <div className="space-y-2 pl-2 border-l-2 border-blue-200 dark:border-blue-800">
+                      <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+                        {t('workflows.pickOne', '请选择一篇发布（选中后点审批通过）')}：
+                      </p>
+                      {approvalCandidates[task.id].map((cand: any, idx: number) => {
+                        const expandKey = `expand-${task.id}-${idx}`
+                        const isExpanded = (selectedCandidate as any)[expandKey]
+                        return (
+                        <div
+                          key={idx}
+                          className={`p-2 rounded border ${selectedCandidate[task.id] === idx ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700'}`}
+                        >
+                          <label className="flex items-start gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name={`cand-${task.id}`}
+                              checked={selectedCandidate[task.id] === idx}
+                              onChange={() => setSelectedCandidate((prev) => ({ ...prev, [task.id]: idx }))}
+                              className="mt-1"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{cand.title || `候选 ${idx + 1}`}</p>
+                              <p className={`text-xs text-gray-500 whitespace-pre-wrap ${isExpanded ? '' : 'line-clamp-2'}`}>{cand.content}</p>
+                            </div>
+                          </label>
+                          <button
+                            type="button"
+                            className="text-xs text-blue-500 hover:underline mt-1 ml-6"
+                            onClick={() => setSelectedCandidate((prev: any) => ({ ...prev, [expandKey]: !prev[expandKey] }))}
+                          >
+                            {isExpanded ? t('workflows.collapse', '收起') : t('workflows.expandFull', '展开全文')}
+                          </button>
+                        </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {!approvalCandidates[task.id] && (
+                    <Button size="sm" variant="ghost" onClick={() => loadApprovalCandidates(task)}>
+                      {t('workflows.loadCandidates', '查看候选内容')}
                     </Button>
-                    <Button size="sm" variant="danger" onClick={() => rejectTask(task)}>
-                      {t('workflows.reject')}
-                    </Button>
-                  </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -881,6 +995,9 @@ export function WorkflowsPage() {
                     </Button>
                     <Button size="sm" variant="outline" leftIcon={<Network className="w-3.5 h-3.5" />} onClick={() => openGraphEditor(row)}>
                       {t('workflows.editGraph')}
+                    </Button>
+                    <Button size="sm" variant="danger" leftIcon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => deleteWorkflow(row)}>
+                      {t('common.delete')}
                     </Button>
                     <div className="relative group">
                       <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" title="更多">
@@ -1338,6 +1455,40 @@ export function WorkflowsPage() {
                     {runInputValues[field.key] ? (
                       <p className="text-xs text-green-600 dark:text-green-400">{t('workflows.fileLoaded', { size: runInputValues[field.key].length })}</p>
                     ) : null}
+                  </div>
+                )
+              }
+              if (field.type === 'select') {
+                return (
+                  <div key={field.key} className="space-y-1">
+                    <label className="text-sm text-gray-600 dark:text-gray-300">{field.label}{field.required ? ' *' : ''}</label>
+                    <select
+                      className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      value={runInputValues[field.key] || ''}
+                      onChange={(e) => handleRunInputChange(field.key, e.target.value)}
+                    >
+                      <option value="">请选择</option>
+                      {(field.options || []).map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )
+              }
+              if (field.type === 'publishing_account') {
+                return (
+                  <div key={field.key} className="space-y-1">
+                    <label className="text-sm text-gray-600 dark:text-gray-300">{field.label}{field.required ? ' *' : ''}</label>
+                    <select
+                      className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      value={runInputValues[field.key] || ''}
+                      onChange={(e) => handleRunInputChange(field.key, e.target.value)}
+                    >
+                      <option value="">{t('workflows.selectAccount', '请选择发布账号')}</option>
+                      {publishingAccounts.map((acc) => (
+                        <option key={acc.id} value={acc.id}>{acc.name} ({acc.channel_type})</option>
+                      ))}
+                    </select>
                   </div>
                 )
               }

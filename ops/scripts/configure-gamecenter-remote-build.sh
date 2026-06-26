@@ -54,7 +54,7 @@ from pathlib import Path
 p = Path('${REMOTE_DIR}/data/devbridge/admin-settings.json')
 data = {}
 if p.exists():
-    data = json.loads(p.read_text())
+    data = json.loads(p.read_text(encoding='utf-8', errors='replace'))
 gc = data.setdefault('gamecenter', {})
 gc['build_command'] = 'bash ${REMOTE_DIR}/ops/scripts/gamecenter-remote-pipeline-build.sh {slug}'
 gc['auto_build_after_patch'] = True

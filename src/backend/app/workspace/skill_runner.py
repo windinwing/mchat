@@ -140,7 +140,14 @@ def _dispatch_namespace(skill_dir: Path, main_module: Any, args: dict[str, Any])
 
 
 def execute_skill_script(script_path: Path, args: dict[str, Any]) -> Any:
-    """Run main.py/tool.py entry and return JSON-serializable result."""
+    """Run main.py/tool.py entry and return JSON-serializable result.
+
+    If the skill defines ``async def run()``, returns the coroutine for the
+    caller to ``await`` (so the skill can use the platform's native async DB
+    engine / async LLM provider on the main event loop, instead of needing a
+    loop-blocking synchronous client on a worker thread). Synchronous skills
+    are returned as-is, exactly as before.
+    """
     script_path = script_path.resolve()
     skill_dir = script_path.parent
     spec = importlib.util.spec_from_file_location("skill_entry", script_path)
@@ -150,7 +157,10 @@ def execute_skill_script(script_path: Path, args: dict[str, Any]) -> Any:
     spec.loader.exec_module(module)
 
     if hasattr(module, "run"):
-        return module.run(**_filter_kwargs(module.run, args))
+        run_fn = module.run
+        if inspect.iscoroutinefunction(run_fn):
+            return run_fn(**_filter_kwargs(run_fn, args))
+        return run_fn(**_filter_kwargs(run_fn, args))
     if hasattr(module, "main"):
         sig = inspect.signature(module.main)
         if len(sig.parameters) == 0:

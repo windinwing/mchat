@@ -16,6 +16,7 @@ class ChannelTemplateResponse(BaseModel):
     price_monthly_cents: int = 0
     price_yearly_cents: int = 0
     trial_days: int = 14
+    max_publishing_accounts: int = 0
     integration_schema: list | None = None
     default_theme: dict | None = None
     default_welcome_message: str | None = None

@@ -42,6 +42,7 @@ class TemplateUpdate(BaseModel):
     default_theme: dict | None = None
     default_welcome_message: str | None = None
     default_offline_message: str | None = None
+    max_publishing_accounts: int | None = None
 
 
 @router.get("/admin/templates")
@@ -161,6 +162,7 @@ async def create_template(
         default_theme=data.default_theme,
         default_welcome_message=data.default_welcome_message,
         default_offline_message=data.default_offline_message,
+        max_publishing_accounts=data.max_publishing_accounts or 0,
     )
     db.add(t)
     await db.flush()

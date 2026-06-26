@@ -126,6 +126,17 @@ async def list_provider_project_builds(
     return provider.service_factory().list_builds(slug)
 
 
+@router.get("/providers/{provider_key}/projects/{slug}/build-progress")
+async def get_provider_project_build_progress(
+    provider_key: str,
+    slug: str,
+    current_user: User = Depends(require_permission(Permission.DEVBRIDGE_READ)),
+):
+    """Latest build status with log tails — for DevBridge live progress polling."""
+    provider = get_devbridge_provider(provider_key)
+    return provider.service_factory().get_build_progress(slug)
+
+
 @router.get("/providers/{provider_key}/projects/{slug}/releases")
 async def list_provider_project_releases(
     provider_key: str,

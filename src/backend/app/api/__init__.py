@@ -22,6 +22,7 @@ from app.api.group import router as group_router
 from app.api.gamecenter_bridge import router as gamecenter_bridge_router
 from app.api.devbridge import router as devbridge_router
 from app.api.devbridge_settings import router as devbridge_settings_router
+from app.api.publish import router as publish_router
 
 from app.core.config import settings
 
@@ -55,6 +56,7 @@ api_router.include_router(group_router, prefix="/groups", tags=["Groups"])
 api_router.include_router(devbridge_router, prefix="/devbridge", tags=["DevBridge"])
 api_router.include_router(devbridge_settings_router, prefix="/devbridge/admin", tags=["DevBridge Settings"])
 api_router.include_router(gamecenter_bridge_router, prefix="/gamecenter", tags=["GameCenter"])
+api_router.include_router(publish_router, prefix="/publish", tags=["Publish"])
 api_router.include_router(health_router, prefix="/health", tags=["Health"])
 api_router.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])
 api_router.include_router(wechat_public_router, prefix="/wechat", tags=["WeChat"])

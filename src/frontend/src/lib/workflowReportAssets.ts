@@ -1,6 +1,6 @@
 import { resolveUploadUrl } from '@/lib/mediaUrl'
 
-export type ReportArtifactFormat = 'png' | 'xlsx' | 'docx' | 'pptx' | 'other'
+export type ReportArtifactFormat = 'png' | 'xlsx' | 'docx' | 'pptx' | 'md' | 'other'
 
 export interface WorkflowReportArtifact {
   format: ReportArtifactFormat
@@ -14,6 +14,7 @@ const FORMAT_LABELS: Record<ReportArtifactFormat, string> = {
   xlsx: 'Excel',
   docx: 'Word',
   pptx: 'PPT',
+  md: 'Markdown',
   other: 'File',
 }
 
@@ -27,6 +28,7 @@ function inferFormat(filename: string, fmt?: string): ReportArtifactFormat {
   if (f.includes('xlsx') || f.endsWith('.xlsx')) return 'xlsx'
   if (f.includes('docx') || f.endsWith('.docx')) return 'docx'
   if (f.includes('pptx') || f.endsWith('.pptx')) return 'pptx'
+  if (f.endsWith('.md') || f === 'md') return 'md'
   return 'other'
 }
 
@@ -180,7 +182,7 @@ export function extractWorkflowReportArtifacts(
     }
   }
 
-  const order: ReportArtifactFormat[] = ['xlsx', 'docx', 'pptx', 'png', 'other']
+  const order: ReportArtifactFormat[] = ['md', 'xlsx', 'docx', 'pptx', 'png', 'other']
   return items
     .filter((a) => a.format !== 'png')
     .sort((a, b) => order.indexOf(a.format) - order.indexOf(b.format))

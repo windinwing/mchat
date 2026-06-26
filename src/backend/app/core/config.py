@@ -132,7 +132,10 @@ class Settings(BaseSettings):
 
     # Rate limiting
     rate_limit_enabled: bool = True
-    rate_limit_requests: int = 60
+    # Raised from 60→300: a single page load fires 10-15 XHRs, so 60/min trips
+    # almost immediately with normal use. 300/min (5/s) is generous for real
+    # users while still blocking brute-force floods.
+    rate_limit_requests: int = 300
     rate_limit_period: int = 60
     login_rate_limit: int = 5
     login_rate_limit_period: int = 60
@@ -161,6 +164,7 @@ class Settings(BaseSettings):
     gamecenter_build_queue_enabled: bool = True
     gamecenter_build_worker_pool_size: int = 5
     gamecenter_auto_build_after_patch: bool = False
+    gamecenter_watch_build_in_chat: bool = True
     gamecenter_build_timeout_seconds: int = 1800
     gamecenter_release_keep_builds: int = 10
     gamecenter_publish_enabled: bool = False
@@ -195,6 +199,11 @@ class Settings(BaseSettings):
     workspace_sidecar_recycle_enabled: bool = False
     # Optional legacy Cloud studio root ({root}/{user_id}/{channel_id}); empty = unified layout
     workspace_legacy_studio_dir: str = ""
+
+    # Skill execution hardening: default per-skill timeout when a node omits
+    # timeout_seconds. 0 = no global ceiling (default; download/fetch skills may
+    # run long). Set >0 to enforce a floor on all skills.
+    skill_default_timeout_seconds: int = 0
 
     # File uploads
     upload_dir: str = "../../uploads"

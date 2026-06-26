@@ -12,6 +12,7 @@ from app.core.security import (
     create_access_token,
     get_password_hash,
     verify_password,
+    verify_password_async,
 )
 from app.models.user import User
 from app.schemas.auth import TokenResponse, UserResponse
@@ -57,7 +58,7 @@ class AuthService:
                 detail="Invalid username or password",
             )
 
-        if not verify_password(password, user.password_hash):
+        if not await verify_password_async(password, user.password_hash):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",

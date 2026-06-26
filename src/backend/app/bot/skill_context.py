@@ -82,6 +82,42 @@ def _ids_from_config(value: list[str] | None) -> list[str] | None:
     return cleaned
 
 
+async def _resolve_allowed_names(db: AsyncSession, allowed_ids: list[str]) -> set[str]:
+    """把渠道绑定的 skill_ids（可能是别的用户注册的副本 id）解析成 skill name 集合。
+
+    解决 reload_skills 给每个用户都注册 skill 副本（同名不同 id）导致：
+    渠道 skill_ids 绑定的 id 属于用户 A，但当前对话用户 B 的 skill 副本 id 不同，
+    按 id 匹配会全部落空。这里跨用户查出这些 id 对应的 name，回退按 name 匹配。
+    """
+    if not allowed_ids:
+        return set()
+    try:
+        from app.models.skill import Skill
+        rows = (await db.execute(
+            select(Skill.name).where(Skill.id.in_(allowed_ids))
+        )).scalars().all()
+        return set(rows)
+    except Exception:
+        return set()
+
+
+def _filter_by_ids_or_names(
+    skills: list, allowed_ids: list[str], allowed_names: set[str]
+) -> list:
+    """先按 id 匹配；若 id 一个都没匹配上（说明是别的用户的副本 id），
+    回退到按 name 匹配 allowed_names。"""
+    if not allowed_ids:
+        return []
+    allowed_set = set(allowed_ids)
+    matched_by_id = [s for s in skills if str(s.id) in allowed_set]
+    if matched_by_id:
+        return matched_by_id
+    # id 全部落空 → 按名字回退（应对同名 skill 多副本的场景）
+    if allowed_names:
+        return [s for s in skills if s.name in allowed_names]
+    return matched_by_id
+
+
 async def load_skills_for_chat(
     db: AsyncSession,
     user_id: str,
@@ -117,8 +153,8 @@ async def load_skills_for_chat(
     if end_user is not None and end_user.role != "admin":
         allowed = getattr(end_user, "skill_ids", None)
         if allowed is not None:
-            allowed_set = set(allowed)
-            all_skills = [s for s in all_skills if s.id in allowed_set]
+            allowed_names = await _resolve_allowed_names(db, allowed)
+            all_skills = _filter_by_ids_or_names(all_skills, allowed, allowed_names)
 
     allowed_ids = None
     if skill_ids_override is not None:
@@ -132,8 +168,8 @@ async def load_skills_for_chat(
         if len(allowed_ids) == 0:
             all_skills = []
         else:
-            allowed_set = set(allowed_ids)
-            all_skills = [s for s in all_skills if s.id in allowed_set]
+            allowed_names = await _resolve_allowed_names(db, allowed_ids)
+            all_skills = _filter_by_ids_or_names(all_skills, allowed_ids, allowed_names)
 
     if group_id:
         group_row = await db.get(Group, group_id)
@@ -469,6 +505,7 @@ _GAMECENTER_DEV_HINT = (
     "a change id and 已写入服务器. If the tool returns 未写入/unchanged/old_text not found, "
     "the file was NOT modified — read the file and fix the patch.\n"
     "When the user asks 编译进度/发布进度/构建状态/试玩是否更新, call get_gamecenter_build_progress(slug) "
+    "or rely on chat auto-tracking after patch/build (progress lines stream until built/failed).\n"
     "and compare 源码版本号 vs 线上试玩包版本号 before claiming success.\n"
     "File paths: relative to Cocos project root, e.g. `assets/scripts/ui/UIMain.ts` — no slug prefix.\n"
     "Writable roots: assets/, settings/, packages/, src/, extensions/.\n"

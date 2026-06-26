@@ -116,6 +116,20 @@ sync_skill_dir gamecenter-dev-agent
 sync_skill_dir git-commit-writer
 sync_skill_dir code-reviewer
 sync_skill_dir wheelchair-advisor
+sync_skill_dir cushion-advisor
+sync_skill_dir shower-chair-advisor
+sync_skill_dir shanghai-fuju-assistant
+# Publish system skills (content auto-distribution)
+sync_skill_dir web-fetch
+sync_skill_dir content-writer
+sync_skill_dir publish-content
+sync_skill_dir read-uploads
+sync_skill_dir list-accounts
+sync_skill_dir save-to-kb
+sync_skill_dir daily-summary
+sync_skill_dir multi-content-writer
+sync_skill_dir generate-video
+sync_skill_dir generate-image
 for patent_dir in "$PROJECT_DIR"/skills/patent-*; do
   [ -d "$patent_dir" ] || continue
   sync_skill_dir "$(basename "$patent_dir")"
@@ -138,6 +152,19 @@ echo "==> Remote setup (pip, db migrate, restart Cloud services)"
 ssh "$REMOTE" "chmod +x ${REMOTE_DIR}/ops/deploy/remote-setup-cloud.sh && bash ${REMOTE_DIR}/ops/deploy/remote-setup-cloud.sh"
 
 echo "==> Fix frontend dist permissions again (after Docker restart)"
+
+# Sync static frontend assets to the edge nginx host (8.12) so it can serve
+# them locally instead of proxying back to 8.15 (72ms → ~2ms per file).
+# The edge nginx reads from /opt/xiaoxiao/mchat-static/ directly.
+STATIC_EDGE_HOST="${MCHAT_STATIC_EDGE:-xiaoxiao@10.98.8.12}"
+STATIC_EDGE_PORT="${MCHAT_STATIC_EDGE_PORT:-5566}"
+STATIC_EDGE_DIR="${MCHAT_STATIC_EDGE_DIR:-/opt/xiaoxiao/mchat-static}"
+if ssh -p "$STATIC_EDGE_PORT" -o ConnectTimeout=5 "$STATIC_EDGE_HOST" "test -d '$STATIC_EDGE_DIR'" 2>/dev/null; then
+  echo "==> Sync frontend dist to edge nginx ($STATIC_EDGE_HOST)"
+  ssh "$REMOTE" "rsync -az --delete -e 'ssh -p $STATIC_EDGE_PORT' $REMOTE_DIR/src/frontend/dist/ $STATIC_EDGE_HOST:$STATIC_EDGE_DIR/" 2>/dev/null \
+    && echo "    Edge static assets synced." \
+    || echo "    ⚠️ Edge sync skipped (non-fatal)."
+fi
 ssh "$REMOTE" "chmod -R a+rX ${REMOTE_DIR}/src/frontend/dist ${REMOTE_DIR}/src/frontend/public 2>/dev/null || true"
 
 echo ""

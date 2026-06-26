@@ -73,6 +73,11 @@ class CustomerConfig(Base):
     subscription_ends_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Publishing add-on quota copied from the ChannelTemplate at provisioning.
+    # 0 = no publishing access. Checked by ensure_can_manage_publishing_accounts.
+    max_publishing_accounts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
     active_order_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, index=True
     )

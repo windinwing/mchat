@@ -20,6 +20,7 @@ class GamecenterBridgeSettings(BaseModel):
     data_root: str = ""
     build_command: str = ""
     auto_build_after_patch: bool | None = None
+    watch_build_in_chat: bool | None = None
     build_timeout_seconds: int | None = None
     cocos_creator_bin: str = ""
     playables_root: str = ""
@@ -132,6 +133,10 @@ def resolved_gamecenter_settings() -> dict[str, Any]:
         "auto_build_after_patch": _pick_bool(
             admin.auto_build_after_patch,
             bool(getattr(settings, "gamecenter_auto_build_after_patch", False)),
+        ),
+        "watch_build_in_chat": _pick_bool(
+            admin.watch_build_in_chat,
+            bool(getattr(settings, "gamecenter_watch_build_in_chat", True)),
         ),
         "build_timeout_seconds": _pick_int(
             admin.build_timeout_seconds,

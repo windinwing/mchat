@@ -38,20 +38,20 @@ class SkillWorkflow(Base):
         "SkillWorkflowStep",
         back_populates="workflow",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="select",
     )
     runs = relationship(
         "SkillWorkflowRun",
         back_populates="workflow",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="select",
     )
-    schedules = relationship("SkillSchedule", back_populates="workflow", lazy="selectin")
+    schedules = relationship("SkillSchedule", back_populates="workflow", lazy="select")
     channel_bindings = relationship(
         "ChannelWorkflowBinding",
         back_populates="workflow",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="select",
     )
 
 
@@ -121,13 +121,13 @@ class SkillWorkflowRun(Base):
         "SkillWorkflowStepRun",
         back_populates="workflow_run",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="select",
     )
     approvals = relationship(
         "SkillWorkflowApproval",
         back_populates="workflow_run",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="select",
     )
 
 

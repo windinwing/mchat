@@ -50,7 +50,9 @@ export function TemplatesPage() {
           const Icon = iconMap[tmpl.icon || ''] || MessageSquare
           const price = tmpl.price_monthly_cents > 0
             ? `¥${(tmpl.price_monthly_cents / 100).toFixed(0)}${t('portal.monthly')}`
-            : t('portal.planFree')
+            : tmpl.price_yearly_cents > 0
+              ? `¥${(tmpl.price_yearly_cents / 100).toFixed(0)}${t('portal.yearly', '/年')}`
+              : t('portal.planFree')
           const trial = tmpl.trial_days > 0
             ? t('portal.trialDays', { days: tmpl.trial_days })
             : t('portal.noTrial')

@@ -213,6 +213,21 @@ tail -50  /opt/xiaoxiao/mchat/data/devbridge/gamecenter/$SLUG/builds/$BUILD_ID/s
 
 对 Agent 说「查一下 xxx 编译进度」，或工具：`get_gamecenter_build_progress(slug)`。
 
+**终端快速查看（无需等 Agent 回复）：**
+
+```bash
+cd /Users/xiaoxiao/dev/mchat
+./ops/scripts/gamecenter-build-progress.sh mmwfk              # 看一次
+./ops/scripts/gamecenter-build-progress.sh mmwfk --watch    # 每 3 秒刷新，直到 built/failed
+./ops/scripts/gamecenter-build-progress.sh 10.98.8.15 mmwfk --watch 5
+```
+
+**DevBridge 页面**：打开 [开发桥接](https://mchat.9235.net) → 选项目 → 「编译进度」卡片会每 3 秒自动刷新（`queued` / `running` 时）。
+
+**聊天内自动跟踪**：通过 mchat 改代码并触发编译后，同一条回复会**持续刷新进度**直到编译完成（patch/build 工具返回 `queued` 时自动开启，每 3 秒一行，完成后显示试玩链接）。
+
+**REST API**（需登录）：`GET /api/devbridge/providers/gamecenter/projects/{slug}/build-progress`
+
 ---
 
 ## 6. 杀进程 / 停任务 / 清队列

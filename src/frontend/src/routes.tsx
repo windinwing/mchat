@@ -29,6 +29,9 @@ const AgentsPage = lazyNamed(() => import('./pages/AgentsPage'), 'AgentsPage')
 const CustomerAgentsPage = lazyNamed(() => import('./pages/CustomerAgentsPage'), 'CustomerAgentsPage')
 const SettingsPage = lazyNamed(() => import('./pages/SettingsPage'), 'SettingsPage')
 const ChannelsPage = lazyNamed(() => import('./pages/ChannelsPage'), 'ChannelsPage')
+const PublishingAccountsPage = lazyNamed(() => import('./pages/PublishingAccountsPage'), 'PublishingAccountsPage')
+const PortalSendRecords = lazyNamed(() => import('./pages/portal/SendRecordsPage'), 'SendRecordsPage')
+const AdminSendRecords = lazyNamed(() => import('./pages/SendRecordsAdminPage'), 'SendRecordsAdminPage')
 const ChatHomePage = lazyNamed(() => import('./pages/ChatHomePage'), 'ChatHomePage')
 const ChatPage = lazyNamed(() => import('./pages/ChatPage'), 'ChatPage')
 const WidgetDemo = lazyNamed(() => import('./pages/WidgetDemo'), 'WidgetDemo')
@@ -117,6 +120,8 @@ export function CoreRoutes() {
         <Route path="/admin/customer-agents" element={<AdminLayout><PageSuspense><CustomerAgentsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/settings" element={<AdminLayout><PageSuspense><SettingsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/channels" element={<AdminLayout><PageSuspense><ChannelsPage /></PageSuspense></AdminLayout>} />
+        <Route path="/admin/publishing-accounts" element={<AdminLayout><PageSuspense><PublishingAccountsPage /></PageSuspense></AdminLayout>} />
+        <Route path="/admin/send-records" element={<AdminLayout><PageSuspense><AdminSendRecords /></PageSuspense></AdminLayout>} />
         <Route path="/admin/roles" element={<AdminLayout><PageSuspense><RolesPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/groups" element={<AdminLayout><PageSuspense><GroupsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/group-memory" element={<AdminLayout><PageSuspense><GroupMemoryPage /></PageSuspense></AdminLayout>} />
@@ -152,6 +157,10 @@ export function PortalRoutes() {
       <Route path="/portal/templates/:id" element={<UserLayout><PageSuspense><PortalTemplateDetail /></PageSuspense></UserLayout>} />
       <Route path="/portal/channels" element={<UserLayout><PageSuspense><PortalMyChannels /></PageSuspense></UserLayout>} />
       <Route path="/portal/channels/:id" element={<UserLayout><PageSuspense><PortalChannelDetail /></PageSuspense></UserLayout>} />
+      <Route path="/portal/publishing-accounts" element={<UserLayout><PageSuspense><PublishingAccountsPage /></PageSuspense></UserLayout>} />
+      <Route path="/portal/send-records" element={<UserLayout><PageSuspense><PortalSendRecords /></PageSuspense></UserLayout>} />
+      <Route path="/portal/workflows" element={<UserLayout><PageSuspense><WorkflowsPage /></PageSuspense></UserLayout>} />
+      <Route path="/portal/workflow-center" element={<UserLayout><PageSuspense><WorkflowCenterPage /></PageSuspense></UserLayout>} />
     </Routes>
   )
 }
