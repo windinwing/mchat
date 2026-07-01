@@ -69,6 +69,10 @@ class EmbeddingService:
     async def embed_query(self, text: str) -> list[float]:
         return await self._embed(text)
 
+    #: Cap concurrent embedding requests per document so a large upload does
+    #: not fan out hundreds of simultaneous calls to the embedding backend.
+    _CONCURRENCY = 8
+
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
@@ -76,9 +80,19 @@ class EmbeddingService:
             from app.knowledge.local_embedder import embed_texts
 
             return await embed_texts(self.model, texts)
-        if self.provider == "ollama":
-            return [await self._embed_ollama(t) for t in texts]
-        return [await self._embed(t) for t in texts]
+
+        # Ollama / OpenAI-compatible backends embed one text per request. Issue
+        # them concurrently (bounded) instead of serially so a document with
+        # many chunks does not take N round-trips back to back.
+        semaphore = asyncio.Semaphore(self._CONCURRENCY)
+
+        async def _one(text: str) -> list[float]:
+            async with semaphore:
+                if self.provider == "ollama":
+                    return await self._embed_ollama(text)
+                return await self._embed(text)
+
+        return await asyncio.gather(*[_one(t) for t in texts])
 
     async def _embed(self, text: str) -> list[float]:
         if self.provider == "local":

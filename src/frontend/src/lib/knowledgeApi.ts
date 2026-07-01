@@ -54,6 +54,18 @@ export interface KnowledgeDocument {
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'indexed'
   fileSize: number
   createdAt: string
+  folderId?: string | null
+}
+
+export interface DocumentFolder {
+  id: string
+  knowledgeBaseId: string
+  parentId?: string | null
+  name: string
+  sortOrder: number
+  documentCount: number
+  createdAt: string
+  updatedAt: string
 }
 
 const defaultRag: KnowledgeBaseRagSettings = {
@@ -223,7 +235,49 @@ export function mapDocument(raw: Record<string, unknown>): KnowledgeDocument {
     status: status === 'indexed' ? 'completed' : (status as KnowledgeDocument['status']),
     fileSize: Number(raw.file_size ?? raw.fileSize ?? 0),
     createdAt: String(raw.created_at ?? raw.createdAt ?? ''),
+    folderId: raw.folder_id != null ? String(raw.folder_id) : null,
   }
+}
+
+export function mapFolder(raw: Record<string, unknown>): DocumentFolder {
+  return {
+    id: String(raw.id),
+    knowledgeBaseId: String(raw.knowledge_base_id ?? raw.knowledgeBaseId ?? ''),
+    parentId: raw.parent_id != null ? String(raw.parent_id) : null,
+    name: String(raw.name ?? ''),
+    sortOrder: Number(raw.sort_order ?? 0),
+    documentCount: Number(raw.document_count ?? 0),
+    createdAt: String(raw.created_at ?? raw.createdAt ?? ''),
+    updatedAt: String(raw.updated_at ?? raw.updatedAt ?? ''),
+  }
+}
+
+/**
+ * Build the breadcrumb path (root → ... → folder) for a given folder id.
+ * Returns [] for the root (null id). Guards against cycles.
+ */
+export function getFolderPath(
+  folders: DocumentFolder[],
+  folderId: string | null,
+): DocumentFolder[] {
+  if (!folderId) return []
+  const byId = new Map(folders.map((f) => [f.id, f]))
+  const path: DocumentFolder[] = []
+  let cur: string | null = folderId
+  const seen = new Set<string>()
+  while (cur && !seen.has(cur)) {
+    seen.add(cur)
+    const node = byId.get(cur)
+    if (!node) break
+    path.unshift(node)
+    cur = node.parentId ?? null
+  }
+  return path
+}
+
+/** Count documents whose folderId is null (i.e. at the kb root). */
+export function countRootDocuments(documents: KnowledgeDocument[]): number {
+  return documents.filter((d) => !d.folderId).length
 }
 
 export function uiStatusLabel(status: string): string {

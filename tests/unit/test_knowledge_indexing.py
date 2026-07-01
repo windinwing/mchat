@@ -4,12 +4,17 @@ import io
 from pathlib import Path
 
 import pytest
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 from app.knowledge.chunking import ChunkConfig, chunk_text
 from app.knowledge.importer import DocumentImporter
 from app.models.knowledge import Document, KnowledgeBase
-from app.schemas.knowledge import DocumentCreate
+from app.schemas.knowledge import (
+    DocumentCreate,
+    DocumentMoveRequest,
+    FolderCreate,
+    FolderUpdate,
+)
 from app.services.knowledge_service import KnowledgeService
 
 
@@ -117,14 +122,14 @@ async def test_create_document_passes_kb_user_id_to_indexer(db_session, monkeypa
     db_session.add(kb)
     await db_session.flush()
 
-    captured: dict[str, object] = {}
+    enqueued: list[str] = []
 
-    async def fake_index_document(self, doc: Document, *, user_id: str) -> int:
-        captured["doc_id"] = doc.id
-        captured["user_id"] = user_id
-        return 2
+    def fake_enqueue(doc_id: str) -> None:
+        enqueued.append(doc_id)
 
-    monkeypatch.setattr(DocumentImporter, "index_document", fake_index_document)
+    monkeypatch.setattr(
+        "app.knowledge.index_runner.enqueue_index_document", fake_enqueue
+    )
 
     service = KnowledgeService(db_session)
     response = await service.create_document(
@@ -133,10 +138,10 @@ async def test_create_document_passes_kb_user_id_to_indexer(db_session, monkeypa
         data=DocumentCreate(title="Guide", content="Hello world"),
     )
 
-    assert response.status == "indexed"
-    assert response.chunk_count == 2
-    assert captured["user_id"] == kb.user_id
-    assert captured["doc_id"] == response.id
+    # Indexing is now deferred: the document is created in "processing" state
+    # and handed to the background runner.
+    assert response.status == "processing"
+    assert enqueued == [response.id]
 
 
 @pytest.mark.asyncio
@@ -145,70 +150,197 @@ async def test_import_file_and_url_pass_kb_user_id(db_session, monkeypatch, tmp_
     db_session.add(kb)
     await db_session.flush()
 
-    file_call: dict[str, object] = {}
-    url_call: dict[str, object] = {}
+    enqueued: list[str] = []
 
-    async def fake_import_file(
-        self,
-        kb_id: str,
-        user_id: str,
-        file_path: Path,
-        original_filename: str,
-        kb: KnowledgeBase | None = None,
-    ) -> Document:
-        file_call.update(
-            {
-                "kb_id": kb_id,
-                "user_id": user_id,
-                "file_path": file_path,
-                "original_filename": original_filename,
-            }
-        )
-        return Document(
-            knowledge_base_id=kb_id,
-            title=original_filename,
-            content="file body",
-            source="txt",
-            status="indexed",
-            chunk_count=1,
-        )
+    def fake_enqueue(doc_id: str) -> None:
+        enqueued.append(doc_id)
 
-    async def fake_import_url(
-        self,
-        kb_id: str,
-        user_id: str,
-        url: str,
-        kb: KnowledgeBase | None = None,
-    ) -> Document:
-        url_call.update({"kb_id": kb_id, "user_id": user_id, "url": url})
-        return Document(
-            knowledge_base_id=kb_id,
-            title=url,
-            content="url body",
-            source="url",
-            source_url=url,
-            status="indexed",
-            chunk_count=1,
-        )
+    monkeypatch.setattr(
+        "app.knowledge.index_runner.enqueue_index_document", fake_enqueue
+    )
+    # import_url fetches the URL inline; stub httpx so no network is used.
+    class _FakeResponse:
+        text = "url body"
 
-    monkeypatch.setattr(DocumentImporter, "import_file", fake_import_file)
-    monkeypatch.setattr(DocumentImporter, "import_url", fake_import_url)
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url):
+            return _FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", _FakeClient)
 
     service = KnowledgeService(db_session)
     upload = UploadFile(filename="notes.txt", file=io.BytesIO(b"hello"))
 
-    await service.import_file(kb_id=kb.id, user_id=kb.user_id, file=upload)
-    await service.import_url(
+    file_item = await service.import_file(kb_id=kb.id, user_id=kb.user_id, file=upload)
+    url_resp = await service.import_url(
         kb_id=kb.id,
         user_id=kb.user_id,
         url="https://example.com/help",
     )
 
-    assert file_call["kb_id"] == kb.id
-    assert file_call["user_id"] == kb.user_id
-    assert file_call["original_filename"] == "notes.txt"
-    assert url_call == {
-        "kb_id": kb.id,
-        "user_id": kb.user_id,
-        "url": "https://example.com/help",
-    }
+    # Both return immediately in "processing" and are enqueued for background indexing.
+    assert file_item.status == "processing"
+    assert file_item.title == "notes.txt"
+    assert url_resp.status == "processing"
+    assert url_resp.source_url == "https://example.com/help"
+    assert len(enqueued) == 2
+
+
+@pytest.mark.asyncio
+async def test_folder_crud_and_nesting(db_session):
+    kb = KnowledgeBase(user_id="owner-fold", name="KB")
+    db_session.add(kb)
+    await db_session.flush()
+
+    service = KnowledgeService(db_session)
+    parent = await service.create_folder(
+        kb_id=kb.id, user_id=kb.user_id, data=FolderCreate(name="产品文档")
+    )
+    child = await service.create_folder(
+        kb_id=kb.id,
+        user_id=kb.user_id,
+        data=FolderCreate(name="需求", parent_id=parent.id),
+    )
+
+    assert parent.parent_id is None
+    assert child.parent_id == parent.id
+
+    folders = await service.list_folders(kb_id=kb.id, user_id=kb.user_id)
+    names = {f.name for f in folders}
+    assert {"产品文档", "需求"} <= names
+
+    # Rename
+    renamed = await service.update_folder(
+        folder_id=child.id,
+        user_id=kb.user_id,
+        data=FolderUpdate(name="需求文档"),
+    )
+    assert renamed.name == "需求文档"
+
+
+@pytest.mark.asyncio
+async def test_folder_cycle_prevention(db_session):
+    kb = KnowledgeBase(user_id="owner-cycle", name="KB")
+    db_session.add(kb)
+    await db_session.flush()
+
+    service = KnowledgeService(db_session)
+    a = await service.create_folder(kb_id=kb.id, user_id=kb.user_id, data=FolderCreate(name="A"))
+    b = await service.create_folder(
+        kb_id=kb.id, user_id=kb.user_id, data=FolderCreate(name="B", parent_id=a.id)
+    )
+    # Moving A into its own descendant B must be rejected.
+    with pytest.raises(HTTPException) as exc:
+        await service.update_folder(
+            folder_id=a.id, user_id=kb.user_id, data=FolderUpdate(parent_id=b.id)
+        )
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_import_file_into_folder_and_move(db_session, monkeypatch, tmp_path):
+    kb = KnowledgeBase(user_id="owner-imp", name="KB")
+    db_session.add(kb)
+    await db_session.flush()
+
+    def fake_enqueue(doc_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "app.knowledge.index_runner.enqueue_index_document", fake_enqueue
+    )
+
+    service = KnowledgeService(db_session)
+    folder = await service.create_folder(
+        kb_id=kb.id, user_id=kb.user_id, data=FolderCreate(name="Docs")
+    )
+    upload = UploadFile(filename="notes.txt", file=io.BytesIO(b"hello"))
+    item = await service.import_file(
+        kb_id=kb.id, user_id=kb.user_id, file=upload, folder_id=folder.id
+    )
+    assert item.folder_id == folder.id
+
+    # Move it back to the root.
+    moved = await service.move_document(
+        doc_id=item.id,
+        user_id=kb.user_id,
+        data=DocumentMoveRequest(folder_id=None),
+    )
+    assert moved.folder_id is None
+
+
+@pytest.mark.asyncio
+async def test_delete_folder_cleans_vectors_and_documents(db_session, monkeypatch):
+    kb = KnowledgeBase(user_id="owner-del", name="KB")
+    db_session.add(kb)
+    await db_session.flush()
+
+    deleted_vectors: list[str] = []
+    deleted_chunks: list[str] = []
+
+    monkeypatch.setattr(
+        "app.services.knowledge_service.milvus_client._connected", True
+    )
+
+    async def fake_delete_vectors(doc_id: str):
+        deleted_vectors.append(doc_id)
+
+    monkeypatch.setattr(
+        "app.services.knowledge_service.milvus_client.delete_vectors",
+        fake_delete_vectors,
+    )
+
+    async def fake_delete_chunks(session, doc_id: str):
+        deleted_chunks.append(doc_id)
+
+    monkeypatch.setattr(
+        "app.services.knowledge_service.delete_document_chunks", fake_delete_chunks
+    )
+
+    service = KnowledgeService(db_session)
+    parent = await service.create_folder(
+        kb_id=kb.id, user_id=kb.user_id, data=FolderCreate(name="P")
+    )
+    child = await service.create_folder(
+        kb_id=kb.id, user_id=kb.user_id, data=FolderCreate(name="C", parent_id=parent.id)
+    )
+    # A document in the child folder (nested).
+    doc_child = Document(
+        knowledge_base_id=kb.id,
+        folder_id=child.id,
+        title="nested",
+        content="nested content",
+        status="indexed",
+    )
+    # A document directly under parent.
+    doc_parent = Document(
+        knowledge_base_id=kb.id,
+        folder_id=parent.id,
+        title="parent doc",
+        content="parent content",
+        status="indexed",
+    )
+    db_session.add_all([doc_child, doc_parent])
+    await db_session.flush()
+
+    ok = await service.delete_folder(folder_id=parent.id, user_id=kb.user_id)
+    assert ok is True
+    # Both documents' vectors and chunks must be cleaned (recursively).
+    assert sorted(deleted_vectors) == sorted([doc_child.id, doc_parent.id])
+    assert sorted(deleted_chunks) == sorted([doc_child.id, doc_parent.id])
+
+    # Folder and its subtree are gone.
+    remaining = await service.list_folders(kb_id=kb.id, user_id=kb.user_id)
+    assert remaining == []

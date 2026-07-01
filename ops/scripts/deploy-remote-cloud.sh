@@ -113,12 +113,14 @@ sync_skill_dir mchat-ops
 sync_skill_dir mchat-notify
 sync_skill_dir dev-assistant
 sync_skill_dir gamecenter-dev-agent
+sync_skill_dir gamecenter-image-guide
 sync_skill_dir git-commit-writer
 sync_skill_dir code-reviewer
 sync_skill_dir wheelchair-advisor
 sync_skill_dir cushion-advisor
 sync_skill_dir shower-chair-advisor
 sync_skill_dir shanghai-fuju-assistant
+sync_skill_dir canho-assistant
 # Publish system skills (content auto-distribution)
 sync_skill_dir web-fetch
 sync_skill_dir content-writer

@@ -19,7 +19,11 @@ from app.models.user import User
 from app.schemas.knowledge import (
     DocumentCreate,
     DocumentListItem,
+    DocumentMoveRequest,
     DocumentResponse,
+    FolderCreate,
+    FolderResponse,
+    FolderUpdate,
     KnowledgeBaseCreate,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
@@ -230,13 +234,14 @@ async def delete_knowledge_base(
 @router.get("/bases/{kb_id}/documents", response_model=list[DocumentListItem])
 async def list_documents(
     kb_id: str,
+    folder_id: str | None = None,
     admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all documents in a knowledge base."""
+    """List all documents in a knowledge base, optionally filtered by folder."""
     service = KnowledgeService(db)
     return await service.list_documents(
-        kb_id=kb_id, user_id=admin.id
+        kb_id=kb_id, user_id=admin.id, folder_id=folder_id
     )
 
 
@@ -293,16 +298,18 @@ async def search_documents(
 async def import_file(
     kb_id: str,
     file: UploadFile,
+    folder_id: str | None = Form(None),
     admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Import a file into a knowledge base."""
+    """Import a file into a knowledge base, optionally into a folder."""
     service = KnowledgeService(db)
     try:
         doc = await service.import_file(
             kb_id=kb_id,
             user_id=admin.id,
             file=file,
+            folder_id=folder_id,
         )
         return doc
     except Exception as e:
@@ -333,3 +340,96 @@ async def import_url(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"URL import failed: {e}",
         )
+
+
+# ---- Folders ------------------------------------------------------------
+
+
+@router.get(
+    "/bases/{kb_id}/folders", response_model=list[FolderResponse]
+)
+async def list_folders(
+    kb_id: str,
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all folders in a knowledge base (flat; client builds the tree)."""
+    service = KnowledgeService(db)
+    return await service.list_folders(kb_id=kb_id, user_id=admin.id)
+
+
+@router.post(
+    "/bases/{kb_id}/folders",
+    response_model=FolderResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_folder(
+    kb_id: str,
+    request: FolderCreate,
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a folder (optionally nested under parent_id)."""
+    service = KnowledgeService(db)
+    return await service.create_folder(
+        kb_id=kb_id, user_id=admin.id, data=request
+    )
+
+
+@router.patch("/folders/{folder_id}", response_model=FolderResponse)
+async def update_folder(
+    folder_id: str,
+    request: FolderUpdate,
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rename a folder and/or move it under another parent."""
+    service = KnowledgeService(db)
+    folder = await service.update_folder(
+        folder_id=folder_id, user_id=admin.id, data=request
+    )
+    if folder is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Folder not found",
+        )
+    return folder
+
+
+@router.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_folder(
+    folder_id: str,
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a folder, its subfolders, and all documents inside."""
+    service = KnowledgeService(db)
+    success = await service.delete_folder(folder_id=folder_id, user_id=admin.id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Folder not found",
+        )
+    return None
+
+
+@router.patch(
+    "/documents/{doc_id}/move", response_model=DocumentListItem
+)
+async def move_document(
+    doc_id: str,
+    request: DocumentMoveRequest,
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Move a document into a folder (root when folder_id is null)."""
+    service = KnowledgeService(db)
+    doc = await service.move_document(
+        doc_id=doc_id, user_id=admin.id, data=request
+    )
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+    return doc

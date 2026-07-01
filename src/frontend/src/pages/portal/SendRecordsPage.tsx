@@ -180,15 +180,25 @@ export function SendRecordsPage() {
                       )}
                     </td>
                     <td className="py-2 pr-4 whitespace-nowrap">{PROVIDER_LABELS[r.provider] || r.provider}</td>
-                    <td className="py-2 pr-4 max-w-xs truncate" title={r.title || r.error_message || ''}>
-                      {r.success ? (r.title || r.content_preview || '-') : (
-                        <span className="text-red-500">{r.error_message || t('sendRecords.unknownError', '未知错误')}</span>
+                    <td className="py-2 pr-4 max-w-xs">
+                      {r.success ? (() => {
+                        const url = r.content_preview || r.remote_url || ''
+                        const absUrl = url.startsWith('http') ? url : (url.startsWith('/') ? `${window.location.origin}${url}` : '')
+                        if (absUrl && /\.(mp4|webm|mov)($|\?)/i.test(absUrl)) {
+                          return <div className="flex items-center gap-2"><video src={absUrl} className="h-12 w-16 object-cover rounded" /><span className="text-xs text-gray-400 truncate">{r.title || '视频'}</span></div>
+                        }
+                        if (absUrl && /\.(jpg|jpeg|png|gif|webp)($|\?)/i.test(absUrl)) {
+                          return <div className="flex items-center gap-2"><img src={absUrl} className="h-12 w-12 object-cover rounded" alt="" /><span className="text-xs text-gray-400 truncate">{r.title || '图片'}</span></div>
+                        }
+                        return <span className="truncate block" title={r.title || ''}>{r.title || r.content_preview || '-'}</span>
+                      })() : (
+                        <span className="text-red-500 text-xs">{r.error_message || t('sendRecords.unknownError', '未知错误')}</span>
                       )}
                     </td>
-                    <td className="py-2 pr-4 whitespace-nowrap text-gray-500">{r.sent_at ? formatDate(r.sent_at) : formatDate(r.created_at || '')}</td>
+                    <td className="py-2 pr-4 whitespace-nowrap text-gray-500 text-xs">{r.sent_at ? formatDate(r.sent_at) : formatDate(r.created_at || '')}</td>
                     <td className="py-2 pr-4">
                       {r.remote_url ? (
-                        <a href={r.remote_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline inline-flex items-center gap-1">
+                        <a href={r.remote_url.startsWith('http') ? r.remote_url : `${window.location.origin}${r.remote_url}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline inline-flex items-center gap-1 text-xs">
                           <ExternalLink className="w-3 h-3" /> {t('sendRecords.view', '查看')}
                         </a>
                       ) : '-'}

@@ -149,6 +149,7 @@ class DocumentListItem(BaseModel):
     """Document summary for list/upload responses (no full content)."""
     id: str
     knowledge_base_id: str
+    folder_id: str | None = None
     title: str
     source: str | None = None
     status: str
@@ -166,18 +167,51 @@ class DocumentCreate(BaseModel):
     content: str = Field(..., min_length=1)
     source: str | None = None
     source_url: str | None = None
+    folder_id: str | None = None
 
 
 class DocumentResponse(BaseModel):
     """Document response schema."""
     id: str
     knowledge_base_id: str
+    folder_id: str | None = None
     title: str
     content: str
     source: str | None = None
     source_url: str | None = None
     status: str
     chunk_count: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentMoveRequest(BaseModel):
+    """Request body for moving a document to a folder (root if null)."""
+    folder_id: str | None = None
+
+
+class FolderCreate(BaseModel):
+    """Request body for creating a folder."""
+    name: str = Field(..., min_length=1, max_length=200)
+    parent_id: str | None = None
+
+
+class FolderUpdate(BaseModel):
+    """Partial update for a folder (rename and/or move)."""
+    name: str | None = Field(None, min_length=1, max_length=200)
+    parent_id: str | None = None
+
+
+class FolderResponse(BaseModel):
+    """Folder response schema."""
+    id: str
+    knowledge_base_id: str
+    parent_id: str | None = None
+    name: str
+    sort_order: int = 0
+    document_count: int = 0
     created_at: datetime
     updated_at: datetime
 

@@ -97,6 +97,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await milvus_client.create_collection()
     await es_knowledge_client.connect()
 
+    # Start the background knowledge index runner and re-queue any documents
+    # left mid-index by a previous (crashed/restarted) process.
+    try:
+        from app.knowledge.index_runner import (
+            recover_stale_indexing,
+            start_index_runner,
+        )
+        start_index_runner()
+        await recover_stale_indexing()
+    except ImportError:
+        logger.warning("app.knowledge.index_runner not available, skipping index runner")
+
     logger.info("mchat backend server started successfully")
     yield
 
@@ -104,6 +116,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Shutting down mchat backend server...")
     from app.core.skills_pool import stop_skills_pool
     stop_skills_pool()
+    try:
+        from app.knowledge.index_runner import stop_index_runner
+        await stop_index_runner()
+    except ImportError:
+        pass
     await close_db()
     await milvus_client.close()
     await es_knowledge_client.close()
@@ -272,6 +289,20 @@ def create_app() -> FastAPI:
     from app.api.uploads import router as uploads_router
 
     app.include_router(uploads_router)
+
+    # Skill 生成物的对外静态访问（如 textbook-review 的 HTML 复习提纲）。
+    # 无签名、公开可访问，便于在浏览器/手机直接打开分享。
+    # nginx 加一条 location /skill_assets/ { proxy_pass http://backend:3001; } 即可对外。
+    # 目录：UPLOAD_DIR/skill_assets/，skill 把生成物写到这里。
+    try:
+        from fastapi.staticfiles import StaticFiles
+        from app.utils.upload_paths import resolve_upload_root as _resolve_assets_root
+        _assets_dir = _resolve_assets_root() / "skill_assets"
+        _assets_dir.mkdir(parents=True, exist_ok=True)
+        app.mount("/skill_assets", StaticFiles(directory=str(_assets_dir)), name="skill_assets")
+        logger.info("Skill assets served at /skill_assets/ from {}", _assets_dir)
+    except Exception as _e:
+        logger.warning("Failed to mount /skill_assets: {}", _e)
 
     # Include API routers
     from app.api import api_router

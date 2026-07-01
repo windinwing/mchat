@@ -5,7 +5,7 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.skill import Skill
 from app.models.embedding_model import EmbeddingModel
-from app.models.knowledge import Document, DocumentChunk, KnowledgeBase
+from app.models.knowledge import Document, DocumentChunk, DocumentFolder, KnowledgeBase
 from app.models.group import Group, GroupMember, GroupMemoryEntry, GroupMemoryRevision
 from app.models.customer import CustomerConfig, WebhookConfig
 from app.models.setting import Setting
@@ -40,6 +40,7 @@ __all__ = [
     "EmbeddingModel",
     "Document",
     "DocumentChunk",
+    "DocumentFolder",
     "CustomerConfig",
     "WebhookConfig",
     "Setting",

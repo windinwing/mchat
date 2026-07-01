@@ -557,6 +557,21 @@ def apply_schema_patches(conn: Connection) -> list[str]:
             )
             applied.append("groups.ai_config_id")
 
+    if "documents" in inspect(conn).get_table_names():
+        cols = _column_names(conn, "documents")
+        if "source_file_path" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE documents ADD COLUMN source_file_path VARCHAR(500) NULL"
+                )
+            )
+            applied.append("documents.source_file_path")
+        if "folder_id" not in cols:
+            conn.execute(
+                text("ALTER TABLE documents ADD COLUMN folder_id VARCHAR(36) NULL")
+            )
+            applied.append("documents.folder_id")
+
     if "skill_workflow_templates" in inspect(conn).get_table_names():
         cols = _column_names(conn, "skill_workflow_templates")
         tpl_patches = [

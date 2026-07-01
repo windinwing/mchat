@@ -199,7 +199,29 @@ class MilvusClient:
         chunks: list[str],
         embeddings: list[list[float]],
     ) -> int:
-        """Insert document chunks with their embeddings into Milvus."""
+        """Insert document chunks with their embeddings into Milvus.
+
+        Thin async wrapper around :meth:`insert_blocking`. Callers running in a
+        thread-pool context should call ``insert_blocking`` directly (via
+        ``asyncio.to_thread``) to avoid the event-loop overhead.
+        """
+        return self.insert_blocking(
+            document_id=document_id,
+            kb_id=kb_id,
+            user_id=user_id,
+            chunks=chunks,
+            embeddings=embeddings,
+        )
+
+    def insert_blocking(
+        self,
+        document_id: str,
+        kb_id: str,
+        user_id: str,
+        chunks: list[str],
+        embeddings: list[list[float]],
+    ) -> int:
+        """Synchronous insert; safe to run in a worker thread."""
         if not self._connected:
             return 0
 
@@ -217,7 +239,7 @@ class MilvusClient:
                 embeddings,
             ]
 
-            mr = collection.insert(data)
+            collection.insert(data)
             collection.flush()
             logger.info(
                 f"Inserted {len(chunks)} chunks for document {document_id}"
@@ -226,6 +248,7 @@ class MilvusClient:
         except Exception as e:
             logger.error(f"Failed to insert vectors: {e}")
             return 0
+
 
     async def search(
         self,
@@ -290,7 +313,14 @@ class MilvusClient:
             return []
 
     async def delete_vectors(self, document_id: str) -> bool:
-        """Delete all vectors for a document."""
+        """Delete all vectors for a document.
+
+        Thin async wrapper around :meth:`delete_blocking`.
+        """
+        return self.delete_blocking(document_id)
+
+    def delete_blocking(self, document_id: str) -> bool:
+        """Synchronous delete; safe to run in a worker thread."""
         if not self._connected:
             return False
 

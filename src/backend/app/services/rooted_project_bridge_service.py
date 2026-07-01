@@ -1013,7 +1013,51 @@ class RootedProjectBridgeService:
                 or source_version == bundle_version
             ),
             "is_active": status in {"queued", "running"},
+            "playable_check": self._ensure_playable_check(
+                slug, latest, source_version or None
+            ),
         }
+
+    def _ensure_playable_check(
+        self,
+        slug: str,
+        latest: dict | None,
+        source_version: str | None,
+    ) -> dict | None:
+        """Lazily probe the playable URL once after a successful build; cache it.
+
+        The result is written back into the build's ``metadata.json`` so the 3s
+        polling loop does NOT re-probe every tick. Returns ``None`` when there is
+        no built build to check (e.g. still queued/failed). Never raises.
+        """
+        if not latest or str(latest.get("status") or "") != "built":
+            return None
+        cached = latest.get("playable_check")
+        if isinstance(cached, dict):
+            return cached
+        play_urls = self._play_urls(slug)
+        if not play_urls:
+            return None
+        try:
+            from app.services.playable_verifier import verify_playable
+
+            result = verify_playable(play_urls, source_version=source_version)
+        except Exception as exc:  # defensive — probe must never break progress read
+            return {"ok": False, "detail": f"probe error: {exc}", "checked_at": ""}
+        payload = result.to_dict()
+        # Cache back into metadata.json (best-effort; read-only FS just skips it).
+        try:
+            build_id = str(latest.get("id") or "")
+            if build_id:
+                build_root = self._project_state_root(slug) / "builds" / build_id
+                meta_path = build_root / "metadata.json"
+                if meta_path.is_file():
+                    meta = json.loads(_read_text_safe(meta_path))
+                    meta["playable_check"] = payload
+                    self._write_build_metadata(build_root, meta)
+        except Exception:
+            pass
+        return payload
 
     def _playable_project_root(self, slug: str) -> Path:
         assert self.config.playables_root is not None
@@ -1385,4 +1429,67 @@ class RootedProjectBridgeService:
             "size_bytes": len(raw),
             "sha256": sha,
             "overwritten": target.exists() and overwrite,
+        }
+
+    # ── extracted asset manifest ──
+
+    def list_extracted_assets(self, slug: str, query: str = "") -> dict:
+        """List replaceable image groups from _extracted/<slug>/manifest_groups.csv.
+
+        Reads the restools extraction manifest to show available game images,
+        their source paths in assets/, types (image/atlas/anim), and suggested
+        replacement actions.
+        """
+        import csv as csv_module
+
+        safe_slug = _validate_slug(slug)
+        if self.config.sync_extracted_root is None:
+            raise HTTPException(status_code=503, detail="sync_extracted_root not configured")
+        extracted_dir = self.config.sync_extracted_root / safe_slug
+        manifest_path = extracted_dir / "manifest_groups.csv"
+        if not manifest_path.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail=f"No asset manifest for '{safe_slug}'. Run extraction in GameCenter UI (:5099) first.",
+            )
+
+        groups: list[dict] = []
+        with manifest_path.open(encoding="utf-8-sig", newline="") as f:
+            reader = csv_module.DictReader(f)
+            for row in reader:
+                sample_raw = row.get("sample_names") or ""
+                sample_names = [n for n in sample_raw.split("|") if n][:6]
+                output_dir = row.get("output_dir", "")
+                # Build preview URLs for first few sample images
+                preview_urls = [
+                    f"/api/devbridge/asset-preview/{safe_slug}/{output_dir}/{name}"
+                    for name in sample_names[:3]
+                    if output_dir and name
+                ]
+                groups.append({
+                    "group_id": row.get("group_id", ""),
+                    "source_type": row.get("source_type", ""),
+                    "source_image": row.get("source_image", ""),
+                    "suggested_action": row.get("suggested_action", ""),
+                    "file_count": int(row.get("file_count") or 0),
+                    "output_dir": output_dir,
+                    "sample_names": sample_names,
+                    "preview_urls": preview_urls,
+                    "original_plist": row.get("original_plist", ""),
+                })
+
+        if query:
+            q = query.lower()
+            groups = [
+                g for g in groups
+                if q in g["group_id"].lower()
+                or q in g["source_image"].lower()
+                or any(q in n.lower() for n in g["sample_names"])
+            ]
+
+        return {
+            "slug": safe_slug,
+            "total_groups": len(groups),
+            "extracted_dir": str(extracted_dir),
+            "groups": groups,
         }

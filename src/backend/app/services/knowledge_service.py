@@ -1,10 +1,7 @@
 """Knowledge service - business logic for knowledge management."""
 
-import tempfile
-from pathlib import Path
-
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import inspect as sa_inspect, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.knowledge.chunk_store import delete_document_chunks
@@ -16,12 +13,16 @@ from app.knowledge.rag import RagService
 from app.knowledge.rag_config import rag_settings_from_kb
 from app.core.config import settings as app_settings
 from app.models.group import GroupMember
-from app.models.knowledge import Document, KnowledgeBase
+from app.models.knowledge import Document, DocumentFolder, KnowledgeBase
 from app.services.storage_service import storage_service
 from app.schemas.knowledge import (
     DocumentCreate,
     DocumentListItem,
+    DocumentMoveRequest,
     DocumentResponse,
+    FolderCreate,
+    FolderResponse,
+    FolderUpdate,
     KnowledgeBaseCreate,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
@@ -124,6 +125,7 @@ def _doc_to_list_item(doc: Document) -> DocumentListItem:
     return DocumentListItem(
         id=doc.id,
         knowledge_base_id=doc.knowledge_base_id,
+        folder_id=doc.folder_id,
         title=doc.title,
         source=doc.source,
         status=doc.status,
@@ -131,6 +133,19 @@ def _doc_to_list_item(doc: Document) -> DocumentListItem:
         file_size=len(doc.content or ""),
         created_at=doc.created_at,
         updated_at=doc.updated_at,
+    )
+
+
+def _folder_to_response(folder: DocumentFolder) -> FolderResponse:
+    return FolderResponse(
+        id=folder.id,
+        knowledge_base_id=folder.knowledge_base_id,
+        parent_id=folder.parent_id,
+        name=folder.name,
+        sort_order=folder.sort_order,
+        document_count=len(folder.documents) if folder.documents is not None else 0,
+        created_at=folder.created_at,
+        updated_at=folder.updated_at,
     )
 
 
@@ -260,7 +275,7 @@ class KnowledgeService:
         return True
 
     async def list_documents(
-        self, kb_id: str, user_id: str
+        self, kb_id: str, user_id: str, folder_id: str | None = None
     ) -> list[DocumentListItem]:
         if await self._get_kb_row(kb_id, user_id) is None:
             raise HTTPException(
@@ -268,11 +283,10 @@ class KnowledgeService:
                 detail="Knowledge base not found",
             )
 
-        result = await self.db.execute(
-            select(Document)
-            .where(Document.knowledge_base_id == kb_id)
-            .order_by(Document.created_at.desc())
-        )
+        query = select(Document).where(Document.knowledge_base_id == kb_id)
+        if folder_id is not None:
+            query = query.where(Document.folder_id == folder_id)
+        result = await self.db.execute(query.order_by(Document.created_at.desc()))
         docs = result.scalars().all()
         return [_doc_to_list_item(d) for d in docs]
 
@@ -286,30 +300,26 @@ class KnowledgeService:
                 detail="Knowledge base not found",
             )
 
+        if data.folder_id:
+            await self._ensure_folder_in_kb(data.folder_id, kb_id, user_id, write=True)
+
         doc = Document(
             knowledge_base_id=kb_id,
+            folder_id=data.folder_id,
             title=data.title,
             content=data.content,
             source=data.source or "manual",
             source_url=data.source_url,
-            status="pending",
+            status="processing",
         )
         self.db.add(doc)
         await self.db.flush()
 
-        try:
-            importer = DocumentImporter(
-                rag_settings=rag_settings_from_kb(kb), db=self.db
-            )
-            chunk_count = await importer.index_document(doc, user_id=kb.user_id)
-            doc.status = "indexed"
-            doc.chunk_count = chunk_count
-            if chunk_count > 0:
-                await importer.mark_kb_indexed(kb)
-        except Exception:
-            doc.status = "failed"
+        # Indexing is deferred to the background runner so this request returns
+        # promptly instead of blocking on parse → chunk → embed.
+        from app.knowledge.index_runner import enqueue_index_document
 
-        await self.db.flush()
+        enqueue_index_document(doc.id)
         await self.db.refresh(doc)
         return DocumentResponse.model_validate(doc)
 
@@ -470,6 +480,157 @@ class KnowledgeService:
         await self.db.flush()
         return True
 
+    async def move_document(
+        self, doc_id: str, user_id: str, data: DocumentMoveRequest
+    ) -> DocumentListItem | None:
+        """Move a document into a folder (or to the kb root when folder_id is null)."""
+        result = await self.db.execute(select(Document).where(Document.id == doc_id))
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            return None
+        kb = await self._get_kb_row(doc.knowledge_base_id, user_id, write=True)
+        if kb is None:
+            return None
+        if data.folder_id:
+            await self._ensure_folder_in_kb(data.folder_id, doc.knowledge_base_id, user_id, write=True)
+        doc.folder_id = data.folder_id
+        await self.db.flush()
+        await self.db.refresh(doc)
+        return _doc_to_list_item(doc)
+
+    # ---- Folders -----------------------------------------------------------
+
+    async def _ensure_folder_in_kb(
+        self,
+        folder_id: str,
+        kb_id: str,
+        user_id: str,
+        *,
+        write: bool = False,
+    ) -> DocumentFolder:
+        """Validate the kb owns the folder (and the caller can access it)."""
+        if await self._get_kb_row(kb_id, user_id, write=write) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge base not found")
+        result = await self.db.execute(
+            select(DocumentFolder).where(
+                DocumentFolder.id == folder_id,
+                DocumentFolder.knowledge_base_id == kb_id,
+            )
+        )
+        folder = result.scalar_one_or_none()
+        if folder is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
+        return folder
+
+    async def _collect_subtree_ids(self, folder_id: str) -> list[str]:
+        """Return folder_id and all descendant folder ids (BFS)."""
+        ids: list[str] = [folder_id]
+        queue = [folder_id]
+        while queue:
+            result = await self.db.execute(
+                select(DocumentFolder.id).where(DocumentFolder.parent_id.in_(queue))
+            )
+            child_ids = [row[0] for row in result.all()]
+            ids.extend(child_ids)
+            queue = child_ids
+        return ids
+
+    async def list_folders(
+        self, kb_id: str, user_id: str
+    ) -> list[FolderResponse]:
+        if await self._get_kb_row(kb_id, user_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge base not found")
+        result = await self.db.execute(
+            select(DocumentFolder)
+            .where(DocumentFolder.knowledge_base_id == kb_id)
+            .order_by(DocumentFolder.sort_order, DocumentFolder.name)
+        )
+        folders = result.scalars().all()
+        return [_folder_to_response(f) for f in folders]
+
+    async def create_folder(
+        self, kb_id: str, user_id: str, data: FolderCreate
+    ) -> FolderResponse:
+        kb = await self._get_kb_row(kb_id, user_id, write=True)
+        if kb is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge base not found")
+        if data.parent_id:
+            await self._ensure_folder_in_kb(data.parent_id, kb_id, user_id, write=True)
+        folder = DocumentFolder(
+            knowledge_base_id=kb_id,
+            parent_id=data.parent_id,
+            name=data.name,
+        )
+        self.db.add(folder)
+        await self.db.flush()
+        await self.db.refresh(folder)
+        return _folder_to_response(folder)
+
+    async def update_folder(
+        self, folder_id: str, user_id: str, data: FolderUpdate
+    ) -> FolderResponse | None:
+        result = await self.db.execute(
+            select(DocumentFolder).where(DocumentFolder.id == folder_id)
+        )
+        folder = result.scalar_one_or_none()
+        if folder is None:
+            return None
+        if await self._get_kb_row(folder.knowledge_base_id, user_id, write=True) is None:
+            return None
+
+        if data.parent_id is not None:
+            # Moving the folder; "" -> root (parent_id None).
+            new_parent = data.parent_id or None
+            if new_parent == folder.id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A folder cannot be its own parent")
+            if new_parent:
+                await self._ensure_folder_in_kb(new_parent, folder.knowledge_base_id, user_id, write=True)
+                # Prevent moving a folder into itself or any of its descendants.
+                descendant_ids = await self._collect_subtree_ids(folder.id)
+                if new_parent in descendant_ids:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Cannot move a folder into its own descendant",
+                    )
+            folder.parent_id = new_parent
+        if data.name is not None:
+            folder.name = data.name
+        await self.db.flush()
+        await self.db.refresh(folder)
+        return _folder_to_response(folder)
+
+    async def delete_folder(
+        self, folder_id: str, user_id: str
+    ) -> bool:
+        """Delete a folder, its subfolders, and all documents inside.
+
+        Vectors and chunks are cleaned up manually because ORM cascade does
+        not touch Milvus.
+        """
+        result = await self.db.execute(
+            select(DocumentFolder).where(DocumentFolder.id == folder_id)
+        )
+        folder = result.scalar_one_or_none()
+        if folder is None:
+            return False
+        if await self._get_kb_row(folder.knowledge_base_id, user_id, write=True) is None:
+            return False
+
+        subtree_ids = await self._collect_subtree_ids(folder.id)
+        doc_result = await self.db.execute(
+            select(Document).where(Document.folder_id.in_(subtree_ids))
+        )
+        docs = list(doc_result.scalars().all())
+        for doc in docs:
+            if milvus_client._connected:
+                await milvus_client.delete_vectors(doc.id)
+            await delete_document_chunks(self.db, doc.id)
+            await self.db.delete(doc)
+
+        await self.db.delete(folder)
+        await self.db.flush()
+        return True
+
     async def search(
         self,
         query: str,
@@ -491,7 +652,7 @@ class KnowledgeService:
         )
 
     async def import_file(
-        self, kb_id: str, user_id: str, file: UploadFile
+        self, kb_id: str, user_id: str, file: UploadFile, folder_id: str | None = None
     ) -> DocumentListItem:
         kb = await self._get_kb_row(kb_id, user_id, write=True)
         if kb is None:
@@ -499,6 +660,9 @@ class KnowledgeService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Knowledge base not found",
             )
+
+        if folder_id:
+            await self._ensure_folder_in_kb(folder_id, kb_id, user_id, write=True)
 
         if milvus_client._connected and align_kb_embedding_to_milvus(kb):
             await self.db.flush()
@@ -511,40 +675,43 @@ class KnowledgeService:
             prefix="knowledge",
         )
 
-        temp_path: Path | None = None
+        # The background runner needs a durable local file to parse from. In
+        # local-storage mode the saved object already lives under uploads/; for
+        # S3 backends we mirror a copy to disk so parsing works offline.
         file_path = stored.local_path
         if file_path is None:
-            suffix = Path(file.filename or "upload.dat").suffix
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
-                f.write(content)
-                temp_path = Path(f.name)
-            file_path = temp_path
+            from app.utils.upload_paths import safe_upload_file_path
 
-        importer = DocumentImporter(rag_settings=rag_settings_from_kb(kb), db=self.db)
-        try:
-            doc = await importer.import_file(
-                kb_id=kb_id,
-                user_id=kb.user_id,
-                file_path=file_path,
-                original_filename=file.filename or "unknown",
-                kb=kb,
-            )
-            if sa_inspect(doc).session is None:
-                doc.knowledge_base_id = kb_id
-                self.db.add(doc)
-            if doc.status == "indexed" and doc.chunk_count > 0:
-                await importer.mark_kb_indexed(kb)
-            await self.db.flush()
-            await self.db.refresh(doc)
-            return _doc_to_list_item(doc)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to import file: {e}",
-            )
-        finally:
-            if temp_path and temp_path.exists():
-                temp_path.unlink(missing_ok=True)
+            mirrored = safe_upload_file_path(stored.key)
+            if mirrored is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid upload path for knowledge file",
+                )
+            mirrored.parent.mkdir(parents=True, exist_ok=True)
+            mirrored.write_bytes(content)
+            file_path = mirrored
+
+        suffix = (file.filename or "upload.dat").rsplit(".", 1)[-1].lower()
+        doc = Document(
+            knowledge_base_id=kb_id,
+            folder_id=folder_id,
+            title=file.filename or "unknown",
+            content="",
+            source=suffix,
+            status="processing",
+            source_file_path=str(file_path),
+        )
+        self.db.add(doc)
+        await self.db.flush()
+        await self.db.refresh(doc)
+
+        # Defer parse → chunk → embed to the background runner so this request
+        # returns immediately and does not block the event loop.
+        from app.knowledge.index_runner import enqueue_index_document
+
+        enqueue_index_document(doc.id)
+        return _doc_to_list_item(doc)
 
     async def import_url(
         self, kb_id: str, user_id: str, url: str
@@ -556,24 +723,36 @@ class KnowledgeService:
                 detail="Knowledge base not found",
             )
 
-        importer = DocumentImporter(rag_settings=rag_settings_from_kb(kb), db=self.db)
+        # Fetch URL content here (fast IO + immediate error feedback to caller),
+        # then defer the CPU-heavy chunk/embed work to the background runner.
+        import httpx
+
         try:
-            doc = await importer.import_url(
-                kb_id=kb_id,
-                user_id=kb.user_id,
-                url=url,
-                kb=kb,
-            )
-            if sa_inspect(doc).session is None:
-                doc.knowledge_base_id = kb_id
-                self.db.add(doc)
-            if doc.status == "indexed" and doc.chunk_count > 0:
-                await importer.mark_kb_indexed(kb)
-            await self.db.flush()
-            await self.db.refresh(doc)
-            return DocumentResponse.model_validate(doc)
+            async with httpx.AsyncClient(
+                timeout=30.0, follow_redirects=True
+            ) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                content = response.text
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to import URL: {e}",
+                detail=f"Failed to fetch URL: {e}",
             )
+
+        doc = Document(
+            knowledge_base_id=kb_id,
+            title=url,
+            content=content,
+            source="url",
+            source_url=url,
+            status="processing",
+        )
+        self.db.add(doc)
+        await self.db.flush()
+        await self.db.refresh(doc)
+
+        from app.knowledge.index_runner import enqueue_index_document
+
+        enqueue_index_document(doc.id)
+        return DocumentResponse.model_validate(doc)

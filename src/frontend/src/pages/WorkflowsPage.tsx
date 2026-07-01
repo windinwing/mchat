@@ -907,7 +907,19 @@ export function WorkflowsPage() {
                             />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium truncate">{cand.title || `候选 ${idx + 1}`}</p>
-                              <p className={`text-xs text-gray-500 whitespace-pre-wrap ${isExpanded ? '' : 'line-clamp-2'}`}>{cand.content}</p>
+                              {(() => {
+                                const url = cand.content || ''
+                                const isVideo = /\.(mp4|webm|mov|avi)($|\?)/i.test(url)
+                                const isImage = /\.(jpg|jpeg|png|gif|webp|svg)($|\?)/i.test(url)
+                                const absUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`
+                                if (isVideo) {
+                                  return <video src={absUrl} controls className="mt-1 max-h-32 rounded" />
+                                }
+                                if (isImage) {
+                                  return <img src={absUrl} alt={cand.title} className="mt-1 max-h-32 rounded" />
+                                }
+                                return <p className={`text-xs text-gray-500 whitespace-pre-wrap ${isExpanded ? '' : 'line-clamp-2'}`}>{cand.content}</p>
+                              })()}
                             </div>
                           </label>
                           <button

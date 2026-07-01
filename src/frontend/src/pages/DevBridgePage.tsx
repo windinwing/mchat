@@ -90,6 +90,19 @@ interface DevBridgeBuild {
   summary?: string | null
 }
 
+interface DevBridgePlayableCheck {
+  ok?: boolean
+  reachable?: boolean
+  http_status?: number | null
+  missing_assets?: string[]
+  source_version?: string | null
+  bundle_version?: string | null
+  version_match?: boolean | null
+  probed_url?: string | null
+  detail?: string
+  checked_at?: string
+}
+
 interface DevBridgeBuildProgress {
   slug: string
   latest_build?: DevBridgeBuild | null
@@ -101,6 +114,7 @@ interface DevBridgeBuildProgress {
   version_match?: boolean
   is_active?: boolean
   play_urls?: string[]
+  playable_check?: DevBridgePlayableCheck | null
 }
 
 interface DevBridgeRelease {
@@ -866,6 +880,24 @@ export function DevBridgePage() {
                           {buildProgress.version_match === false && (
                             <span className="text-amber-600 dark:text-amber-400 ml-1">{t('devbridge.versionMismatch')}</span>
                           )}
+                        </div>
+                      )}
+                      {buildProgress.playable_check && (
+                        <div
+                          className={cn(
+                            'flex items-center gap-1.5',
+                            buildProgress.playable_check.ok
+                              ? 'text-green-600 dark:text-green-400'
+                              : 'text-amber-600 dark:text-amber-400',
+                          )}
+                          title={buildProgress.playable_check.detail || buildProgress.playable_check.probed_url || ''}
+                        >
+                          {buildProgress.playable_check.ok ? '🟢' : '🟡'}{' '}
+                          {buildProgress.playable_check.ok
+                            ? (buildProgress.playable_check.version_match
+                                ? t('devbridge.playableCheckOk')
+                                : t('devbridge.playableCheckReachable'))
+                            : buildProgress.playable_check.detail || t('devbridge.playableCheckFail')}
                         </div>
                       )}
                       {buildProgress.is_active && (

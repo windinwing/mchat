@@ -1,6 +1,9 @@
 """Generic development bridge API."""
 
+import mimetypes
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 
 from app.middleware.auth import Permission, get_current_user, require_permission
 from app.models.user import User
@@ -269,3 +272,41 @@ async def upload_provider_project_asset(
         raise HTTPException(status_code=400, detail="path and data (base64) are required")
     provider = get_devbridge_provider(provider_key)
     return provider.service_factory().upload_asset(slug, path, data_b64, overwrite=overwrite)
+
+
+# ── Public asset preview (no JWT — serves game images for chat inline display) ──
+
+_PREVIEW_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
+
+
+@router.get("/asset-preview/{slug}/{path:path}")
+async def get_asset_preview(slug: str, path: str):
+    """Serve an image from _extracted/<slug>/<path> for inline chat preview.
+
+    Public (no auth) — game asset images are not sensitive.
+    Only serves files with image extensions under the sync_extracted_root.
+    """
+    provider = get_devbridge_provider("gamecenter")
+    service = provider.service_factory()
+    if service.config.sync_extracted_root is None:
+        raise HTTPException(status_code=503, detail="sync_extracted_root not configured")
+
+    clean_slug = "/".join(p for p in slug.strip().split("/") if p and p not in {".", ".."})
+    clean_path = "/".join(p for p in path.strip().split("/") if p and p not in {".", ".."})
+    if not clean_slug or not clean_path:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    target = (service.config.sync_extracted_root / clean_slug / clean_path).resolve()
+    try:
+        target.relative_to(service.config.sync_extracted_root.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Outside extracted root")
+
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    if target.suffix.lower() not in _PREVIEW_IMAGE_EXTS:
+        raise HTTPException(status_code=415, detail="Preview only supports image files")
+
+    mime, _ = mimetypes.guess_type(str(target))
+    return FileResponse(target, media_type=mime or "image/png", headers={"Cache-Control": "private, max-age=300"})

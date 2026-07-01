@@ -92,9 +92,20 @@ class LLMProvider:
                 chunk
             )
             if reasoning:
-                yield {"type": "reasoning", "content": reasoning}
+                # Thinking models stream chain-of-thought via reasoning_content.
+                # Inject <think> tag on the FIRST reasoning chunk so frontend
+                # can render a collapsible "thinking" section.
+                if not getattr(self, "_thinking_open", False):
+                    self._thinking_open = True
+                    yield {"type": "content", "content": "<think>\n"}
+                yield {"type": "content", "content": reasoning}
+                continue  # don't also process as content below
 
             if delta.content:
+                # Close <think> tag when transitioning from reasoning to content
+                if getattr(self, "_thinking_open", False):
+                    self._thinking_open = False
+                    yield {"type": "content", "content": "\n</think>\n\n"}
                 content_buffer += delta.content
                 if contains_dsml(content_buffer):
                     dsml_mode = True
@@ -210,9 +221,15 @@ class OpenAIProvider(LLMProvider):
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
             "stream": True,
         }
+        # Thinking models (GLM-5.2, DeepSeek-R1, etc.) share max_tokens between
+        # reasoning and content — reasoning eats half, content gets truncated.
+        # Use max_completion_tokens (only limits content) for thinking providers.
+        if self.provider_name in ("deepseek", "zhipu", "zhipu-coding"):
+            kwargs["max_completion_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
         # stream_options (usage in stream) is OpenAI-specific; some providers
         # (zhipu/glm) reject it with "API 调用参数有误" (code 1210). Only send
         # it for providers known to support it.
@@ -222,12 +239,7 @@ class OpenAIProvider(LLMProvider):
         if self.provider_name in ("openai", "deepseek") or _supports_usage:
             kwargs["stream_options"] = {"include_usage": True}
         if tools:
-            # Some providers (zhipu/glm coding endpoint) reject the OpenAI tools
-            # schema with "API 调用参数有误" (code 1210). Skip tools for them —
-            # the model still works for plain chat, just without function calling.
-            _supports_tools = self.provider_name not in ("zhipu", "zhipu-coding")
-            if _supports_tools:
-                kwargs["tools"] = tools
+            kwargs["tools"] = tools
 
         try:
             stream = await self.client.chat.completions.create(**kwargs)

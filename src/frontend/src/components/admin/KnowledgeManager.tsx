@@ -11,15 +11,24 @@ import {
   AlertCircle,
   Settings2,
   Pencil,
+  FolderPlus,
+  Folder,
+  ChevronRight,
+  Home,
+  MoreVertical,
+  FolderInput,
 } from 'lucide-react'
 import api from '@/lib/api'
 import {
   defaultRag,
+  getFolderPath,
   mapDocument,
+  mapFolder,
   mapKnowledgeBase,
   mapReindexResult,
   mapUploadedEmbeddingModel,
   ragSettingsToPayload,
+  type DocumentFolder,
   type UploadedEmbeddingModel,
   type ChunkStrategy,
   type KnowledgeBase,
@@ -97,6 +106,16 @@ export function KnowledgeManager() {
   const [kbDesc, setKbDesc] = useState('')
   const [search, setSearch] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [folders, setFolders] = useState<DocumentFolder[]>([])
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
+  const [folderDialog, setFolderDialog] = useState<{
+    mode: 'create' | 'rename'
+    folderId?: string
+    name: string
+  } | null>(null)
+  const [folderMenuId, setFolderMenuId] = useState<string | null>(null)
+  const [moveDialog, setMoveDialog] = useState<{ docId: string } | null>(null)
+  const [moveTarget, setMoveTarget] = useState<string | null>(null)
   const [platformTab, setPlatformTab] = useState<'connections' | 'embedding' | 'tokenizer'>(
     'connections',
   )
@@ -114,6 +133,7 @@ export function KnowledgeManager() {
   const [modelUploading, setModelUploading] = useState(false)
   const embeddingModelInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const docPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const embeddingProvider =
     ragSettings.embeddingProvider?.trim().toLowerCase() || 'openai'
@@ -219,6 +239,8 @@ export function KnowledgeManager() {
   useEffect(() => {
     if (selectedKB) {
       loadDocuments(selectedKB)
+      loadFolders(selectedKB)
+      setCurrentFolderId(null)
       const meta = knowledgeBases.find((k) => k.id === selectedKB)
       if (meta) {
         setRagSettings({
@@ -417,16 +439,119 @@ export function KnowledgeManager() {
     }
   }
 
-  const loadDocuments = async (kbId: string) => {
+  const loadDocuments = async (kbId: string): Promise<KnowledgeDocument[]> => {
     try {
       const data = await api.get<Record<string, unknown>[]>(
         `/knowledge/bases/${kbId}/documents`,
       )
-      setDocuments(data.map(mapDocument))
+      const mapped = data.map(mapDocument)
+      setDocuments(mapped)
+      return mapped
     } catch (err) {
       console.error('Failed to load documents:', err)
+      return []
     }
   }
+
+  const loadFolders = async (kbId: string): Promise<DocumentFolder[]> => {
+    try {
+      const data = await api.get<Record<string, unknown>[]>(
+        `/knowledge/bases/${kbId}/folders`,
+      )
+      const mapped = data.map(mapFolder)
+      setFolders(mapped)
+      return mapped
+    } catch (err) {
+      console.error('Failed to load folders:', err)
+      setFolders([])
+      return []
+    }
+  }
+
+  const submitFolder = async () => {
+    if (!selectedKB || !folderDialog || !folderDialog.name.trim()) return
+    const name = folderDialog.name.trim()
+    try {
+      if (folderDialog.mode === 'create') {
+        const created = await api.post<Record<string, unknown>>(
+          `/knowledge/bases/${selectedKB}/folders`,
+          { name, parent_id: currentFolderId },
+        )
+        setFolders((prev) => [...prev, mapFolder(created)])
+      } else if (folderDialog.folderId) {
+        const updated = await api.patch<Record<string, unknown>>(
+          `/knowledge/folders/${folderDialog.folderId}`,
+          { name },
+        )
+        const mapped = mapFolder(updated)
+        setFolders((prev) => prev.map((f) => (f.id === mapped.id ? mapped : f)))
+      }
+      setFolderDialog(null)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t('common.failed')
+      toast(t('knowledge.toastFolderSaveFailed'), { type: 'error', message })
+    }
+  }
+
+  const deleteFolder = async (folderId: string) => {
+    try {
+      await api.delete(`/knowledge/folders/${folderId}`)
+      // Reload folders + documents since the folder subtree and its documents
+      // were removed server-side (including their vectors/chunks).
+      await loadFolders(selectedKB!)
+      await loadDocuments(selectedKB!)
+      // If the deleted folder was on our breadcrumb, climb back to the root.
+      if (getFolderPath(folders, currentFolderId).some((f) => f.id === folderId)) {
+        setCurrentFolderId(null)
+      }
+      toast(t('knowledge.toastFolderDeleted'), { type: 'success' })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t('common.failed')
+      toast(t('knowledge.toastFolderDeleteFailed'), { type: 'error', message })
+    }
+  }
+
+  const moveDocumentTo = async (docId: string, targetFolderId: string | null) => {
+    try {
+      await api.patch(`/knowledge/documents/${docId}/move`, { folder_id: targetFolderId })
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === docId ? { ...d, folderId: targetFolderId } : d)),
+      )
+      setMoveDialog(null)
+      setMoveTarget(null)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t('common.failed')
+      toast(t('knowledge.toastMoveFailed'), { type: 'error', message })
+    }
+  }
+
+  // Poll the document list while any document is still being indexed in the
+  // background. Upload returns immediately with status "processing"; we refresh
+  // until every document reaches a terminal state, then stop polling.
+  useEffect(() => {
+    if (docPollRef.current) {
+      clearInterval(docPollRef.current)
+      docPollRef.current = null
+    }
+    if (!selectedKB) return
+    const hasProcessing = documents.some((d) => d.status === 'processing')
+    if (!hasProcessing) return
+    docPollRef.current = setInterval(async () => {
+      const latest = await loadDocuments(selectedKB)
+      if (!latest.some((d) => d.status === 'processing') && docPollRef.current) {
+        clearInterval(docPollRef.current)
+        docPollRef.current = null
+        loadKnowledgeBases()
+      }
+    }, 2500)
+    return () => {
+      if (docPollRef.current) {
+        clearInterval(docPollRef.current)
+        docPollRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documents, selectedKB])
 
   const handleCreate = async () => {
     if (!kbName.trim()) return
@@ -448,9 +573,11 @@ export function KnowledgeManager() {
 
     setUploading(true)
     try {
+      let count = 0
       for (let i = 0; i < files.length; i++) {
         const formData = new FormData()
         formData.append('file', files[i])
+        if (currentFolderId) formData.append('folder_id', currentFolderId)
         const doc = await api.upload<Record<string, unknown>>(
           `/knowledge/bases/${selectedKB}/import-file`,
           formData,
@@ -462,9 +589,11 @@ export function KnowledgeManager() {
             type: 'error',
           })
         }
+        count += 1
       }
-      toast(t('knowledge.toastUploadComplete'), { type: 'success' })
-      loadKnowledgeBases()
+      // Indexing now happens in the background; the poll effect above refreshes
+      // statuses until every document reaches a terminal state.
+      toast(t('knowledge.toastUploadQueued', { count }), { type: 'success' })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t('common.failed')
       toast(t('knowledge.toastUploadFailed'), { type: 'error', message })
@@ -562,9 +691,17 @@ export function KnowledgeManager() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
-  const filteredDocs = documents.filter((d) =>
-    d.filename.toLowerCase().includes(search.toLowerCase()),
+  // Documents in the currently open folder, further filtered by the search box.
+  const filteredDocs = documents.filter(
+    (d) =>
+      (d.folderId ?? null) === currentFolderId &&
+      d.filename.toLowerCase().includes(search.toLowerCase()),
   )
+  // Folders directly under the current folder (children of currentFolderId).
+  const childFolders = folders.filter(
+    (f) => (f.parentId ?? null) === currentFolderId,
+  )
+  const folderPath = getFolderPath(folders, currentFolderId)
 
   const docStatusVariant = (status: string): 'default' | 'success' | 'warning' | 'danger' => {
     switch (status) {
@@ -925,6 +1062,16 @@ export function KnowledgeManager() {
                   </Button>
                   <Button
                     size="actionWide"
+                    variant="secondary"
+                    leftIcon={<FolderPlus className="w-4 h-4" />}
+                    onClick={() =>
+                      setFolderDialog({ mode: 'create', name: '' })
+                    }
+                  >
+                    {t('knowledge.newFolder')}
+                  </Button>
+                  <Button
+                    size="actionWide"
                     leftIcon={<Upload className="w-4 h-4" />}
                     onClick={() => {
                       setUploadOpen(true)
@@ -955,7 +1102,41 @@ export function KnowledgeManager() {
               accept=".txt,.pdf,.doc,.docx,.md"
             />
 
-            {filteredDocs.length === 0 ? (
+            {/* Breadcrumb: root → ... → current folder */}
+            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 shrink-0 flex-wrap">
+              <button
+                onClick={() => {
+                  setCurrentFolderId(null)
+                  setSearch('')
+                }}
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                  currentFolderId === null ? 'font-medium text-gray-700 dark:text-gray-200' : ''
+                }`}
+              >
+                <Home className="w-3.5 h-3.5" />
+                {t('knowledge.rootFolder')}
+              </button>
+              {folderPath.map((f) => (
+                <span key={f.id} className="inline-flex items-center gap-1">
+                  <ChevronRight className="w-3 h-3 opacity-60" />
+                  <button
+                    onClick={() => {
+                      setCurrentFolderId(f.id)
+                      setSearch('')
+                    }}
+                    className={`px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                      currentFolderId === f.id
+                        ? 'font-medium text-gray-700 dark:text-gray-200'
+                        : ''
+                    }`}
+                  >
+                    {f.name}
+                  </button>
+                </span>
+              ))}
+            </div>
+
+            {childFolders.length === 0 && filteredDocs.length === 0 ? (
               <Card>
                 <CardContent>
                   <div className="flex flex-col items-center py-8 text-gray-400">
@@ -966,6 +1147,82 @@ export function KnowledgeManager() {
               </Card>
             ) : (
               <div className="space-y-1.5 overflow-y-auto flex-1 min-h-0">
+                {/* Subfolders in the current folder */}
+                {childFolders.map((folder) => (
+                  <Card key={folder.id}>
+                    <CardContent className="py-2">
+                      <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => {
+                            setCurrentFolderId(folder.id)
+                            setSearch('')
+                          }}
+                          className="flex items-center gap-3 min-w-0 flex-1 text-left"
+                        >
+                          <Folder className="w-5 h-5 text-primary-500 dark:text-primary-400 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                              {folder.name}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              {t('knowledge.folderItemCount', { count: folder.documentCount })}
+                            </p>
+                          </div>
+                        </button>
+                        <div className="relative shrink-0">
+                          <button
+                            onClick={() =>
+                              setFolderMenuId(folderMenuId === folder.id ? null : folder.id)
+                            }
+                            aria-label={t('common.actions')}
+                            title={t('common.actions')}
+                            className="p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                          {folderMenuId === folder.id && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-10"
+                                onClick={() => setFolderMenuId(null)}
+                              />
+                              <div className="absolute right-0 top-7 z-20 w-36 rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                                <button
+                                  onClick={() => {
+                                    setFolderDialog({
+                                      mode: 'rename',
+                                      folderId: folder.id,
+                                      name: folder.name,
+                                    })
+                                    setFolderMenuId(null)
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                  {t('knowledge.renameFolder')}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (confirm(t('knowledge.deleteFolderConfirm'))) {
+                                      deleteFolder(folder.id)
+                                    }
+                                    setFolderMenuId(null)
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  {t('common.delete')}
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+
+                {/* Documents in the current folder */}
                 {filteredDocs.map((doc) => (
                   <Card key={doc.id}>
                     <CardContent className="py-2">
@@ -994,6 +1251,17 @@ export function KnowledgeManager() {
                             )}
                             {docStatusLabel(doc.status)}
                           </Badge>
+                          <button
+                            onClick={() => {
+                              setMoveDialog({ docId: doc.id })
+                              setMoveTarget(doc.folderId ?? null)
+                            }}
+                            aria-label={t('knowledge.moveDocument')}
+                            title={t('knowledge.moveDocument')}
+                            className="p-1 rounded text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20"
+                          >
+                            <FolderInput className="w-4 h-4" />
+                          </button>
                           <button
                             onClick={() => handleDelete(doc.id)}
                             aria-label={t('common.delete')}
@@ -1684,6 +1952,123 @@ export function KnowledgeManager() {
             </Button>
             <Button onClick={handleCreate} disabled={!kbName.trim()}>
               {t('common.create')}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Folder create / rename dialog */}
+      <Dialog
+        open={folderDialog !== null}
+        onClose={() => setFolderDialog(null)}
+        title={
+          folderDialog?.mode === 'rename'
+            ? t('knowledge.renameFolder')
+            : t('knowledge.newFolder')
+        }
+        size="sm"
+      >
+        <div className="space-y-3">
+          <Input
+            value={folderDialog?.name ?? ''}
+            onChange={(e) =>
+              setFolderDialog((prev) =>
+                prev ? { ...prev, name: e.target.value } : prev,
+              )
+            }
+            placeholder={t('knowledge.folderNamePlaceholder')}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submitFolder()
+            }}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setFolderDialog(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={submitFolder}
+              disabled={!(folderDialog?.name.trim())}
+            >
+              {t('common.confirm')}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Move document dialog */}
+      <Dialog
+        open={moveDialog !== null}
+        onClose={() => {
+          setMoveDialog(null)
+          setMoveTarget(null)
+        }}
+        title={t('knowledge.moveDocument')}
+        size="sm"
+      >
+        <div className="space-y-2">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {t('knowledge.moveToHint')}
+          </p>
+          <button
+            onClick={() => setMoveTarget(null)}
+            className={`flex w-full items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+              moveTarget === null
+                ? 'border-primary-400 bg-primary-50 dark:border-primary-600 dark:bg-primary-950/40'
+                : 'border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'
+            }`}
+          >
+            <Home className="w-4 h-4 text-gray-400" />
+            {t('knowledge.rootFolder')}
+          </button>
+          {getFolderPath(folders, currentFolderId).map((f) => (
+            <button
+              key={`path-${f.id}`}
+              disabled
+              className="flex w-full items-center gap-2 rounded-md border border-dashed border-gray-200 px-3 py-2 text-sm text-gray-400 dark:border-gray-700"
+            >
+              <Folder className="w-4 h-4" />
+              {f.name}
+              <span className="ml-auto text-[10px]">{t('knowledge.currentLocation')}</span>
+            </button>
+          ))}
+          {folders
+            .filter(
+              (f) =>
+                f.id !== currentFolderId &&
+                !getFolderPath(folders, currentFolderId).some((p) => p.id === f.id),
+            )
+            .map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setMoveTarget(f.id)}
+                className={`flex w-full items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                  moveTarget === f.id
+                    ? 'border-primary-400 bg-primary-50 dark:border-primary-600 dark:bg-primary-950/40'
+                    : 'border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'
+                }`}
+              >
+                <Folder className="w-4 h-4 text-primary-500" />
+                <span className="truncate">{f.name}</span>
+                <span className="ml-auto text-[10px] text-gray-400">
+                  {t('knowledge.folderItemCount', { count: f.documentCount })}
+                </span>
+              </button>
+            ))}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setMoveDialog(null)
+                setMoveTarget(null)
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={() => moveDialog && moveDocumentTo(moveDialog.docId, moveTarget)}
+            >
+              {t('knowledge.moveHere')}
             </Button>
           </div>
         </div>

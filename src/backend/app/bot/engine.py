@@ -724,6 +724,10 @@ async def process_message(
                         yield token
                     else:
                         first_pass_content += token
+                        # Stream live so user sees tokens as they arrive (not
+                        # accumulated then dumped at end). Fixes GLM/DeepSeek
+                        # non-streaming in tool_rounds path.
+                        yield token
                 elif chunk.get("type") == "tool_call":
                     tc = chunk.get("tool_call", {})
                     tid = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
@@ -753,9 +757,9 @@ async def process_message(
                     )
                     continue
                 if first_pass_content:
+                    # Already streamed live above; just update full_response.
                     cleaned = _sanitize_visible_text(first_pass_content)
                     full_response += cleaned
-                    yield cleaned
                 break
 
             messages_list.append(

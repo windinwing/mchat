@@ -152,6 +152,7 @@ def _fmt_build_progress(
     stdout_tail: str = "",
     stderr_tail: str = "",
     play_urls: list[str] | None = None,
+    playable_check: dict[str, Any] | None = None,
 ) -> str:
     lines = [f"📊 **编译/发布进度** · `{slug}`"]
     project_path = str(project.get("path") or "")
@@ -202,6 +203,11 @@ def _fmt_build_progress(
         )
     if play_urls:
         lines.append("- 试玩链接（强刷 Cmd+Shift+R）：" + " ".join(play_urls))
+    resolved_check = playable_check
+    if resolved_check is None and builds and isinstance(builds[0].get("playable_check"), dict):
+        resolved_check = builds[0]["playable_check"]
+    if isinstance(resolved_check, dict):
+        lines.append(_fmt_playable_check(resolved_check))
     if stdout_tail:
         preview = stdout_tail[-2000:]
         lines.append(f"<details><summary>最新构建 stdout</summary>\n\n```text\n{preview}\n```\n\n</details>")
@@ -296,6 +302,25 @@ def _fmt_build_progress_tick(slug: str, progress: dict[str, Any]) -> str:
     return line
 
 
+def _fmt_playable_check(check: dict[str, Any]) -> str:
+    """One-line playable-page probe summary for chat (advisory, never alarms)."""
+    ok = bool(check.get("ok"))
+    reachable = bool(check.get("reachable"))
+    version_match = check.get("version_match")
+    missing = check.get("missing_assets") or []
+    if ok:
+        return "- 🟢 试玩页可访问，资源完整" + (
+            "，版本一致" if version_match is True else ""
+        )
+    if not reachable:
+        return f"- 🟡 试玩页暂不可访问（{check.get('detail') or 'HTTP 异常'}），可能仍在发布"
+    if version_match is False:
+        return "- 🟡 试玩页可达但版本未更新，新版可能尚未上线（publish 后再查）"
+    if missing:
+        return f"- 🟡 试玩页可达但缺少资源：{', '.join(str(m) for m in missing)}"
+    return f"- 🟡 试玩页检查未通过（{check.get('detail') or '原因未知'}）"
+
+
 def _fmt_build_progress_done(slug: str, progress: dict[str, Any]) -> str:
     latest = progress.get("latest_build") or {}
     status = str(latest.get("status") or "")
@@ -306,6 +331,10 @@ def _fmt_build_progress_done(slug: str, progress: dict[str, Any]) -> str:
         bundle_ver = progress.get("bundle_version")
         if source_ver or bundle_ver:
             lines.append(f"- 版本: 源码 {source_ver or '—'} · 试玩包 {bundle_ver or '—'}")
+        # Playable-page smoke check (HTTP probe + version consistency).
+        check = progress.get("playable_check")
+        if isinstance(check, dict):
+            lines.append(_fmt_playable_check(check))
         if play_urls:
             lines.append("- 试玩（强刷 Cmd+Shift+R）：" + " ".join(str(u) for u in play_urls))
         return "\n".join(lines) + "\n\n"
@@ -766,7 +795,7 @@ _NEW_READ_TOOLS = [
         "type": "function",
         "function": {
             "name": "upload_devbridge_asset",
-            "description": "Upload a binary asset (image, audio, model, font) to a project as base64 data. Use for game textures, sound effects, 3D models, fonts etc.",
+            "description": "Upload a binary asset (image, audio, model, font) to a project as base64 data. Use for game textures, sound effects, 3D models, fonts etc. For replacing existing game images, first use list_gamecenter_assets to find the correct path, then upload with overwrite=true.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -776,6 +805,27 @@ _NEW_READ_TOOLS = [
                     "overwrite": {"type": "boolean", "description": "Set true to overwrite if asset already exists"},
                 },
                 "required": ["slug", "path", "data"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_gamecenter_assets",
+            "description": (
+                "Browse game images/assets (loading bg, sprites, UI textures, etc.). "
+                "Shows inline previews and source paths. "
+                "USE THIS when the user asks to 查看/看/展示/浏览 game images, "
+                "背景图/loading图/素材图/精灵图, or wants to know what images a game has. "
+                "Reads the _extracted manifest; returns groups with preview URLs."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Game slug/folder name"},
+                    "query": {"type": "string", "description": "Optional keyword to filter groups (e.g. 'loading', 'bg', 'btn', 'splash')"},
+                },
+                "required": ["slug"],
             },
         },
     },
@@ -1269,6 +1319,7 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
             stdout_tail=str(progress.get("stdout_tail") or ""),
             stderr_tail=str(progress.get("stderr_tail") or ""),
             play_urls=play_urls,
+            playable_check=progress.get("playable_check"),
         )
         return {
             "ok": True,
@@ -1364,6 +1415,33 @@ async def _execute(name: str, args: dict[str, Any], _ctx: Any) -> Any | None:
         listing = service.list_files(slug, str(args.get("path") or ""))
         data = _json_dump(listing)
         return {"ok": True, "content": _fmt_file_listing(data), "listing": data}
+
+    if name == "list_gamecenter_assets":
+        slug = str(args.get("slug") or "")
+        query = str(args.get("query") or "")
+        result = service.list_extracted_assets(slug, query)
+        groups = result["groups"]
+        content_lines = [f"🖼️ `{slug}` 资源清单（{result['total_groups']} 组）"]
+        outbound_assets: list[dict[str, Any]] = []
+        for g in groups[:15]:
+            action_label = "替换" if g["suggested_action"] == "replace_image" else "重打包" if g["suggested_action"] == "repack_atlas" else g["suggested_action"]
+            content_lines.append(
+                f"\n**{g['group_id']}** — {g['source_type']}/{action_label}，{g['file_count']} 文件"
+            )
+            content_lines.append(f"  源路径: `{g['source_image']}`")
+            if len(g.get("sample_names", [])) > 1:
+                content_lines.append(f"  文件: {', '.join(g['sample_names'][:4])}")
+            # Attach first preview image as outbound_asset (frontend renders it directly)
+            if g.get("preview_urls") and len(outbound_assets) < 6:
+                outbound_assets.append({
+                    "type": "image",
+                    "url": g["preview_urls"][0],
+                    "name": g.get("sample_names", ["preview"])[0],
+                    "source": "gamecenter_asset",
+                })
+        if result["total_groups"] > 15:
+            content_lines.append(f"\n…（还有 {result['total_groups'] - 15} 组，用 query 过滤）")
+        return {"ok": True, "content": "\n".join(content_lines), "outbound_assets": outbound_assets, **result}
 
     if name == "read_devbridge_project_file":
         slug = str(args.get("slug") or "")

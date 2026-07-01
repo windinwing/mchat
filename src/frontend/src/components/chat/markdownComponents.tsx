@@ -223,5 +223,22 @@ export function createMarkdownComponents(
         </summary>
       )
     },
+    img({ src, alt, ...props }) {
+      const imgSrc = String(src || '')
+      if (!imgSrc) return null
+      return (
+        <img
+          src={imgSrc}
+          alt={alt || ''}
+          loading="lazy"
+          className="max-w-full rounded-lg border border-gray-200 dark:border-gray-600 my-2"
+          style={{ maxHeight: '300px', objectFit: 'contain' }}
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = 'none'
+          }}
+          {...props}
+        />
+      )
+    },
   }
 }

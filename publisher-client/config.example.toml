@@ -2,7 +2,10 @@
 # 复制本文件为 config.toml 并填写
 
 # 启用的平台（顶层）——需对应的 runner 实现
-platforms = ["xiaohongshu", "douyin"]
+# 发布: xiaohongshu / douyin / weibo (Playwright)
+# 图片生成: image:comfyui / image:sd
+# 视频生成: video:comfyui / video:kling / video:jimeng
+platforms = ["xiaohongshu", "image:comfyui", "video:comfyui"]
 
 [center]
 # MChat 后端地址（cloud 模式同此）
@@ -26,6 +29,15 @@ headless = false
 # 每步操作的随机延迟范围（秒），模拟人节奏
 min_delay = 1.5
 max_delay = 4.0
+
+# ComfyUI 配置（图片/视频生成引擎）
+[comfyui]
+server_url = "http://localhost:8188"
+output_dir = "/path/to/ComfyUI/output"
+# 工作流模板（ComfyUI API JSON 格式，从 ComfyUI 导出）
+# text_to_image_workflow = "workflows/t2i.json"
+# image_to_image_workflow = "workflows/i2i.json"
+# text_to_video_workflow = "workflows/t2v.json"
 
 # ---- 定时触发工作流（可选，用 --schedule 启动）----
 # 客户机侧轻量定时器：按固定间隔触发中心的 workflow run-once。
