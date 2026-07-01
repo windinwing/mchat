@@ -100,7 +100,11 @@ def _chunk_fixed(text: str, cfg: ChunkConfig) -> list[str]:
 
         if end >= text_len:
             break
-        start = max(0, end - cfg.overlap)
+        # Guarantee forward progress: a separator found right after `start`
+        # (e.g. "\n\n" at start+1) makes `end` advance by only a few chars, so
+        # subtracting the overlap can move `start` backwards and loop forever.
+        # Always advance at least one char past the previous start.
+        start = max(end - cfg.overlap, start + 1)
 
     return [c for c in chunks if c]
 

@@ -158,8 +158,10 @@ class _IndexRunner:
         file_path = self._resolve_source_path(doc)
         if file_path is not None:
             importer = DocumentImporter()
-            # Parsing is synchronous CPU work — run off the event loop.
-            return await asyncio.to_thread(importer._read_file, file_path)
+            # _read_file is an async coroutine (delegates to sync parsers
+            # internally); await it rather than passing it through to_thread,
+            # which would only call it and return an un-awaited coroutine.
+            return await importer._read_file(file_path)
 
         return doc.content or ""
 
@@ -188,11 +190,14 @@ class _IndexRunner:
 
         chunk_cfg = importer.rag_settings.chunk_config()
         # Chunking (esp. pdfplumber-driven parsing above) is CPU-bound.
-        children, parents = await asyncio.to_thread(
+        # chunk_text_with_parents returns a list of (child, parent) tuples.
+        pairs = await asyncio.to_thread(
             chunk_text_with_parents, content, chunk_cfg, importer._embedder
         )
-        if not children:
+        if not pairs:
             return 0
+        children = [child for child, _parent in pairs]
+        parents = [parent for _child, parent in pairs]
 
         await replace_document_chunks(
             importer.db,
