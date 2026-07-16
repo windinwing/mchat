@@ -46,7 +46,7 @@ class CustomBridgeProviderSettings(BaseModel):
     publish_enabled: bool | None = False
     data_root: str = ""
     build_command: str = ""
-    build_timeout_seconds: int | None = 1800
+    build_timeout_seconds: int | None = 3600
     cocos_creator_bin: str = ""
     playables_root: str = ""
     sync_extracted_root: str = ""

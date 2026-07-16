@@ -7,7 +7,11 @@ from sqlalchemy import select
 from app.bot.engine import process_message
 from app.bot.patent_links import inject_action_links, linkify_patent_ids, patent_link_settings_from_skills
 from app.bot.reply_persist import ensure_assistant_reply_persisted, persist_assistant_reply
-from app.services.llm_credentials import ensure_ai_config_api_key, is_usable_api_key
+from app.services.llm_credentials import (
+    ensure_ai_config_api_key,
+    is_local_provider,
+    is_usable_api_key,
+)
 from app.core.database import async_session_factory
 from app.core.event_bus import event_bus
 from app.models.ai_config import AIConfig
@@ -98,9 +102,12 @@ async def on_message_created(
 
             if ai_config is None:
                 cfg_result = await db.execute(
-                    select(AIConfig).where(AIConfig.is_default == True)
+                    select(AIConfig)
+                    .where(AIConfig.is_default == True)
+                    .order_by(AIConfig.updated_at.desc())
+                    .limit(1)
                 )
-                ai_config = cfg_result.scalar_one_or_none()
+                ai_config = cfg_result.scalars().first()
 
             if ai_config is None:
                 cfg_result = await db.execute(
@@ -139,7 +146,9 @@ async def on_message_created(
                 return
 
             ai_config = await ensure_ai_config_api_key(db, ai_config)
-            if not is_usable_api_key(ai_config.api_key):
+            if not is_local_provider(ai_config.provider) and not is_usable_api_key(
+                ai_config.api_key
+            ):
                 error_msg = (
                     "未配置有效的 AI API 密钥。请在管理后台「模型工作台」填写 API Key，"
                     "或在 .env 设置 DEEPSEEK_API_KEY / MOONSHOT_API_KEY。"

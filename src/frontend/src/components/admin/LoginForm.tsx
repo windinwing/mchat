@@ -8,13 +8,14 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { ThemeToggle } from '@/components/common/ThemeToggle'
-import { isCloudEdition, isSignupEnabled } from '@/lib/edition'
+import { getEditionEffective, applyRuntimeEditionFlags } from '@/lib/edition'
 import { preferredStaffPath } from '@/lib/appPreferences'
 
 type LoginMode = 'phone' | 'password'
 
 function postLoginPath(user: { role: string } | null, from?: string): string {
-  if (isCloudEdition && user?.role === 'user') {
+  const { cloud } = getEditionEffective()
+  if (cloud && user?.role === 'user') {
     return from && from.startsWith('/portal') ? from : '/portal/dashboard'
   }
   if (user?.role === 'agent' || user?.role === 'admin') {
@@ -25,7 +26,11 @@ function postLoginPath(user: { role: string } | null, from?: string): string {
 
 export function LoginForm() {
   const { t } = useTranslation()
-  const portalLogin = isSignupEnabled || isCloudEdition
+  // portalLogin starts from build-time flags, then widens once /auth/bootstrap
+  // reports the server's actual edition (so a Core build on a Cloud server
+  // still shows register / phone login / 9235 SSO).
+  const [effectiveFlags, setEffectiveFlags] = useState(() => getEditionEffective())
+  const portalLogin = effectiveFlags.signup || effectiveFlags.cloud
   const [mode, setMode] = useState<LoginMode>('password')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -38,7 +43,10 @@ export function LoginForm() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const from = (location.state as { from?: string })?.from
+  const from =
+    (location.state as { from?: string })?.from ||
+    new URLSearchParams(location.search).get('redirect') ||
+    undefined
   const [bootstrapHint, setBootstrapHint] = useState<{
     username: string
     password: string | null
@@ -54,13 +62,25 @@ export function LoginForm() {
 
   useEffect(() => {
     api
-      .get<{ username: string; password: string | null; show_credentials: boolean }>(
-        '/auth/bootstrap',
-      )
+      .get<{
+        username: string
+        password: string | null
+        show_credentials: boolean
+        signup_enabled?: boolean
+        cloud_edition?: boolean
+      }>('/auth/bootstrap')
       .then((data) => {
         if (data.show_credentials && data.password) {
           setBootstrapHint({ username: data.username, password: data.password })
         }
+        // Widen edition flags from the live server. This makes register /
+        // phone login / 9235 SSO appear even if the frontend was built as
+        // Core while the backend is Cloud or has signup enabled.
+        applyRuntimeEditionFlags({
+          cloud: !!data.cloud_edition,
+          signup: !!data.signup_enabled,
+        })
+        setEffectiveFlags(getEditionEffective())
       })
       .catch(() => {})
   }, [])
@@ -287,7 +307,7 @@ export function LoginForm() {
             </p>
           )}
 
-          {isSignupEnabled && (
+          {effectiveFlags.signup && (
             <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
               {t('auth.noAccount')}{' '}
               <Link

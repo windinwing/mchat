@@ -18,7 +18,7 @@ from app.schemas.chat import (
     MessageResponse,
     ModelCapabilitiesResponse,
 )
-from app.services.llm_credentials import is_usable_api_key, resolve_api_key
+from app.services.llm_credentials import is_ai_config_ready
 from app.services.model_capabilities import model_capabilities
 from app.utils.outbound_assets import enrich_message_extra_data
 
@@ -34,9 +34,25 @@ class ChatService:
             select(GroupMember).where(
                 GroupMember.group_id == group_id,
                 GroupMember.user_id == user_id,
-            )
+            ).limit(1)
         )
-        return result.scalar_one_or_none() is not None
+        return result.scalars().first() is not None
+
+    async def _can_access_group(self, user_id: str, group_id: str) -> bool:
+        """True if the user is a group member OR has global scope (admin).
+
+        Admins can see all data, so they may join any group conversation
+        without an explicit GroupMember row.
+        """
+        if await self._is_group_member(user_id, group_id):
+            return True
+        from app.middleware.auth import has_global_scope
+        from app.models.user import User
+
+        user = await self.db.get(User, user_id)
+        if user is not None and await has_global_scope(user, self.db):
+            return True
+        return False
 
     async def _actor_can_access_conversation(
         self,
@@ -44,21 +60,22 @@ class ChatService:
         conversation: Conversation,
     ) -> bool:
         if conversation.scope_type == "group" and conversation.scope_id:
-            return await self._is_group_member(actor_user_id, conversation.scope_id)
+            return await self._can_access_group(actor_user_id, conversation.scope_id)
         return conversation.user_id == actor_user_id
 
     async def _resolve_platform_ai_config(self) -> AIConfig | None:
         default_result = await self.db.execute(
-            select(AIConfig).where(AIConfig.is_default == True)
+            select(AIConfig)
+            .where(AIConfig.is_default == True)
+            .order_by(AIConfig.updated_at.desc())
+            .limit(1)
         )
-        cfg = default_result.scalar_one_or_none()
-        if cfg is not None and is_usable_api_key(
-            resolve_api_key(cfg.provider, cfg.api_key)
-        ):
+        cfg = default_result.scalars().first()
+        if cfg is not None and is_ai_config_ready(cfg.provider, cfg.api_key):
             return cfg
         all_result = await self.db.execute(select(AIConfig))
         for candidate in all_result.scalars().all():
-            if is_usable_api_key(resolve_api_key(candidate.provider, candidate.api_key)):
+            if is_ai_config_ready(candidate.provider, candidate.api_key):
                 return candidate
         return None
 
@@ -511,9 +528,12 @@ class ChatService:
             cfg = cfg_result.scalar_one_or_none()
         if cfg is None:
             default_result = await self.db.execute(
-                select(AIConfig).where(AIConfig.is_default == True)
+                select(AIConfig)
+                .where(AIConfig.is_default == True)
+                .order_by(AIConfig.updated_at.desc())
+                .limit(1)
             )
-            cfg = default_result.scalar_one_or_none()
+            cfg = default_result.scalars().first()
 
         if cfg is None:
             return None
@@ -646,13 +666,7 @@ class ChatService:
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="scope_id required for group scope",
                 )
-            membership_result = await self.db.execute(
-                select(GroupMember).where(
-                    GroupMember.group_id == scope_id,
-                    GroupMember.user_id == user_id,
-                )
-            )
-            if membership_result.scalar_one_or_none() is None:
+            if not await self._can_access_group(user_id, scope_id):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Group access denied",
@@ -735,7 +749,7 @@ class ChatService:
                 .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
                 .limit(1)
             )
-            existing = result.scalar_one_or_none()
+            existing = result.scalars().first()
             if existing is not None:
                 loaded = await self.get_conversation(
                     existing.id,
@@ -763,7 +777,7 @@ class ChatService:
         """Resume a group-scoped chat for a member (no personal assistant required)."""
         import uuid
 
-        if not await self._is_group_member(user_id, group_id):
+        if not await self._can_access_group(user_id, group_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Group access denied",
@@ -815,7 +829,7 @@ class ChatService:
                 .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
                 .limit(1)
             )
-            existing = result.scalar_one_or_none()
+            existing = result.scalars().first()
             if existing is not None:
                 if group.ai_config_id and existing.ai_config_id != group.ai_config_id:
                     existing.ai_config_id = group.ai_config_id

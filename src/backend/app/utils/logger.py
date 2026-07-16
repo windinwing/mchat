@@ -47,4 +47,16 @@ def setup_logger() -> None:
         retention="7 days",
     )
 
+    # Dedicated AI-request debug log. Only captures records bound with
+    # `logger.bind(ai_request=True)`, so it stays isolated from app.log.
+    # Rotates daily (new file per day) to keep size manageable.
+    logger.add(
+        "logs/ai_request.log",
+        format=("{message}"),
+        level="INFO",
+        rotation="00:00",
+        retention="14 days",
+        filter=lambda record: record["extra"].get("ai_request") is not None,
+    )
+
     logger.info("Logger initialized")

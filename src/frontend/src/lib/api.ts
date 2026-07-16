@@ -67,12 +67,14 @@ async function request<T = any>(endpoint: string, options: RequestOptions = {}):
       if (!isLoginRequest) {
         removeToken()
         const path = window.location.pathname
+        const search = window.location.search || ''
+        const current = encodeURIComponent(path + search)
         if (path.startsWith('/portal')) {
           if (path !== '/register') {
-            window.location.href = '/register'
+            window.location.href = `/register?redirect=${current}`
           }
         } else if (path !== '/admin/login') {
-          window.location.href = '/admin/login'
+          window.location.href = `/admin/login?redirect=${current}`
         }
       }
     }

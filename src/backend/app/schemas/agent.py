@@ -57,6 +57,7 @@ class AIConfigCreate(BaseModel):
     system_prompt: str | None = None
     temperature: float = Field(0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(2048, ge=1)
+    thinking_enabled: bool = True
     is_default: bool = False
 
 
@@ -65,11 +66,12 @@ class AIConfigUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     provider: str | None = Field(None, max_length=50)
     model: str | None = Field(None, min_length=1, max_length=100)
-    api_key: str | None = Field(None, min_length=1, max_length=500)
+    api_key: str | None = Field(None, max_length=500)
     api_base: str | None = Field(None, max_length=500)
     system_prompt: str | None = None
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(None, ge=1)
+    thinking_enabled: bool | None = None
     is_default: bool | None = None
 
 
@@ -84,10 +86,14 @@ class AIConfigResponse(BaseModel):
     system_prompt: str | None = None
     temperature: float
     max_tokens: int
+    thinking_enabled: bool = True
     is_default: bool
     created_at: datetime
     updated_at: datetime
     api_key: str  # Return full key for admin panel display
+    # True when this config is a system-wide default owned by another account
+    # and surfaced to the current admin/agent as a shared (read-only) config.
+    shared: bool = False
 
     model_config = {"from_attributes": True}
 

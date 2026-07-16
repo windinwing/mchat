@@ -7,6 +7,7 @@ import {
   applyProviderDefaults,
   getDefaultBaseUrl,
   getDefaultModel,
+  isLocalProvider,
   normalizeModelId,
   PROVIDER_MODEL_OPTIONS,
   PROVIDER_STATIC_MODEL_IDS,
@@ -58,6 +59,7 @@ export function PortalAiConfigManager({ onUpdated }: { onUpdated?: () => void })
       { value: 'google', label: t('agents.providerGoogle') },
       { value: 'deepseek', label: t('agents.providerDeepseek') },
       { value: 'ollama', label: t('agents.providerOllama') },
+      { value: 'lmstudio', label: t('agents.providerLmStudio') },
       { value: 'groq', label: t('agents.providerGroqFast') },
       { value: 'zhipu', label: t('agents.providerZhipu') },
       { value: 'zhipu-coding', label: t('agents.providerZhipuCoding') },
@@ -201,7 +203,7 @@ export function PortalAiConfigManager({ onUpdated }: { onUpdated?: () => void })
       toast(t('portal.aiConfigNameRequired'), { type: 'error' })
       return
     }
-    if (!form.api_key.trim() && !editingId) {
+    if (!form.api_key.trim() && !editingId && !isLocalProvider(form.provider)) {
       toast(t('portal.aiConfigFieldsRequired'), { type: 'error' })
       return
     }
@@ -354,7 +356,10 @@ export function PortalAiConfigManager({ onUpdated }: { onUpdated?: () => void })
           <Button
             onClick={handleSave}
             isLoading={saving}
-            disabled={!form.name.trim() || (!editingId && !form.api_key.trim())}
+            disabled={
+              !form.name.trim() ||
+              (!editingId && !form.api_key.trim() && !isLocalProvider(form.provider))
+            }
           >
             {editingId ? t('common.save') : t('portal.createAiConfig')}
           </Button>

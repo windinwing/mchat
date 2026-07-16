@@ -187,6 +187,13 @@ class SettingsService:
         sms_workflow_alert_enabled = get_val(
             "sms_workflow_alert_enabled", DEFAULT_SETTINGS.sms_workflow_alert_enabled
         )
+        chat_debug_log_enabled = get_val(
+            "chat_debug_log_enabled", DEFAULT_SETTINGS.chat_debug_log_enabled
+        )
+        chat_debug_extra_data_enabled = get_val(
+            "chat_debug_extra_data_enabled",
+            DEFAULT_SETTINGS.chat_debug_extra_data_enabled,
+        )
         sync_notification_settings_from_db(
             enabled=notification_skills_enabled,
             allowlist=notification_skill_allowlist or None,
@@ -217,6 +224,8 @@ class SettingsService:
         settings.worker_log_cleanup_enabled = worker_log_cleanup_enabled
         settings.worker_log_retention_days = worker_log_retention_days
         settings.worker_usage_reset_enabled = worker_usage_reset_enabled
+        settings.chat_debug_log_enabled = chat_debug_log_enabled
+        settings.chat_debug_extra_data_enabled = chat_debug_extra_data_enabled
 
         return AppSettingsResponse(
             site_name=get_val("site_name", DEFAULT_SETTINGS.site_name),
@@ -265,6 +274,8 @@ class SettingsService:
             sms_alert_phones=sms_alert_phones,
             sms_send_cooldown_seconds=int(sms_send_cooldown_seconds),
             sms_workflow_alert_enabled=sms_workflow_alert_enabled,
+            chat_debug_log_enabled=chat_debug_log_enabled,
+            chat_debug_extra_data_enabled=chat_debug_extra_data_enabled,
         )
 
     async def update_settings(self, data: AppSettingsUpdate) -> AppSettingsResponse:

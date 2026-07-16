@@ -13,7 +13,10 @@
 #   bash /opt/xiaoxiao/mchat/ops/scripts/gamecenter-remote-pipeline-build.sh {slug} {build_id}
 set -euo pipefail
 
-# DevBridge subprocess may not inherit .env; load server env when present.
+# DevBridge subprocess inherits the worker's os.environ; stale Windows-agent
+# variables survive .env edits until the worker restarts. Clear first, then load.
+unset GAMECENTER_BUILD_AGENT_URL GAMECENTER_BUILD_AGENT_TOKEN 2>/dev/null || true
+
 MCHAT_ENV_FILE="${MCHAT_ENV_FILE:-/opt/xiaoxiao/mchat/.env}"
 if [[ -f "$MCHAT_ENV_FILE" ]]; then
   while IFS= read -r line; do

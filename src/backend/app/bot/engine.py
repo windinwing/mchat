@@ -307,7 +307,10 @@ async def _append_rag_context(
                 query=query,
                 user_id=user_id,
                 knowledge_base_id=kb_id,
-                top_k=3,
+                # top_k=None → use each KB's configured retrieval_top_k (rag.py
+                # resolves `final_k = top_k or retrieval.top_k`). Previously
+                # hardcoded to 3, which silently overrode per-KB settings.
+                top_k=None,
                 chat_fn=chat_fn,
                 conversation_id=conversation_id,
                 log_source="chat",
@@ -441,24 +444,32 @@ async def process_message(
     try:
         if ai_config is None:
             result = await db_session.execute(
-                select(AIConfig).where(AIConfig.is_default == True)
+                select(AIConfig)
+                .where(AIConfig.is_default == True)
+                .order_by(AIConfig.updated_at.desc())
+                .limit(1)
             )
-            ai_config = result.scalar_one_or_none()
+            ai_config = result.scalars().first()
 
         if ai_config is None:
             yield "Error: No AI configuration available. Please configure an AI provider first."
             return
 
         if not (ai_config.api_key or "").strip():
-            from app.services.llm_credentials import ensure_ai_config_api_key, is_usable_api_key
+            from app.services.llm_credentials import (
+                ensure_ai_config_api_key,
+                is_local_provider,
+                is_usable_api_key,
+            )
 
-            ai_config = await ensure_ai_config_api_key(db_session, ai_config)
-            if not is_usable_api_key(ai_config.api_key):
-                yield (
-                    "Error: 未配置有效的 AI API 密钥。请在管理后台「模型工作台」填写 API Key，"
-                    "或在 .env 设置 DEEPSEEK_API_KEY / MOONSHOT_API_KEY。"
-                )
-                return
+            if not is_local_provider(ai_config.provider):
+                ai_config = await ensure_ai_config_api_key(db_session, ai_config)
+                if not is_usable_api_key(ai_config.api_key):
+                    yield (
+                        "Error: 未配置有效的 AI API 密钥。请在管理后台「模型工作台」填写 API Key，"
+                        "或在 .env 设置 DEEPSEEK_API_KEY / MOONSHOT_API_KEY。"
+                    )
+                    return
 
         system_prompt = ai_config.system_prompt or "You are a helpful AI assistant."
         channel_extra = (
@@ -604,7 +615,9 @@ async def process_message(
                     "extra_data": hist_msg.extra_data,
                 }
             )
-        messages_list.extend(sanitize_history_messages(history_payload))
+        messages_list.extend(
+            sanitize_history_messages(history_payload, user_id=ai_config.user_id)
+        )
 
         # Compress context if approaching model limit
         from app.bot.context_compressor import compress_history, get_context_limit
@@ -619,16 +632,17 @@ async def process_message(
             model=ai_config.model or "",
             api_key=ai_config.api_key or "",
             api_base=ai_config.api_base,
+            provider=ai_config.provider or "",
         )
 
-        messages_list.append(
-            {
-                "role": "user",
-                "content": attachment_prompt_text(
-                    message.content, message.extra_data
-                ),
-            }
+        # Build the current user turn. Images become inline base64 image_url
+        # parts so vision-capable models actually see the pixels.
+        from app.bot.chat_attachments import build_multimodal_content
+
+        current_content = build_multimodal_content(
+            message.content, message.extra_data, ai_config.user_id
         )
+        messages_list.append({"role": "user", "content": current_content})
 
         provider = create_provider(ai_config)
         full_response = ""
@@ -697,6 +711,43 @@ async def process_message(
                 yield processed
                 if parts_out is not None:
                     parts_out.append(processed)
+
+        # ── Debug recording: capture the full request payload once, right
+        # before the first model call. Gated by admin settings (default off).
+        debug_summary: dict[str, Any] | None = None
+        from app.core.config import settings as _settings
+
+        if (
+            _settings.chat_debug_log_enabled
+            or _settings.chat_debug_extra_data_enabled
+        ):
+            from app.bot.context_compressor import (
+                estimate_messages_tokens as _est_tokens,
+            )
+            from app.bot.request_debug import build_debug_summary, log_full_request
+
+            _token_est = _est_tokens(messages_list)
+            debug_summary = build_debug_summary(
+                ai_config,
+                messages_list,
+                tools if tools else None,
+                knowledge_hits,
+                rag_top_k=None,  # KB-configured (see _search_kb above)
+                system_prompt=system_prompt,
+                estimated_prompt_tokens=_token_est,
+            )
+            if _settings.chat_debug_log_enabled:
+                log_full_request(
+                    conversation_id=conversation.id,
+                    message_id=message.id,
+                    ai_config=ai_config,
+                    system_prompt=system_prompt,
+                    messages=messages_list,
+                    tools=tools if tools else None,
+                    knowledge_hits=knowledge_hits,
+                    rag_top_k=None,
+                    estimated_prompt_tokens=_token_est,
+                )
 
         for _tool_round in range(max_tool_rounds):
             tool_calls_map: dict[str, dict[str, Any]] = {}
@@ -977,9 +1028,7 @@ async def process_message(
             )
             auto_reply_assets = [match["asset"] for match in auto_reply_matches]
             merged_assets = auto_reply_assets + tool_turn_assets
-            assistant_extra_data = enrich_message_extra_data(
-                full_response,
-                {
+            _extra: dict[str, Any] = {
                     "model": ai_config.model,
                     "provider": ai_config.provider,
                     "devbridge_modified_files": devbridge_modified_files or None,
@@ -997,7 +1046,15 @@ async def process_message(
                         for match in auto_reply_matches
                     ],
                     "outbound_assets": merged_assets,
-                },
+                }
+            if (
+                debug_summary
+                and _settings.chat_debug_extra_data_enabled
+            ):
+                _extra["debug_request"] = debug_summary.get("debug_request")
+            assistant_extra_data = enrich_message_extra_data(
+                full_response,
+                _extra,
             )
             assistant_msg = Message(
                 conversation_id=conversation.id,

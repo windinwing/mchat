@@ -203,9 +203,12 @@ async def channel_resolve_ai_config(
         if cfg is not None:
             return cfg
     result = await db.execute(
-        select(AIConfig).where(AIConfig.is_default == True)
+        select(AIConfig)
+        .where(AIConfig.is_default == True)
+        .order_by(AIConfig.updated_at.desc())
+        .limit(1)
     )
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def channel_trigger_bound_workflows(

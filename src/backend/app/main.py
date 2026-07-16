@@ -109,6 +109,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except ImportError:
         logger.warning("app.knowledge.index_runner not available, skipping index runner")
 
+    # NOTE: DevBridge build workers run as a separate process
+    # (ops/scripts/gamecenter-build-worker.py), NOT inside the API server.
+    # This avoids blocking API workers during long compilations.
+
     logger.info("mchat backend server started successfully")
     yield
 

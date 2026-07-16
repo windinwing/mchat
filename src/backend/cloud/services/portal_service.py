@@ -12,7 +12,7 @@ from app.services.agent_service import AgentService
 from app.services.maintenance_gate import ensure_public_api_available
 from app.services.skill_filter import filter_skill_ids_global, filter_tenant_skill_ids
 from app.services.skill_service import SkillService
-from app.services.llm_credentials import is_usable_api_key, resolve_api_key
+from app.services.llm_credentials import is_ai_config_ready, resolve_api_key
 from app.models.channel_template import ChannelTemplate
 from app.models.skill import Skill
 from app.models.conversation import Conversation
@@ -174,7 +174,7 @@ class PortalService:
                 key = resolve_api_key(
                     platform_default.provider, platform_default.api_key
                 )
-                if is_usable_api_key(key):
+                if is_ai_config_ready(platform_default.provider, key):
                     ai_config = AIConfig(
                         name=f"{template.name} AI",
                         user_id=user.id,

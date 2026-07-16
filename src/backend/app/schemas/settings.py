@@ -51,6 +51,8 @@ class AppSettingsResponse(BaseModel):
     sms_alert_phones: list[str] = Field(default_factory=list)
     sms_send_cooldown_seconds: int = 60
     sms_workflow_alert_enabled: bool = False
+    chat_debug_log_enabled: bool = False
+    chat_debug_extra_data_enabled: bool = False
 
 
 class AppSettingsUpdate(BaseModel):
@@ -101,6 +103,8 @@ class AppSettingsUpdate(BaseModel):
     sms_alert_phones: list[str] | None = None
     sms_send_cooldown_seconds: int | None = Field(None, ge=30, le=3600)
     sms_workflow_alert_enabled: bool | None = None
+    chat_debug_log_enabled: bool | None = None
+    chat_debug_extra_data_enabled: bool | None = None
 
 
 class AppLogResponse(BaseModel):

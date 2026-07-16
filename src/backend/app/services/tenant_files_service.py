@@ -80,10 +80,11 @@ def _resolve_path(user_id: str, subdir: str, relative: str) -> Path:
 
 
 def _file_url(user_id: str, subdir: str, relative: str) -> str:
-    from urllib.parse import quote
+    """Signed download URL — no auth header needed (works in <img>/<video>)."""
+    from app.utils.upload_tokens import signed_workspace_download_url
 
     rel = relative.replace("\\", "/").lstrip("/")
-    return f"/api/workspace/files/download?subdir={quote(subdir)}&path={quote(rel)}"
+    return signed_workspace_download_url(user_id, subdir, rel)
 
 
 class TenantFilesService:

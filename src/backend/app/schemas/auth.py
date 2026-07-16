@@ -68,6 +68,8 @@ class BootstrapResponse(BaseModel):
     username: str
     password: str | None = None
     show_credentials: bool = False
+    signup_enabled: bool = False
+    cloud_edition: bool = False
 
 
 class ChangePasswordRequest(BaseModel):

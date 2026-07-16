@@ -7,6 +7,7 @@ Run with: uvicorn cloud.main:app
 from fastapi import FastAPI
 
 from app.main import create_app as create_core_app
+from app.core.config import settings
 from cloud.api.auth import router as cloud_auth_router
 from cloud.api.pay_callbacks import router as pay_callbacks_router
 from cloud.api.payments import router as payments_router
@@ -16,6 +17,10 @@ from cloud.api.admin_templates import router as admin_templates_router
 from cloud.api.admin_orders import router as admin_orders_router
 from cloud.api.admin_subscriptions import router as admin_subscriptions_router
 from cloud.bot.studio_memory import register_cloud_chat_extensions
+
+# Mark that the Cloud edition is running, so the public /auth/bootstrap endpoint
+# can report it to the frontend (decouples edition from the build-time flag).
+settings.mchat_cloud_mode = True
 
 register_cloud_chat_extensions()
 

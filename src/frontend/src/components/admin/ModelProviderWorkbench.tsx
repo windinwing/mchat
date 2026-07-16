@@ -24,6 +24,7 @@ import {
   applyProviderDefaults,
   getDefaultBaseUrl,
   getDefaultModel,
+  isLocalProvider,
   normalizeModelId,
   PROVIDER_DEFAULT_BASE_URLS,
   PROVIDER_STATIC_MODEL_IDS,
@@ -40,6 +41,8 @@ interface AIConfig {
   temperature: number
   max_tokens: number
   is_default: boolean
+  /** True for a system-wide default owned by another account (read-only here). */
+  shared?: boolean
 }
 
 function connectionKey(c: Pick<AIConfig, 'provider' | 'api_base'>) {
@@ -67,6 +70,7 @@ export function ModelProviderWorkbench() {
       { value: 'google', label: t('agents.providerGoogle') },
       { value: 'deepseek', label: t('agents.providerDeepseek') },
       { value: 'ollama', label: t('agents.providerOllama') },
+      { value: 'lmstudio', label: t('agents.providerLmStudio') },
       { value: 'groq', label: t('agents.providerGroq') },
       { value: 'zhipu', label: t('agents.providerZhipu') },
       { value: 'zhipu-coding', label: t('agents.providerZhipuCoding') },
@@ -99,10 +103,19 @@ export function ModelProviderWorkbench() {
       const data = await api.get<AIConfig[]>('/agents/ai-configs')
       setConfigs(data)
       if (data.length && !selectedId) {
-        setSelectedId(data[0].id)
-        const first = withProviderDefaults(data[0])
+        // Restore selection shared with the "Advanced" tab (AgentConfig).
+        const stored = localStorage.getItem('mchat:agents:selectedId')
+        const initial = data.find((c) => c.id === stored) ?? data[0]
+        setSelectedId(initial.id)
+        const first = withProviderDefaults(initial)
         setDraft(first)
-        setRemoteModels(PROVIDER_STATIC_MODEL_IDS[first.provider!] || [])
+        if (isLocalProvider(first.provider)) {
+          // Local model names are machine-specific (include tags, e.g.
+          // "deepseek-r1:32b"); the static presets never match. Auto-fetch.
+          void fetchModels(first)
+        } else {
+          setRemoteModels(PROVIDER_STATIC_MODEL_IDS[first.provider!] || [])
+        }
       }
     } catch {
       toast(t('agents.workbenchToastLoadFailed'), { type: 'error' })
@@ -113,13 +126,18 @@ export function ModelProviderWorkbench() {
 
   const selectConfig = async (id: string) => {
     setSelectedId(id)
+    localStorage.setItem('mchat:agents:selectedId', id)
     setRemoteModels([])
     setModelSearch('')
     try {
       const data = await api.get<AIConfig>(`/agents/ai-configs/${id}`)
       const next = withProviderDefaults(data)
       setDraft(next)
-      setRemoteModels(PROVIDER_STATIC_MODEL_IDS[next.provider!] || [])
+      if (isLocalProvider(next.provider)) {
+        void fetchModels(next)
+      } else {
+        setRemoteModels(PROVIDER_STATIC_MODEL_IDS[next.provider!] || [])
+      }
     } catch {
       toast(t('agents.workbenchToastLoadConfigFailed'), { type: 'error' })
     }
@@ -150,6 +168,20 @@ export function ModelProviderWorkbench() {
 
   const handleSave = async () => {
     if (!selectedId) return
+    // Local providers (Ollama/LM Studio): model ids are machine-specific and
+    // must match exactly. If we have the real list but the selected model
+    // isn't in it, warn before saving — a mismatched id causes a 404 at chat.
+    if (
+      isLocalProvider(draft.provider) &&
+      draft.model &&
+      remoteModels.length > 0 &&
+      !remoteModels.includes(draft.model)
+    ) {
+      toast(
+        t('agents.workbenchModelNotInList', { model: draft.model }),
+        { type: 'warning' },
+      )
+    }
     setSaving(true)
     try {
       const payload = { ...draft }
@@ -172,21 +204,25 @@ export function ModelProviderWorkbench() {
     }
   }
 
-  const fetchModels = async () => {
-    if (!draft.provider) return
+  const fetchModels = async (override?: Partial<AIConfig>) => {
+    const provider = override?.provider || draft.provider
+    if (!provider) return
+    const apiBase = override?.api_base ?? draft.api_base ?? getDefaultBaseUrl(provider) ?? ''
     setFetchingModels(true)
     try {
       const res = await api.post<{ models: string[] }>('/agents/ai-configs/models', {
-        provider: draft.provider,
-        api_key: draft.api_key || '',
-        api_base: draft.api_base || getDefaultBaseUrl(draft.provider) || '',
-        config_id: selectedId || undefined,
+        provider,
+        api_key: override?.api_key || draft.api_key || '',
+        api_base: apiBase,
+        config_id: (override?.id || selectedId) || undefined,
       })
       setRemoteModels(res.models)
       if (!res.models.length) {
         toast(t('agents.workbenchToastNoModels'), { type: 'info' })
       }
     } catch (err: any) {
+      // Keep the static fallback list so the user can still pick something.
+      setRemoteModels(PROVIDER_STATIC_MODEL_IDS[provider] || [])
       toast(t('agents.workbenchToastFetchModelsFailed'), { type: 'error', message: err.message })
     } finally {
       setFetchingModels(false)
@@ -328,7 +364,12 @@ export function ModelProviderWorkbench() {
                     <span className="flex-1 truncate text-gray-900 dark:text-gray-100">
                       {c.name}
                     </span>
-                    {c.is_default && (
+                    {c.shared && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                        {t('agents.workbenchSharedBadge')}
+                      </span>
+                    )}
+                    {!c.shared && c.is_default && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary-100 dark:bg-primary-800 text-primary-700 dark:text-primary-200">
                         {t('agents.workbenchDefaultBadge')}
                       </span>
@@ -355,15 +396,23 @@ export function ModelProviderWorkbench() {
                 <div>
                   <h3 className="font-semibold text-gray-900 dark:text-gray-100">
                     {draft.name || t('agents.workbenchUnnamed')}
+                    {draft.shared && (
+                      <span className="ml-2 align-middle text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                        {t('agents.workbenchSharedBadge')}
+                      </span>
+                    )}
                   </h3>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {t('agents.workbenchCredentialHint')}
+                    {draft.shared
+                      ? t('agents.workbenchSharedReadOnly')
+                      : t('agents.workbenchCredentialHint')}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-500 dark:text-gray-400">{t('agents.workbenchDefaultModel')}</span>
                   <Switch
                     checked={draft.is_default ?? false}
+                    disabled={!!draft.shared}
                     onChange={(checked) =>
                       setDraft({ ...draft, is_default: checked })
                     }
@@ -380,6 +429,7 @@ export function ModelProviderWorkbench() {
                   <Button
                     size="sm"
                     onClick={handleSave}
+                    disabled={!!draft.shared}
                     isLoading={saving}
                     leftIcon={<Save className="w-4 h-4" />}
                   >
@@ -388,6 +438,7 @@ export function ModelProviderWorkbench() {
                   <Button
                     size="sm"
                     variant="ghost"
+                    disabled={!!draft.shared}
                     onClick={() => handleDelete(selectedId)}
                   >
                     <Trash2 className="w-4 h-4 text-red-500" />
@@ -399,23 +450,30 @@ export function ModelProviderWorkbench() {
                 <Input
                   label={t('agents.workbenchConfigName')}
                   value={draft.name || ''}
+                  disabled={!!draft.shared}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 />
                 <Select
                   label={t('agents.workbenchProvider')}
                   options={providerOptions}
                   value={draft.provider || 'deepseek'}
+                  disabled={!!draft.shared}
                   onChange={(e) => {
                     const provider = e.target.value
                     const next = applyProviderDefaults(draft, provider)
                     setDraft(next)
-                    setRemoteModels(PROVIDER_STATIC_MODEL_IDS[provider] || [])
+                    if (isLocalProvider(provider)) {
+                      void fetchModels(next)
+                    } else {
+                      setRemoteModels(PROVIDER_STATIC_MODEL_IDS[provider] || [])
+                    }
                   }}
                 />
                 <Input
                   label={t('agents.workbenchApiKey')}
                   type="password"
                   value={draft.api_key || ''}
+                  disabled={!!draft.shared}
                   onChange={(e) =>
                     setDraft({ ...draft, api_key: e.target.value })
                   }
@@ -453,7 +511,7 @@ export function ModelProviderWorkbench() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={fetchModels}
+                    onClick={() => fetchModels()}
                     isLoading={fetchingModels}
                     leftIcon={<RefreshCw className="w-4 h-4" />}
                   >

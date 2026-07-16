@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     sms_alert_phones: list[str] | None = None
     sms_send_cooldown_seconds: int = 60
     sms_workflow_alert_enabled: bool = False
+    chat_debug_log_enabled: bool = False
+    chat_debug_extra_data_enabled: bool = False
     notification_skills_enabled: bool = False
     notification_skill_allowlist: list[str] | None = None
 
@@ -81,6 +83,10 @@ class Settings(BaseSettings):
 
     # Portal signup on Core edition (phone OTP + 9235 SSO). Auto-on when PATENT9235_JWT_SECRET is set.
     mchat_signup_enabled: bool = False
+
+    # Set to True at runtime by cloud.main — distinguishes the Cloud edition
+    # from Core even when the frontend was built with the wrong VITE_MCHAT_EDITION.
+    mchat_cloud_mode: bool = False
 
     # Encrypt skill_bindings secrets at rest (Fernet key or any string — hashed if needed)
     secrets_encryption_key: str = ""
@@ -165,7 +171,7 @@ class Settings(BaseSettings):
     gamecenter_build_worker_pool_size: int = 5
     gamecenter_auto_build_after_patch: bool = False
     gamecenter_watch_build_in_chat: bool = True
-    gamecenter_build_timeout_seconds: int = 1800
+    gamecenter_build_timeout_seconds: int = 3600
     gamecenter_release_keep_builds: int = 10
     gamecenter_publish_enabled: bool = False
     gamecenter_playables_root: str = ""
@@ -267,6 +273,11 @@ class Settings(BaseSettings):
         if self.mchat_signup_enabled:
             return True
         return bool((self.patent9235_jwt_secret or "").strip())
+
+    @property
+    def cloud_mode(self) -> bool:
+        """True when the Cloud app factory (cloud.main) is running."""
+        return self.mchat_cloud_mode
 
 
 settings = Settings()

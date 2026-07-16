@@ -49,6 +49,8 @@ interface AppSettings {
   sms_alert_phones: string[]
   sms_send_cooldown_seconds: number
   sms_workflow_alert_enabled: boolean
+  chat_debug_log_enabled: boolean
+  chat_debug_extra_data_enabled: boolean
 }
 
 interface AppLogResponse {
@@ -117,6 +119,8 @@ export function SettingsPage() {
     sms_alert_phones: [],
     sms_send_cooldown_seconds: 60,
     sms_workflow_alert_enabled: false,
+    chat_debug_log_enabled: false,
+    chat_debug_extra_data_enabled: false,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -629,6 +633,40 @@ export function SettingsPage() {
 
           <TabPanel id="logs" activeTab={activeTab}>
             <div className="space-y-4">
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  {t('settings.chatDebugTitle')}
+                </p>
+                <p className="text-xs text-gray-500">{t('settings.chatDebugHint')}</p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {t('settings.chatDebugLog')}
+                    </p>
+                    <p className="text-xs text-gray-500">{t('settings.chatDebugLogHint')}</p>
+                  </div>
+                  <Switch
+                    checked={settings.chat_debug_log_enabled}
+                    onChange={(checked) =>
+                      setSettings({ ...settings, chat_debug_log_enabled: checked })
+                    }
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {t('settings.chatDebugExtraData')}
+                    </p>
+                    <p className="text-xs text-gray-500">{t('settings.chatDebugExtraDataHint')}</p>
+                  </div>
+                  <Switch
+                    checked={settings.chat_debug_extra_data_enabled}
+                    onChange={(checked) =>
+                      setSettings({ ...settings, chat_debug_extra_data_enabled: checked })
+                    }
+                  />
+                </div>
+              </div>
               <div className="flex items-center justify-between gap-3">
                 <div className="w-48">
                   <Select

@@ -70,7 +70,10 @@ def bridge_config_from_settings(provider_key: str, cfg: dict[str, Any]) -> Roote
         max_read_bytes=256 * 1024,
         max_list_entries=2000,
         build_command=str(cfg.get("build_command") or ""),
-        build_timeout_seconds=int(cfg.get("build_timeout_seconds") or 1800),
+        build_timeout_seconds=int(
+            cfg.get("build_timeout_seconds")
+            or settings.gamecenter_build_timeout_seconds
+        ),
         keep_builds=int(cfg.get("release_keep_builds") or 10),
         cocos_creator_bin=str(cfg.get("cocos_creator_bin") or "").strip(),
         publish_enabled=bool(cfg.get("publish_enabled")),

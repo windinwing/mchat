@@ -48,7 +48,7 @@ const emptyProvider = (): BridgeProviderSettings => ({
   data_root: '',
   build_command: '',
   auto_build_after_patch: false,
-  build_timeout_seconds: 1800,
+  build_timeout_seconds: 3600,
   cocos_creator_bin: '',
   playables_root: '',
   sync_extracted_root: '',

@@ -22,6 +22,7 @@ STATIC_MODELS: dict[str, list[str]] = {
         "deepseek-reasoner",
     ],
     "ollama": ["llama3.2", "qwen2.5", "deepseek-r1", "mistral"],
+    "lmstudio": ["local-model"],
     "groq": [
         "llama-3.3-70b-versatile",
         "llama-3.1-8b-instant",
@@ -49,6 +50,7 @@ DEFAULT_BASE_URLS: dict[str, str] = {
     "google": "https://generativelanguage.googleapis.com",
     "deepseek": "https://api.deepseek.com/v1",
     "ollama": "http://localhost:11434/v1",
+    "lmstudio": "http://localhost:1234/v1",
     "groq": "https://api.groq.com/openai/v1",
     "zhipu": "https://open.bigmodel.cn/api/paas/v4",
     "zhipu-coding": "https://open.bigmodel.cn/api/coding/paas/v4",
@@ -65,10 +67,33 @@ class ConnectionParams:
     api_base: str | None = None
 
 
+#: Providers whose base URL needs a /v1 suffix when one isn't present.
+#: NOTE: this is NOT the same as "OpenAI-compatible". Zhipu GLM is OpenAI-
+#: compatible but its URL already includes its own version path (/paas/v4),
+#: so adding /v1 would corrupt it. Listed here are providers whose default
+#: base ends in a bare host (e.g. http://localhost:11434) needing /v1 appended.
+_NEEDS_V1_SUFFIX_PROVIDERS = frozenset({
+    "openai",
+    "deepseek",
+    "ollama",
+    "lmstudio",
+    "groq",
+    "moonshot",
+    "siliconflow",
+    "together",
+    "openai-compatible",
+})
+
+
 def _resolve_base_url(provider: str, api_base: str | None) -> str | None:
-    if api_base:
-        return api_base.rstrip("/")
-    return DEFAULT_BASE_URLS.get(provider)
+    base = (api_base or "").strip().rstrip("/") or DEFAULT_BASE_URLS.get(provider)
+    if not base:
+        return None
+    # Ensure /v1 suffix for OpenAI-compatible endpoints (Ollama, LM Studio, …).
+    # Omitting it silently breaks /v1/models and /v1/chat/completions.
+    if (provider or "").lower() in _NEEDS_V1_SUFFIX_PROVIDERS and not base.endswith("/v1"):
+        base = f"{base}/v1"
+    return base
 
 
 async def list_models(params: ConnectionParams) -> list[str]:
@@ -79,6 +104,7 @@ async def list_models(params: ConnectionParams) -> list[str]:
             "openai",
             "deepseek",
             "ollama",
+            "lmstudio",
             "groq",
             "zhipu",
             "zhipu-coding",
@@ -101,8 +127,12 @@ async def list_models(params: ConnectionParams) -> list[str]:
 async def _list_openai_compatible(params: ConnectionParams) -> list[str]:
     from openai import AsyncOpenAI
 
+    from app.services.llm_credentials import is_local_provider
+
     base = _resolve_base_url(params.provider, params.api_base)
-    key = params.api_key or ("ollama" if params.provider == "ollama" else "not-needed")
+    key = params.api_key or (
+        params.provider if is_local_provider(params.provider) else "not-needed"
+    )
     client_kwargs: dict = {"api_key": key}
     if base:
         client_kwargs["base_url"] = base
@@ -169,11 +199,24 @@ async def test_connection(
     try:
         llm = create_provider(cfg)
         messages = [{"role": "user", "content": "hi"}]
+        error_text = ""
+        got_content = False
         async for chunk in llm.stream_chat(messages, max_tokens=8):
-            if chunk.get("type") == "content" and chunk.get("content"):
-                return True, "连接成功"
-            if chunk.get("type") == "done":
+            if chunk.get("type") == "content":
+                text = chunk.get("content") or ""
+                # stream_chat wraps request failures as {"content": "Error: ..."}
+                # rather than raising. Treat those as a failed connection so the
+                # user sees the real cause (connection refused, model not found, …).
+                if text.startswith("Error:"):
+                    error_text = text
+                elif text:
+                    got_content = True
+            elif chunk.get("type") == "done":
                 break
+        if got_content:
+            return True, "连接成功"
+        if error_text:
+            return False, error_text
         return True, "连接成功（无返回内容）"
     except Exception as e:
         return False, str(e)

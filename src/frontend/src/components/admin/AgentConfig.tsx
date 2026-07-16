@@ -13,10 +13,8 @@ import { Dialog } from '@/components/ui/Dialog'
 import { toast } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
 import {
-  applyProviderDefaults,
   getDefaultModel,
   PROVIDER_DEFAULT_BASE_URLS,
-  PROVIDER_MODEL_OPTIONS,
 } from '@/lib/providerDefaults'
 
 interface AgentConfig {
@@ -29,57 +27,21 @@ interface AgentConfig {
   system_prompt: string | null
   temperature: number
   max_tokens: number
+  thinking_enabled?: boolean
   top_p?: number
   is_default: boolean
   created_at: string
   updated_at: string
+  /** True for a system-wide default owned by another account (read-only here). */
+  shared?: boolean
 }
 
 export function AgentConfig() {
   const { t } = useTranslation()
-  const modelOptions = useMemo(() => {
-    const opts = { ...PROVIDER_MODEL_OPTIONS }
-    opts.deepseek = [
-      { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
-      { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
-      {
-        value: 'deepseek-chat',
-        label: t('agents.modelDeepseekChatDeprecated'),
-      },
-      {
-        value: 'deepseek-reasoner',
-        label: t('agents.modelDeepseekReasonerDeprecated'),
-      },
-    ]
-    opts['openai-compatible'] = [
-      { value: 'custom-model', label: t('agents.customModel') },
-    ]
-    return opts
-  }, [t])
-  const providerOptions = useMemo(
-    () => [
-      { value: 'openai', label: t('agents.providerOpenai') },
-      { value: 'anthropic', label: t('agents.providerAnthropic') },
-      { value: 'google', label: t('agents.providerGoogle') },
-      { value: 'deepseek', label: t('agents.providerDeepseek') },
-      { value: 'ollama', label: t('agents.providerOllama') },
-      { value: 'groq', label: t('agents.providerGroqFast') },
-      { value: 'zhipu', label: t('agents.providerZhipu') },
-      { value: 'zhipu-coding', label: t('agents.providerZhipuCoding') },
-      { value: 'moonshot', label: t('agents.providerMoonshot') },
-      { value: 'siliconflow', label: t('agents.providerSiliconflow') },
-      { value: 'together', label: t('agents.providerTogether') },
-      { value: 'openai-compatible', label: t('agents.providerOpenAiCompatible') },
-    ],
-    [t],
-  )
-
   const tabs = useMemo(
     () => [
-      { id: 'basic', label: t('agents.tabBasic') },
-      { id: 'api', label: t('agents.tabApi') },
-      { id: 'model', label: t('agents.tabModel') },
       { id: 'prompt', label: t('agents.tabPrompt') },
+      { id: 'model', label: t('agents.tabModel') },
     ],
     [t],
   )
@@ -97,7 +59,7 @@ export function AgentConfig() {
     api_base: PROVIDER_DEFAULT_BASE_URLS.deepseek,
     is_default: true,
   })
-  const [activeTab, setActiveTab] = useState('basic')
+  const [activeTab, setActiveTab] = useState('prompt')
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
 
@@ -110,8 +72,13 @@ export function AgentConfig() {
       const data = await api.get<AgentConfig[]>('/agents/ai-configs')
       setAgents(data)
       if (data.length > 0) {
-        setSelectedAgentId(data[0].id)
-        setConfig(data[0])
+        // Restore the previously selected config across tabs (shared with the
+        // model workbench via localStorage) so switching tabs keeps the same
+        // config selected instead of jumping back to the first one.
+        const stored = localStorage.getItem('mchat:agents:selectedId')
+        const initial = data.find((a) => a.id === stored) ?? data[0]
+        setSelectedAgentId(initial.id)
+        setConfig(initial)
       }
     } catch (err) {
       console.error('Failed to load agents:', err)
@@ -123,6 +90,7 @@ export function AgentConfig() {
 
   const selectAgent = async (id: string) => {
     setSelectedAgentId(id)
+    localStorage.setItem('mchat:agents:selectedId', id)
     try {
       const data = await api.get<AgentConfig>(`/agents/ai-configs/${id}`)
       setConfig(data)
@@ -135,19 +103,22 @@ export function AgentConfig() {
     if (!selectedAgentId) return
     setSaving(true)
     try {
-      const currentKey = config.api_key  // Remember current key
-      const payload: any = { ...config }
-      delete payload.id
-      delete payload.created_at
-      delete payload.updated_at
-      delete payload.user_id
+      // Only persist fields edited here (system_prompt, temperature, max_tokens,
+      // is_default). Provider/model/api_key/api_base are managed by the model
+      // workbench — sending them would overwrite workbench values with stale ones.
+      const payload: Partial<AgentConfig> = {
+        system_prompt: config.system_prompt ?? null,
+        temperature: config.temperature ?? 0.7,
+        max_tokens: config.max_tokens ?? 2048,
+        thinking_enabled: config.thinking_enabled ?? true,
+        is_default: config.is_default ?? false,
+      }
 
       const updated = await api.put<AgentConfig>(
         `/agents/ai-configs/${selectedAgentId}`,
         payload,
       )
-      // Merge: response api_key wins, fallback to what user typed
-      setConfig({ ...config, ...updated, api_key: updated.api_key || currentKey || '' })
+      setConfig({ ...config, ...updated })
       setAgents((prev) =>
         prev.map((a) => (a.id === selectedAgentId ? { ...a, ...updated } : a)),
       )
@@ -209,13 +180,17 @@ export function AgentConfig() {
   }
 
   const selectedLabel = agents.find((a) => a.id === selectedAgentId)?.name
+  const isShared = !!config.shared
 
   return (
     <div className="space-y-4">
       {/* Agent selector */}
       <div className="flex items-center gap-3">
         <Select
-          options={agents.map((a) => ({ value: a.id, label: a.name }))}
+          options={agents.map((a) => ({
+            value: a.id,
+            label: a.shared ? `${a.name} · ${t('agents.workbenchSharedBadge')}` : a.name,
+          }))}
           value={selectedAgentId || ''}
           onChange={(e: any) => selectAgent(e.target.value)}
           className="w-60"
@@ -225,6 +200,7 @@ export function AgentConfig() {
           variant="secondary"
           leftIcon={<Plus className="w-4 h-4" />}
           onClick={() => setCreateOpen(true)}
+          className="!w-[150px] justify-center"
         >
           {t('agents.newConfig')}
         </Button>
@@ -232,6 +208,7 @@ export function AgentConfig() {
           <Button
             size="sm"
             variant="ghost"
+            disabled={isShared}
             onClick={() => handleDelete(selectedAgentId)}
           >
             <Trash2 className="w-4 h-4 text-red-500" />
@@ -246,6 +223,11 @@ export function AgentConfig() {
               <Bot className="w-5 h-5 text-primary-600" />
               <h3 className="font-medium text-gray-900 dark:text-gray-100">
                 {selectedLabel || t('agents.cardTitleFallback')}
+                {isShared && (
+                  <span className="ml-2 align-middle text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                    {t('agents.workbenchSharedBadge')}
+                  </span>
+                )}
               </h3>
             </div>
             <div className="flex items-center gap-3">
@@ -253,12 +235,14 @@ export function AgentConfig() {
                 <span className="text-xs text-gray-500 dark:text-gray-400">{t('agents.defaultToggle')}</span>
                 <Switch
                   checked={config.is_default ?? false}
+                  disabled={isShared}
                   onChange={(checked) => setConfig({ ...config, is_default: checked })}
                 />
               </div>
               <Button
                 leftIcon={<Save className="w-4 h-4" />}
                 onClick={handleSave}
+                disabled={isShared}
                 isLoading={saving}
               >
                 {t('common.save')}
@@ -270,66 +254,6 @@ export function AgentConfig() {
         <CardContent>
           <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
 
-          <TabPanel id="basic" activeTab={activeTab}>
-            <div className="space-y-4 pt-4">
-              <Input
-                label={t('agents.configName')}
-                value={selectedLabel || ''}
-                onChange={(e: any) => setConfig({ ...config, name: e.target.value })}
-                placeholder={t('agents.configNamePlaceholder')}
-              />
-              <div className="grid grid-cols-2 gap-4">
-                <Select
-                  label={t('agents.providerLabel')}
-                  options={providerOptions}
-                  value={config.provider || 'deepseek'}
-                  onChange={(e: any) => {
-                    setConfig(applyProviderDefaults(config, e.target.value))
-                  }}
-                />
-                <Select
-                  label={t('agents.modelLabel')}
-                  options={modelOptions[config.provider || 'deepseek'] || [
-                    { value: 'custom', label: t('agents.customModel') },
-                  ]}
-                  value={config.model || ''}
-                  onChange={(e: any) =>
-                    setConfig({ ...config, model: e.target.value })
-                  }
-                />
-              </div>
-            </div>
-          </TabPanel>
-
-          <TabPanel id="api" activeTab={activeTab}>
-            <div className="space-y-4 pt-4">
-              <div>
-                <Input
-                  label={t('agents.apiKeyLabel')}
-                  type="password"
-                  value={config.api_key || ''}
-                  onChange={(e: any) => setConfig({ ...config, api_key: e.target.value })}
-                  placeholder={t('agents.apiKeyPlaceholder')}
-                  autoComplete="off"
-                />
-                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                  {t('agents.apiKeyHint')}
-                </p>
-              </div>
-              <div>
-                <Input
-                  label={t('agents.apiBaseLabel')}
-                  value={config.api_base || ''}
-                  onChange={(e: any) => setConfig({ ...config, api_base: e.target.value })}
-                  placeholder={t('agents.apiBasePlaceholder')}
-                />
-                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                  {t('agents.apiBaseHint')}
-                </p>
-              </div>
-            </div>
-          </TabPanel>
-
           <TabPanel id="model" activeTab={activeTab}>
             <div className="space-y-4 pt-4">
               <div className="grid grid-cols-3 gap-4">
@@ -339,6 +263,7 @@ export function AgentConfig() {
                   min={0}
                   max={2}
                   step={0.1}
+                  disabled={isShared}
                   value={config.temperature ?? 0.7}
                   onChange={(e: any) =>
                     setConfig({
@@ -351,17 +276,40 @@ export function AgentConfig() {
                   label={t('agents.maxTokens')}
                   type="number"
                   min={1}
+                  max={65536}
                   step={1}
+                  disabled={isShared}
                   value={config.max_tokens ?? 2048}
                   onChange={(e: any) =>
                     setConfig({
                       ...config,
-                      max_tokens: Math.max(1, parseInt(e.target.value, 10) || 1),
+                      max_tokens: Math.min(65536, Math.max(1, parseInt(e.target.value, 10) || 1)),
                     })
                   }
                 />
-                <div />
+                <div className="flex flex-col justify-center">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    {t('agents.thinkingMode')}
+                  </label>
+                  <div className="flex items-center gap-2 h-[38px]">
+                    <Switch
+                      checked={config.thinking_enabled ?? true}
+                      disabled={isShared}
+                      onChange={(checked) =>
+                        setConfig({ ...config, thinking_enabled: checked })
+                      }
+                    />
+                    <span className="text-xs text-gray-400">
+                      {config.thinking_enabled === false
+                        ? t('agents.thinkingOff')
+                        : t('agents.thinkingOn')}
+                    </span>
+                  </div>
+                </div>
               </div>
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                {t('agents.thinkingHint')}
+              </p>
             </div>
           </TabPanel>
 
@@ -370,6 +318,7 @@ export function AgentConfig() {
               <Textarea
                 label={t('agents.systemPromptLabel')}
                 value={config.system_prompt || ''}
+                disabled={isShared}
                 onChange={(e: any) =>
                   setConfig({ ...config, system_prompt: e.target.value })
                 }

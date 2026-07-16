@@ -92,28 +92,65 @@ class AgentService:
     async def list_ai_configs(
         self, user_id: str
     ) -> list[AIConfigResponse]:
-        """List all AI configs for a user."""
+        """List a user's own AI configs plus shared system defaults.
+
+        A config owned by another account but marked ``is_default`` is treated
+        as a system-wide default and surfaced to every admin/agent as a shared,
+        read-only entry. This matches runtime chat resolution (which already
+        falls back to any ``is_default`` config globally) so the workbench and
+        setup guide reflect what the account can actually use.
+        """
         result = await self.db.execute(
             select(AIConfig)
             .where(AIConfig.user_id == user_id)
             .order_by(AIConfig.created_at.desc())
         )
-        configs = result.scalars().all()
-        return [AIConfigResponse.model_validate(c) for c in configs]
+        own_configs = result.scalars().all()
+        own_ids = {c.id for c in own_configs}
+
+        # Surface global system defaults not already owned by this user.
+        shared_result = await self.db.execute(
+            select(AIConfig)
+            .where(
+                AIConfig.is_default == True,
+                AIConfig.user_id != user_id,
+            )
+            .order_by(AIConfig.updated_at.desc())
+        )
+        shared_configs = [
+            c for c in shared_result.scalars().all() if c.id not in own_ids
+        ]
+
+        responses: list[AIConfigResponse] = [
+            AIConfigResponse.model_validate(c) for c in own_configs
+        ]
+        for c in shared_configs:
+            resp = AIConfigResponse.model_validate(c)
+            resp.shared = True
+            responses.append(resp)
+        return responses
 
     async def get_ai_config(
         self, config_id: str, user_id: str
     ) -> AIConfigResponse | None:
-        """Get a specific AI config."""
+        """Get a specific AI config.
+
+        Reads are allowed for the owner, or for a shared system default
+        (``is_default`` config owned by another account). The latter is returned
+        with ``shared=True`` so the workbench can render it read-only.
+        """
         result = await self.db.execute(
-            select(AIConfig).where(
-                AIConfig.id == config_id, AIConfig.user_id == user_id
-            )
+            select(AIConfig).where(AIConfig.id == config_id)
         )
         config = result.scalar_one_or_none()
         if config is None:
             return None
-        return AIConfigResponse.model_validate(config)
+        is_shared = config.user_id != user_id and bool(config.is_default)
+        if config.user_id != user_id and not is_shared:
+            return None
+        resp = AIConfigResponse.model_validate(config)
+        resp.shared = is_shared
+        return resp
 
     async def update_ai_config(
         self, config_id: str, user_id: str, data: AIConfigUpdate

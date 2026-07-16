@@ -32,12 +32,18 @@ router = APIRouter()
 
 @router.get("/bootstrap", response_model=BootstrapResponse)
 async def bootstrap_hint() -> BootstrapResponse:
-    """Return default admin credentials hint when enabled (self-hosted dev)."""
+    """Return default admin credentials hint when enabled (self-hosted dev).
+
+    Also reports runtime edition flags (signup/cloud) so the frontend can show
+    the correct login UI even when built with the wrong VITE_MCHAT_EDITION flag.
+    """
     show = settings.show_bootstrap_credentials
     return BootstrapResponse(
         username=settings.admin_username,
         password=settings.admin_password if show else None,
         show_credentials=show,
+        signup_enabled=settings.signup_enabled,
+        cloud_edition=settings.cloud_mode,
     )
 
 

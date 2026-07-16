@@ -164,9 +164,12 @@ async def prepare_widget_chat(
 
     if ai_config is None:
         result = await db.execute(
-            select(AIConfig).where(AIConfig.is_default == True)
+            select(AIConfig)
+            .where(AIConfig.is_default == True)
+            .order_by(AIConfig.updated_at.desc())
+            .limit(1)
         )
-        ai_config = result.scalar_one_or_none()
+        ai_config = result.scalars().first()
 
     return WidgetChatContext(
         customer=customer,

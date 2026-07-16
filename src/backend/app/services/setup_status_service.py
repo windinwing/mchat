@@ -12,9 +12,9 @@ from app.models.group import GroupMember
 from app.models.user import User
 from app.schemas.setup import SetupStatusResponse
 from app.services.llm_credentials import (
+    is_ai_config_ready,
     is_usable_api_key,
     provider_env_api_key,
-    resolve_api_key,
 )
 
 _ENV_PROVIDERS = (
@@ -39,8 +39,7 @@ def _env_configured_providers() -> list[str]:
 
 def _ai_configs_ready(configs: list[AIConfig]) -> bool:
     for cfg in configs:
-        resolved = resolve_api_key(cfg.provider, cfg.api_key)
-        if is_usable_api_key(resolved):
+        if is_ai_config_ready(cfg.provider, cfg.api_key):
             return True
     return False
 
@@ -75,10 +74,18 @@ async def get_setup_status(db: AsyncSession, user: User) -> SetupStatusResponse:
             env_key_providers=env_key_providers,
         )
 
+    # Admins and agents may use any system-wide default AI config (mirrors
+    # runtime chat resolution, which falls back to a global is_default config).
+    # A newly created admin/agent account therefore does not need to configure
+    # its own provider before chatting.
     is_admin = await has_global_scope(user, db)
-    ai_query = select(AIConfig)
-    if not is_admin:
-        ai_query = ai_query.where(AIConfig.user_id == user.id)
+    if is_admin:
+        ai_query = select(AIConfig)
+    else:
+        # Agents: their own configs plus any shared system default.
+        ai_query = select(AIConfig).where(
+            (AIConfig.user_id == user.id) | (AIConfig.is_default == True)
+        )
 
     ai_result = await db.execute(ai_query)
     ai_configs = list(ai_result.scalars().all())

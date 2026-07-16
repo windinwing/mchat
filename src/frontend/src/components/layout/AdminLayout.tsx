@@ -24,16 +24,26 @@ export function AdminLayout({ children }: AdminLayoutProps) {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  // Track whether the initial auth check has completed. On a fresh page load
+  // the store starts with isLoading=false (so children would render before
+  // checkAuth finishes), which causes a blank screen when the token has
+  // expired — the page renders, its API calls 401, and the redirect races
+  // with the error state. Force a loading screen until the first checkAuth
+  // resolves.
+  const [authChecked, setAuthChecked] = useState(false)
 
   useEffect(() => {
-    checkAuth()
+    checkAuth().finally(() => setAuthChecked(true))
   }, [checkAuth])
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      navigate('/admin/login', { state: { from: location.pathname } })
+    if (authChecked && !isLoading && !isAuthenticated) {
+      navigate('/admin/login', {
+        state: { from: location.pathname + location.search },
+        replace: true,
+      })
     }
-  }, [isLoading, isAuthenticated, navigate, location.pathname])
+  }, [authChecked, isLoading, isAuthenticated, navigate, location.pathname, location.search])
 
   useEffect(() => {
     if (isLoading || !isAuthenticated || !user || user.role !== 'user') return
@@ -50,7 +60,7 @@ export function AdminLayout({ children }: AdminLayoutProps) {
     }
   }, [user?.role, location.pathname])
 
-  if (isLoading) {
+  if (isLoading || !authChecked) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
         <div className="flex flex-col items-center gap-3">

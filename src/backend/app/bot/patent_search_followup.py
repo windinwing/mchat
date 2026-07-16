@@ -119,16 +119,25 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 
 
 def patent_search_enable_presentation(skill: Skill | None) -> bool:
+    """是否让 LLM 重新格式化检索结果表格。
+
+    默认关闭——工具返回的表格直接展示一次。开启会导致 LLM 重新生成表格，
+    与工具结果重复（用户看到两次表格）。
+    """
     return _coerce_bool(
-        _skill_cfg(skill, "enable_presentation_followup", True),
-        True,
+        _skill_cfg(skill, "enable_presentation_followup", False),
+        False,
     )
 
 
 def patent_search_enable_summary(skill: Skill | None) -> bool:
+    """是否在表格展示后追加 LLM 观察分析（不重复表格）。
+
+    默认开启——LLM 看到表格但被告知"表格已在上方展示"，只输出初步观察要点。
+    """
     return _coerce_bool(
-        _skill_cfg(skill, "enable_observation_followup", False),
-        False,
+        _skill_cfg(skill, "enable_observation_followup", True),
+        True,
     )
 
 

@@ -49,7 +49,7 @@ class RootedProjectBridgeConfig:
     max_read_bytes: int = 256 * 1024
     max_list_entries: int = 2000
     build_command: str = ""
-    build_timeout_seconds: int = 1800
+    build_timeout_seconds: int = 3600
     keep_builds: int = 10
     publish_enabled: bool = False
     playables_root: Path | None = None

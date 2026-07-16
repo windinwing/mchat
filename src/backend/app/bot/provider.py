@@ -167,30 +167,33 @@ def _format_provider_error(exc: Exception) -> str:
             "Error: API 密钥无效或未配置。请在管理后台「模型工作台」更新该 AI 配置的 API Key，"
             "或在 .env 中设置对应环境变量（如 DEEPSEEK_API_KEY、MOONSHOT_API_KEY）。"
         )
+    # Local backends (Ollama / LM Studio via llama.cpp) raise this when the
+    # input prompt + requested tokens exceed the runtime context window (n_ctx)
+    # the model was LOADED with — not the model's max. The fix is on the server
+    # side (raise n_ctx / context length), so give an actionable message.
+    if (
+        "context length" in lower
+        or "tokens to keep" in lower
+        or ("greater than" in lower and "context" in lower)
+    ):
+        return (
+            "Error: 输入内容超出模型的上下文长度。这是本地模型（Ollama / LM Studio）加载时分配的"
+            "「上下文长度 / Context Length」太小所致（不是模型本身的上限）。\n"
+            "请在该模型的加载设置里调大 Context Length（如 8192 / 32768 / 131072），"
+            "或在对话中减少历史消息、技能与知识库内容。"
+        )
     return f"Error: {exc}"
 
 
 def resolve_llm_base_url(provider: str, api_base: str | None) -> str | None:
-    """Provider default base URL + ensure /v1 suffix for OpenAI-compatible APIs."""
+    """Provider default base URL + ensure /v1 suffix for OpenAI-compatible APIs.
+
+    The /v1 suffix logic lives in ``_resolve_base_url`` (model_catalog) so that
+    model listing, connection tests, and chat all apply it consistently.
+    """
     from app.services.model_catalog import _resolve_base_url
 
-    base = _resolve_base_url((provider or "").lower(), api_base)
-    if not base:
-        return None
-    base = base.rstrip("/")
-    openai_compatible = {
-        "openai",
-        "deepseek",
-        "ollama",
-        "groq",
-        "moonshot",
-        "siliconflow",
-        "together",
-        "openai-compatible",
-    }
-    if provider.lower() in openai_compatible and not base.endswith("/v1"):
-        return f"{base}/v1"
-    return base
+    return _resolve_base_url((provider or "").lower(), api_base)
 
 
 class OpenAIProvider(LLMProvider):
@@ -209,6 +212,7 @@ class OpenAIProvider(LLMProvider):
         self.model = ai_config.model
         self.api_base = base or ""
         self.provider_name = (ai_config.provider or "").lower()
+        self.thinking_enabled = getattr(ai_config, "thinking_enabled", True)
 
     async def stream_chat(
         self,
@@ -223,10 +227,19 @@ class OpenAIProvider(LLMProvider):
             "temperature": temperature,
             "stream": True,
         }
-        # Thinking models (GLM-5.2, DeepSeek-R1, etc.) share max_tokens between
-        # reasoning and content — reasoning eats half, content gets truncated.
-        # Use max_completion_tokens (only limits content) for thinking providers.
-        if self.provider_name in ("deepseek", "zhipu", "zhipu-coding"):
+        # DeepSeek-V4 / GLM-5.x default to thinking mode. When thinking is
+        # DISABLED, the model behaves like a standard chat model (faster, no
+        # chain-of-thought). When ENABLED, max_tokens is shared between
+        # reasoning and content, so use max_completion_tokens (content only).
+        thinking_active = self.thinking_enabled
+        if self.provider_name == "deepseek" and not self.thinking_enabled:
+            # DeepSeek API: extra_body carries the thinking toggle.
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        if thinking_active and self.provider_name in (
+            "deepseek",
+            "zhipu",
+            "zhipu-coding",
+        ):
             kwargs["max_completion_tokens"] = max_tokens
         else:
             kwargs["max_tokens"] = max_tokens
@@ -443,12 +456,17 @@ class OllamaProvider(OpenAIProvider):
     def __init__(self, ai_config: AIConfig) -> None:
         from openai import AsyncOpenAI
 
-        base_url = ai_config.api_base or "http://localhost:11434/v1"
+        base_url = resolve_llm_base_url(ai_config.provider, ai_config.api_base)
         self.client = AsyncOpenAI(
             api_key=ai_config.api_key or "ollama",
             base_url=base_url,
         )
         self.model = ai_config.model
+        # OpenAIProvider.stream_chat reads these; must be set here since we
+        # override __init__ instead of calling super().__init__().
+        self.api_base = base_url or ""
+        self.provider_name = (ai_config.provider or "").lower()
+        self.thinking_enabled = getattr(ai_config, "thinking_enabled", True)
 
 
 class GroqProvider(OpenAIProvider):
@@ -457,12 +475,17 @@ class GroqProvider(OpenAIProvider):
     def __init__(self, ai_config: AIConfig) -> None:
         from openai import AsyncOpenAI
 
-        base_url = ai_config.api_base or "https://api.groq.com/openai/v1"
+        base_url = resolve_llm_base_url(ai_config.provider, ai_config.api_base)
         self.client = AsyncOpenAI(
             api_key=ai_config.api_key,
             base_url=base_url,
         )
         self.model = ai_config.model
+        # OpenAIProvider.stream_chat reads these; set here because we override
+        # __init__ instead of calling super().__init__().
+        self.api_base = base_url or ""
+        self.provider_name = (ai_config.provider or "").lower()
+        self.thinking_enabled = getattr(ai_config, "thinking_enabled", True)
 
 
 class OpenAICompatibleProvider(OpenAIProvider):
@@ -485,6 +508,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         self.model = ai_config.model
         self.api_base = base or ""
         self.provider_name = (ai_config.provider or "").lower()
+        self.thinking_enabled = getattr(ai_config, "thinking_enabled", True)
 
 
 def _effective_api_base(ai_config: AIConfig) -> str:
@@ -521,6 +545,7 @@ def create_provider(ai_config: AIConfig) -> LLMProvider:
         "openai": OpenAIProvider,
         "deepseek": OpenAIProvider,  # DeepSeek uses OpenAI-compatible API
         "ollama": OllamaProvider,
+        "lmstudio": OpenAICompatibleProvider,  # LM Studio local API (OpenAI-compatible)
         "groq": GroqProvider,
         "anthropic": AnthropicProvider,
         "google": GoogleProvider,

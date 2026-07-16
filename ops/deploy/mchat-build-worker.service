@@ -8,8 +8,15 @@ Type=simple
 WorkingDirectory=/opt/xiaoxiao/mchat/src/backend
 EnvironmentFile=/opt/xiaoxiao/mchat/.env
 ExecStart=/opt/xiaoxiao/mchat/src/backend/venv/bin/python /opt/xiaoxiao/mchat/ops/scripts/gamecenter-build-worker.py
-Restart=on-failure
+# `always` (not `on-failure`) so the worker is restarted even when killed by a
+# signal during a deploy (SIGTERM is not a "failure", so on-failure would leave
+# it dead — which is exactly what happened and stalled all builds).
+Restart=always
 RestartSec=5
+# Guard against a crash loop: at most 5 restarts per 60s, then stop. systemd
+# clears this counter after running steadily for StartLimitIntervalSec.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Install]
 WantedBy=default.target

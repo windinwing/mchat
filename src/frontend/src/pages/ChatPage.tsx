@@ -1,10 +1,11 @@
 import React, { useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { Menu, X } from 'lucide-react'
+import { Menu, X, Bug } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { AppModeSwitch } from '@/components/common/AppModeSwitch'
 import { ChatWindow } from '@/components/chat/ChatWindow'
+import { AiRequestDebugPanel } from '@/components/chat/AiRequestDebugPanel'
 import { AssistantChatSidebar } from '@/components/portal/AssistantChatSidebar'
 import { useChat } from '@/hooks/useChat'
 import { ChatSendOptions } from '@/stores/chat'
@@ -13,6 +14,7 @@ import { portalApi } from '@/lib/portalApi'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { ToastContainer } from '@/components/ui/Toast'
+import { Spinner } from '@/components/ui/Spinner'
 import api from '@/lib/api'
 import { isCloudEdition } from '@/lib/edition'
 import {
@@ -39,16 +41,35 @@ export function ChatPage() {
   const { conversationId } = useParams<{ conversationId: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { user, isAuthenticated } = useAuthStore()
+  const { user, isAuthenticated, isLoading: authLoading, checkAuth } = useAuthStore()
   const chat = useChat(conversationId)
   const [startingNewChat, setStartingNewChat] = useState(false)
   const [groupOptions, setGroupOptions] = useState<GroupOption[]>([])
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [debugPanelOpen, setDebugPanelOpen] = useState(false)
 
   // Close mobile drawer when switching conversations
   React.useEffect(() => {
     setMobileSidebarOpen(false)
   }, [conversationId])
+
+  // Auth guard: verify the token on mount and redirect to login if invalid.
+  // The store starts in loading state when a token exists, so the spinner
+  // below renders until checkAuth() resolves (prevents a blank screen when
+  // the token has expired and API calls 401).
+  React.useEffect(() => {
+    checkAuth()
+  }, [checkAuth])
+
+  React.useEffect(() => {
+    if (authLoading) return
+    if (!isAuthenticated) {
+      navigate('/admin/login', {
+        state: { from: `/chat/${conversationId || ''}` },
+        replace: true,
+      })
+    }
+  }, [authLoading, isAuthenticated, navigate, conversationId])
 
   const channelFromUrl =
     searchParams.get('channel') || readChannelIdFromUrl() || undefined
@@ -190,6 +211,15 @@ export function ChatPage() {
     navigate('/chat')
   }
 
+  if (authLoading || !isAuthenticated) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900 gap-3">
+        <Spinner size="lg" />
+        <p className="text-sm text-gray-500">{t('common.loading')}</p>
+      </div>
+    )
+  }
+
   return (
     <div className="h-screen flex bg-gray-50 dark:bg-gray-900">
       {showStudioChat && (
@@ -292,6 +322,15 @@ export function ChatPage() {
             )}
           </div>
           <LanguageSwitcher variant="ghost" />
+          <button
+            type="button"
+            onClick={() => setDebugPanelOpen(true)}
+            className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+            aria-label={t('chat.debugPanelTitle')}
+            title={t('chat.debugPanelTitle')}
+          >
+            <Bug className="w-5 h-5" />
+          </button>
         </header>
 
         {chat.error && (
@@ -335,6 +374,11 @@ export function ChatPage() {
           />
         </div>
       </div>
+      <AiRequestDebugPanel
+        open={debugPanelOpen}
+        onClose={() => setDebugPanelOpen(false)}
+        messages={chat.messages}
+      />
       <ToastContainer />
     </div>
   )

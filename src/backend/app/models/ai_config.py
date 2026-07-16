@@ -35,6 +35,10 @@ class AIConfig(Base):
     max_tokens: Mapped[int] = mapped_column(
         Integer, nullable=False, default=2048
     )
+    thinking_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True,
+        server_default="1",
+    )
     is_default: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.middleware.auth import get_current_user, has_global_scope
+from app.middleware.auth import get_current_user, has_global_scope, security_scheme
 from app.models.customer import CustomerConfig
 from app.models.user import User
 from app.schemas.tenant_files import (
@@ -237,10 +238,68 @@ async def upload_tenant_file(
 async def download_tenant_file(
     path: str,
     subdir: str = "user",
-    current_user: User = Depends(get_current_user),
+    uid: str | None = None,
+    exp: int | None = None,
+    sig: str | None = None,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
+    db: AsyncSession = Depends(get_db),
 ):
+    """Download a tenant file.
+
+    Two access modes:
+    - **Authenticated**: Bearer token → owner is the logged-in user.
+    - **Signed URL**: ``uid`` + ``exp`` + ``sig`` params, so browser
+      ``<img>``/``<video>`` tags can load chat attachments without an
+      Authorization header. The signature binds (uid, subdir, path, exp).
+    """
+    from app.utils.upload_tokens import verify_workspace_token
+
+    user_id: str | None = None
+
+    # 1) Signed-URL access (no auth header needed)
+    if exp is not None and sig and uid:
+        if verify_workspace_token(uid, subdir, path, exp, sig):
+            user_id = uid
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature"
+            )
+
+    # 2) Bearer-token access
+    if user_id is None:
+        if credentials is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        from jose import JWTError
+
+        from app.core.security import verify_access_token
+
+        try:
+            payload = verify_access_token(credentials.credentials)
+            token_uid = payload.get("sub")
+            if not token_uid:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid token payload",
+                )
+        except JWTError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token",
+            )
+        result = await db.execute(select(User).where(User.id == token_uid))
+        user = result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+            )
+        user_id = user.id
+
     service = TenantFilesService()
-    target, mime = service.read_file(current_user.id, subdir=subdir, path=path)
+    target, mime = service.read_file(user_id, subdir=subdir, path=path)
     return FileResponse(target, media_type=mime, filename=target.name)
 
 

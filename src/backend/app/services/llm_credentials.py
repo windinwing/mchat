@@ -10,6 +10,14 @@ from loguru import logger
 from app.core.config import settings
 from app.models.ai_config import AIConfig
 
+#: Providers that run locally and never require an API key.
+#: Validation/skip-points treat an empty key as valid for these.
+LOCAL_PROVIDERS: frozenset[str] = frozenset({"ollama", "lmstudio"})
+
+
+def is_local_provider(provider: str | None) -> bool:
+    return (provider or "").strip().lower() in LOCAL_PROVIDERS
+
 
 def is_usable_api_key(key: str | None) -> bool:
     k = (key or "").strip()
@@ -20,6 +28,18 @@ def is_usable_api_key(key: str | None) -> bool:
     if k.lower() in ("not-needed", "your-api-key", "sk-xxx", "changeme"):
         return False
     return True
+
+
+def is_ai_config_ready(provider: str | None, key: str | None) -> bool:
+    """Whether a (provider, key) pair is ready for actual chat/business use.
+
+    Local providers (Ollama, LM Studio) never require a key, so they're
+    considered ready regardless of the key value. Other providers must pass
+    the usual key-usable check after env/DB resolution.
+    """
+    if is_local_provider(provider):
+        return True
+    return is_usable_api_key(resolve_api_key(provider, key))
 
 
 def provider_env_api_key(provider: str) -> str:
@@ -40,6 +60,10 @@ def provider_env_api_key(provider: str) -> str:
 
 def resolve_api_key(provider: str, configured: str | None) -> str:
     """Prefer DB key, then provider-specific env (e.g. DEEPSEEK_API_KEY)."""
+    if is_local_provider(provider):
+        # Local providers (Ollama, LM Studio) never need a key; the OpenAI
+        # client is given a placeholder at request time if still empty.
+        return (configured or "").strip()
     if is_usable_api_key(configured):
         return (configured or "").strip()
     env_key = provider_env_api_key(provider)
@@ -96,9 +120,12 @@ async def ensure_ai_config_api_key(
             return ai_config
 
     default_result = await db.execute(
-        select(AIConfig).where(AIConfig.is_default == True, AIConfig.api_key != "")
+        select(AIConfig)
+        .where(AIConfig.is_default == True, AIConfig.api_key != "")
+        .order_by(AIConfig.updated_at.desc())
+        .limit(1)
     )
-    default_cfg = default_result.scalar_one_or_none()
+    default_cfg = default_result.scalars().first()
     if default_cfg and default_cfg.id != ai_config.id:
         fb_key = resolve_api_key(default_cfg.provider, default_cfg.api_key)
         if is_usable_api_key(fb_key):

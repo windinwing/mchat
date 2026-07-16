@@ -1,11 +1,19 @@
 /** Per-provider default API base URL, default model, and preset model list. */
 
+/** Local providers that run on the user's machine and never need an API key. */
+export const LOCAL_PROVIDERS = ['ollama', 'lmstudio'] as const
+
+export function isLocalProvider(provider: string | undefined | null): boolean {
+  return LOCAL_PROVIDERS.includes((provider || '').trim().toLowerCase() as any)
+}
+
 export const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
   anthropic: 'https://api.anthropic.com',
   google: 'https://generativelanguage.googleapis.com',
   deepseek: 'https://api.deepseek.com',
   ollama: 'http://localhost:11434/v1',
+  lmstudio: 'http://localhost:1234/v1',
   groq: 'https://api.groq.com/openai/v1',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   'zhipu-coding': 'https://open.bigmodel.cn/api/coding/paas/v4',
@@ -21,7 +29,8 @@ export const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-3-5-sonnet-20241022',
   google: 'gemini-2.0-flash',
   deepseek: 'deepseek-v4-flash',
-  ollama: 'llama3.2',
+  ollama: '',
+  lmstudio: 'local-model',
   groq: 'llama-3.3-70b-versatile',
   zhipu: 'glm-4-flash',
   'zhipu-coding': 'glm-4.5-air',
@@ -94,11 +103,13 @@ export const PROVIDER_MODEL_OPTIONS: Record<string, { value: string; label: stri
     },
   ],
   ollama: [
-    { value: 'llama3.2', label: 'Llama 3.2' },
-    { value: 'qwen2.5', label: 'Qwen 2.5' },
-    { value: 'deepseek-r1', label: 'DeepSeek R1' },
-    { value: 'mistral', label: 'Mistral' },
+    // Ollama model ids are machine-specific (name:tag, e.g. "deepseek-r1:32b")
+    // and the OpenAI-compatible API (/v1/chat/completions) does NOT fuzzy-match
+    // — a wrong tag (e.g. ":latest" when only ":32b" exists) returns 404.
+    // We intentionally leave NO static presets: always click "Fetch models" to
+    // pull the real list from your local Ollama.
   ],
+  lmstudio: [{ value: 'local-model', label: 'Local model' }],
   groq: [
     { value: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B' },
     { value: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B' },
@@ -147,6 +158,7 @@ export const PROVIDER_STATIC_MODEL_IDS: Record<string, string[]> = {
     'deepseek-reasoner',
   ],
   ollama: PROVIDER_MODEL_OPTIONS.ollama.map((o) => o.value),
+  lmstudio: PROVIDER_MODEL_OPTIONS.lmstudio.map((o) => o.value),
   groq: PROVIDER_MODEL_OPTIONS.groq.map((o) => o.value),
   zhipu: PROVIDER_MODEL_OPTIONS.zhipu.map((o) => o.value),
   'zhipu-coding': PROVIDER_MODEL_OPTIONS['zhipu-coding'].map((o) => o.value),

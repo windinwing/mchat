@@ -46,11 +46,31 @@ def estimate_tokens(text: str) -> int:
     return int(cjk + ascii_chars * 0.3)
 
 
+def _message_text(content: Any) -> str:
+    """Extract plain text from a message content (str or multimodal list)."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Multimodal: join text parts; image_url parts carry no countable text.
+        parts = []
+        for part in content:
+            if isinstance(part, dict):
+                if part.get("type") == "text" and part.get("text"):
+                    parts.append(str(part["text"]))
+                elif part.get("type") == "image_url":
+                    # Base64 images are large; count a rough token cost so they
+                    # aren't treated as "free" by the context compressor.
+                    parts.append("[image]")
+        return " ".join(parts)
+    return str(content)
+
+
 def estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
     total = 0
     for m in messages:
-        content = str(m.get("content") or "")
-        total += estimate_tokens(content)
+        total += estimate_tokens(_message_text(m.get("content")))
         total += 4  # per-message overhead (role separator)
     return total
 
@@ -64,6 +84,7 @@ async def compress_history(
     model: str = "",
     api_key: str = "",
     api_base: str | None = None,
+    provider: str = "",
 ) -> list[dict[str, Any]]:
     """Compress oldest messages when total exceeds limit. Returns (possibly shortened) list."""
     if not messages or context_limit is None or context_limit <= 0:
@@ -100,6 +121,7 @@ async def compress_history(
         model=model,
         api_key=api_key,
         api_base=api_base,
+        provider=provider,
     )
 
     if summary:
@@ -121,15 +143,21 @@ async def _try_summarize(
     model: str = "",
     api_key: str = "",
     api_base: str | None = None,
+    provider: str = "",
 ) -> str | None:
     """Summarize old messages using LLM. Returns summary text or None."""
-    if not provider_factory or not model or not api_key:
+    from app.services.llm_credentials import is_local_provider
+
+    # Local providers (Ollama, LM Studio) need no key; others require one.
+    if not provider_factory or not model or (
+        not api_key and not is_local_provider(provider)
+    ):
         return _simple_truncation_summary(old_messages)
 
     transcript_parts: list[str] = []
     for m in old_messages:
         role = str(m.get("role") or "unknown")
-        content = str(m.get("content") or "")
+        content = _message_text(m.get("content"))
         if len(content) > 2000:
             content = content[:2000] + "…"
         transcript_parts.append(f"[{role}]: {content}")
@@ -151,23 +179,28 @@ async def _try_summarize(
     )
 
     try:
-        from dataclasses import dataclass
+        # Build a real AIConfig rather than a local dataclass: Python's class
+        # scope does NOT close over the enclosing function's locals, so a
+        # dataclass field default like `model: str = model` raises NameError.
+        from app.models.ai_config import AIConfig
 
-        @dataclass
-        class TempAIConfig:
-            provider: str = "openai"
-            model: str = model
-            api_key: str = api_key
-            api_base: str | None = api_base
-            temperature: float = 0.3
-            max_tokens: int = 1024
-            system_prompt: str | None = None
-
-        temp_config = TempAIConfig()
-        provider = provider_factory(temp_config)
+        temp_config = AIConfig(
+            id="summarize",
+            user_id="summarize",
+            name="summarize",
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            api_base=api_base,
+            temperature=0.3,
+            max_tokens=1024,
+            system_prompt=None,
+            is_default=False,
+        )
+        summarizer = provider_factory(temp_config)
 
         summary = ""
-        async for chunk in provider.stream_chat(
+        async for chunk in summarizer.stream_chat(
             messages=[{"role": "user", "content": summary_prompt}],
             temperature=0.3,
             max_tokens=1024,

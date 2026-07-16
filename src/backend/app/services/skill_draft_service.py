@@ -143,7 +143,10 @@ class SkillDraftService:
 
     async def _resolve_ai_config(self, conversation: Conversation):
         from app.models.ai_config import AIConfig
-        from app.services.llm_credentials import ensure_ai_config_api_key, is_usable_api_key
+        from app.services.llm_credentials import (
+            ensure_ai_config_api_key,
+            is_ai_config_ready,
+        )
 
         ai_config = None
         if conversation.customer_id:
@@ -154,19 +157,22 @@ class SkillDraftService:
             ai_config = await self.db.get(AIConfig, conversation.ai_config_id)
         if ai_config is None:
             result = await self.db.execute(
-                select(AIConfig).where(AIConfig.is_default == True)  # noqa: E712
+                select(AIConfig)
+                .where(AIConfig.is_default == True)  # noqa: E712
+                .order_by(AIConfig.updated_at.desc())
+                .limit(1)
             )
-            ai_config = result.scalar_one_or_none()
+            ai_config = result.scalars().first()
         if ai_config is None:
             result = await self.db.execute(select(AIConfig).limit(1))
-            ai_config = result.scalar_one_or_none()
+            ai_config = result.scalars().first()
         if ai_config is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="No AI configuration available for skill drafting",
             )
         ai_config = await ensure_ai_config_api_key(self.db, ai_config)
-        if not is_usable_api_key(ai_config.api_key):
+        if not is_ai_config_ready(ai_config.provider, ai_config.api_key):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="AI API key not configured for skill drafting",

@@ -34,10 +34,17 @@ interface AuthState {
   clearError: () => void
 }
 
+// On a fresh page load with a token in localStorage, start in loading state so
+// route guards (UserLayout/ChatHomePage/ChatPage) show a spinner instead of
+// rendering children before checkAuth() resolves. Without this, an expired
+// token leaves isAuthenticated=true & isLoading=false → children mount, their
+// API calls 401, and the page renders null while the redirect races → blank.
+const _hasToken = !!localStorage.getItem('mchat_token')
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  isAuthenticated: !!localStorage.getItem('mchat_token'),
-  isLoading: false,
+  isAuthenticated: _hasToken,
+  isLoading: _hasToken,
   error: null,
 
   login: async (username: string, password: string) => {
