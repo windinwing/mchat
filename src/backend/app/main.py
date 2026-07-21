@@ -316,6 +316,10 @@ def create_app() -> FastAPI:
     from app.websocket.route import router as ws_router
     app.include_router(ws_router)
 
+    # Interactive container shell (admin-only) — reuses the /ws nginx upgrade.
+    from app.workspace.exec_ws import router as exec_ws_router
+    app.include_router(exec_ws_router)
+
     # Chat extension hooks (once per process; idempotent; Cloud studio hooks register earlier in cloud/main.py)
     from app.bot.skill_draft_extensions import register_skill_draft_extensions
     from app.bot.gamecenter_bridge_extensions import register_gamecenter_bridge_extensions

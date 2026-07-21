@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Container, RefreshCw, Server } from 'lucide-react'
+import { Container, RefreshCw, Server, TerminalSquare } from 'lucide-react'
 import api from '@/lib/api'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Spinner'
 import { toast } from '@/components/ui/Toast'
+import { ContainerTerminal } from '@/components/workspace/ContainerTerminal'
 
 interface SidecarStatus {
   exists: boolean
@@ -113,6 +114,7 @@ export function WorkspacePage() {
   const [savingId, setSavingId] = useState<string | null>(null)
   const [savingUserId, setSavingUserId] = useState<string | null>(null)
   const [userDrafts, setUserDrafts] = useState<Record<string, { memory: string; cpus: string; policy: string }>>({})
+  const [shellContainer, setShellContainer] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -522,9 +524,21 @@ export function WorkspacePage() {
                     {s.idle_minutes != null ? `${s.idle_minutes}m` : '—'}
                   </td>
                   <td className="py-3">
-                    <Button size="sm" variant="outline" onClick={() => recycleUser(s.user_id)}>
-                      {t('workspace.recycle')}
-                    </Button>
+                    <div className="flex gap-2">
+                      {s.running && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          leftIcon={<TerminalSquare className="h-3.5 w-3.5" />}
+                          onClick={() => setShellContainer(s.container_name)}
+                        >
+                          {t('workspace.shell')}
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" onClick={() => recycleUser(s.user_id)}>
+                        {t('workspace.recycle')}
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -535,6 +549,14 @@ export function WorkspacePage() {
           )}
         </CardContent>
       </Card>
+
+      {shellContainer && (
+        <ContainerTerminal
+          key={shellContainer}
+          containerName={shellContainer}
+          onClose={() => setShellContainer(null)}
+        />
+      )}
     </div>
   )
 }

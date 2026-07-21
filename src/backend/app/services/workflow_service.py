@@ -583,14 +583,31 @@ class WorkflowService:
             except Exception as e:
                 logger.warning("workflow alert sms error: run=%s err=%s", run.id, e)
 
-    async def list_workflows(self, *, user_id: str) -> list[WorkflowResponse]:
-        result = await self.db.execute(
-            select(SkillWorkflow)
-            .where(SkillWorkflow.user_id == user_id)
-            .order_by(SkillWorkflow.created_at.desc())
-        )
-        rows = result.scalars().all()
-        return [
+    async def list_workflows(
+        self, *, user_id: str, search: str | None = None,
+        limit: int = 50, offset: int = 0,
+    ) -> tuple[list[WorkflowResponse], int]:
+        """Return (page_items, total_count) for paginated workflow listing.
+
+        search: case-insensitive substring match on name/description.
+        """
+        from sqlalchemy import func as _func
+
+        safe_limit = max(1, min(limit, 200))
+        safe_offset = max(0, offset)
+        base = select(SkillWorkflow).where(SkillWorkflow.user_id == user_id)
+        if search and search.strip():
+            pat = f"%{search.strip()}%"
+            base = base.where(
+                (SkillWorkflow.name.ilike(pat)) | (SkillWorkflow.description.ilike(pat))
+            )
+        # total count (same filters, no limit/offset)
+        count_stmt = select(_func.count()).select_from(base.subquery())
+        total = int((await self.db.execute(count_stmt)).scalar() or 0)
+        # page
+        stmt = base.order_by(SkillWorkflow.created_at.desc()).limit(safe_limit).offset(safe_offset)
+        rows = (await self.db.execute(stmt)).scalars().all()
+        items = [
             WorkflowResponse(
                 id=row.id,
                 name=row.name,
@@ -602,6 +619,7 @@ class WorkflowService:
             )
             for row in rows
         ]
+        return items, total
 
     async def create_workflow(
         self, *, user_id: str, data: WorkflowCreate
@@ -1957,33 +1975,49 @@ class WorkflowService:
         return await self.get_run_detail(run_id=run.id, user_id=user_id)
 
     async def list_runs(
-        self, *, user_id: str, workflow_id: str | None = None, limit: int = 50
-    ) -> list[WorkflowRunResponse]:
-        safe_limit = max(1, min(limit, 200))
-        stmt = select(SkillWorkflowRun).where(SkillWorkflowRun.user_id == user_id)
-        if workflow_id:
-            stmt = stmt.where(SkillWorkflowRun.workflow_id == workflow_id)
-        stmt = stmt.order_by(SkillWorkflowRun.started_at.desc()).limit(safe_limit)
-        result = await self.db.execute(stmt)
-        runs = result.scalars().all()
+        self, *, user_id: str, workflow_id: str | None = None, limit: int = 50,
+        offset: int = 0, search: str | None = None, status: str | None = None,
+    ) -> tuple[list[WorkflowRunResponse], int]:
+        """Return (page_items, total_count) for paginated run listing.
 
-        workflow_ids = [r.workflow_id for r in runs]
-        wf_map: dict[str, SkillWorkflow] = {}
-        if workflow_ids:
-            wf_res = await self.db.execute(
-                select(SkillWorkflow).where(SkillWorkflow.id.in_(workflow_ids))  # type: ignore[arg-type]
-            )
-            wf_map = {w.id: w for w in wf_res.scalars().all()}
+        search: substring match on workflow_name (joined). status: exact run status.
+        Note: search by display_name isn't SQL-filterable (it's derived from
+        input_payload at read time), so we filter on workflow_name server-side
+        and the client can refine display_name matches client-side.
+        """
+        from sqlalchemy import func as _func
+
+        safe_limit = max(1, min(limit, 200))
+        safe_offset = max(0, offset)
+        # Join SkillWorkflow for name search + the response's workflow_name.
+        joined = (
+            select(SkillWorkflowRun, SkillWorkflow.name.label("_wf_name"))
+            .outerjoin(SkillWorkflow, SkillWorkflowRun.workflow_id == SkillWorkflow.id)
+            .where(SkillWorkflowRun.user_id == user_id)
+        )
+        if workflow_id:
+            joined = joined.where(SkillWorkflowRun.workflow_id == workflow_id)
+        if status and status.strip():
+            joined = joined.where(SkillWorkflowRun.status == status.strip())
+        if search and search.strip():
+            pat = f"%{search.strip()}%"
+            joined = joined.where(SkillWorkflow.name.ilike(pat))
+
+        # total
+        count_stmt = select(_func.count()).select_from(joined.subquery())
+        total = int((await self.db.execute(count_stmt)).scalar() or 0)
+
+        # page
+        stmt = joined.order_by(SkillWorkflowRun.started_at.desc()).limit(safe_limit).offset(safe_offset)
+        rows = (await self.db.execute(stmt)).all()
+        runs = [(row[0], row[1]) for row in rows]  # (SkillWorkflowRun, wf_name)
 
         return [
             WorkflowRunResponse(
                 id=r.id,
                 workflow_id=r.workflow_id,
-                workflow_name=(wf_map.get(r.workflow_id).name if wf_map.get(r.workflow_id) else ""),
-                display_name=_run_display_name(
-                    r.input_payload,
-                    wf_map.get(r.workflow_id).name if wf_map.get(r.workflow_id) else "",
-                ),
+                workflow_name=wf_name or "",
+                display_name=_run_display_name(r.input_payload, wf_name or ""),
                 trigger_type=r.trigger_type,
                 status=r.status,
                 input_payload=r.input_payload,
@@ -1993,8 +2027,8 @@ class WorkflowService:
                 finished_at=r.finished_at,
                 duration_ms=r.duration_ms,
             )
-            for r in runs
-        ]
+            for r, wf_name in runs
+        ], total
 
     async def get_run_detail(self, *, run_id: str, user_id: str) -> WorkflowRunDetailResponse:
         run_result = await self.db.execute(

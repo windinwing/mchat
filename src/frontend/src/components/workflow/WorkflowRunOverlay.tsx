@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2, CheckCircle2, XCircle, Clock, FileOutput, X, RotateCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { humanizeRunError } from '@/lib/humanizeRunError'
 import api from '@/lib/api'
 import { toast } from '@/components/ui/Toast'
 
@@ -191,8 +192,17 @@ function RunDetail({ run }: { run: RunItem }) {
 
       {/* Error */}
       {run.error && (
-        <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-3">
-          <p className="text-xs text-red-600 dark:text-red-400">{run.error}</p>
+        <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-3 space-y-1">
+          <p className="text-xs font-medium text-red-700 dark:text-red-300">{humanizeRunError(run.error).title}</p>
+          {humanizeRunError(run.error).hint ? (
+            <p className="text-xs text-red-600/90 dark:text-red-400/90">{humanizeRunError(run.error).hint}</p>
+          ) : null}
+          <details>
+            <summary className="text-xs cursor-pointer text-red-500 dark:text-red-400/80 hover:underline">
+              {t('workflows.viewRawError', { defaultValue: '查看详细错误日志' })}
+            </summary>
+            <pre className="text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words mt-1 max-h-40 overflow-auto">{run.error}</pre>
+          </details>
         </div>
       )}
 

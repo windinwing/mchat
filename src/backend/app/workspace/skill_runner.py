@@ -327,6 +327,12 @@ def main():
             result = module.main(**_filter_kwargs(module.main, args))
     else:
         result = {"error": "No main() or run() function found"}
+    # Skills may declare ``async def run()`` (e.g. web-fetch); await the
+    # coroutine here so async skills work inside the sidecar, not just via
+    # the host-side executor that returns the coroutine to its caller.
+    import asyncio as _asyncio
+    if inspect.iscoroutine(result):
+        result = _asyncio.run(result)
     if result is None:
         print(json.dumps({"ok": True, "message": "技能执行完成（无返回内容）"}))
     elif isinstance(result, dict):

@@ -479,7 +479,7 @@ WEB_FETCH_ZH: dict[str, Any] = {
                             "required": True,
                         },
                         {
-                            "key": "proxy",
+                            "key": "use_proxy",
                             "label": "使用代理",
                             "placeholder": "true / false",
                             "required": False,
@@ -504,7 +504,7 @@ WEB_FETCH_ZH: dict[str, Any] = {
                     "payload_template": {
                         "command": "fetch",
                         "url": "${input.url}",
-                        "proxy": "${input.proxy}",
+                        "use_proxy": "${input.use_proxy}",
                         "format": "${input.format}",
                     },
                 },
@@ -572,7 +572,7 @@ WEB_FETCH_EN: dict[str, Any] = {
                     "payload_template": {
                         "command": "fetch",
                         "url": "${input.url}",
-                        "proxy": "${input.proxy}",
+                        "use_proxy": "${input.use_proxy}",
                         "format": "${input.format}",
                     },
                 },
@@ -616,7 +616,7 @@ BATCH_URL_FETCH: dict[str, Any] = {
                             "type": "multiline",
                         },
                         {
-                            "key": "proxy",
+                            "key": "use_proxy",
                             "label": "使用代理",
                             "placeholder": "true / false（留空=否）",
                             "required": False,
@@ -645,6 +645,7 @@ BATCH_URL_FETCH: dict[str, Any] = {
                     "payload_template": {
                         "command": "fetch",
                         "url": "${item.line}",
+                        "use_proxy": "${input.use_proxy}",
                         "format": "text",
                         "max_length": 5000,
                     },
@@ -688,7 +689,7 @@ BATCH_URL_FETCH_EN: dict[str, Any] = {
                             "required": True,
                         },
                         {
-                            "key": "proxy",
+                            "key": "use_proxy",
                             "label": "Use proxy",
                             "placeholder": "true / false (blank=no)",
                             "required": False,
@@ -709,6 +710,7 @@ BATCH_URL_FETCH_EN: dict[str, Any] = {
                     "payload_template": {
                         "command": "fetch",
                         "url": "${item.line}",
+                        "use_proxy": "${input.use_proxy}",
                         "format": "text",
                         "max_length": 5000,
                     },

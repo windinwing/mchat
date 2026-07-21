@@ -9,6 +9,7 @@ import { WorkflowSidebar } from '@/components/workflow/WorkflowSidebar'
 import type { PresetItem } from '@/components/workflow/WorkflowSidebar'
 import { toast } from '@/components/ui/Toast'
 import api from '@/lib/api'
+import { automationCheckoutPath, extractAutomationLimit } from '@/lib/automationLimit'
 import { useAuthStore } from '@/stores/auth'
 import { getPatentPresetTitle, getPatentPresetDescription, buildPatentWorkflowPresets } from '@/lib/patentWorkflowPresets'
 import type { WorkflowSkillOption } from '@/lib/workflowSkillMeta'
@@ -75,13 +76,23 @@ export function WorkflowGraphPage() {
       try {
         await api.patch(`/workflows/${workflowId}`, { graph_json: graph })
         setWorkflow((prev) => (prev ? { ...prev, graph_json: graph } : prev))
-      } catch (err) {
-        toast(err instanceof Error ? err.message : t('workflows.toastSaveFailed', '保存失败'), { type: 'error' })
+      } catch (err: unknown) {
+        // 402 权益不足：友好提示 + 引导升级（对齐 WorkflowsPage 的处理）
+        const limit = extractAutomationLimit(err)
+        if (limit) {
+          toast(limit.message || t('workflows.dagPlanRequired', '图形编排需开通权益'), { type: 'error' })
+          if (isPortal && limit.upgrade_template_id) {
+            navigate(automationCheckoutPath(limit))
+          }
+        } else {
+          const msg = err instanceof Error ? err.message : t('workflows.toastSaveFailed', '保存失败')
+          toast(msg, { type: 'error' })
+        }
       } finally {
         setSaving(false)
       }
     },
-    [workflowId],
+    [workflowId, isPortal, navigate, t],
   )
 
   if (loading) {

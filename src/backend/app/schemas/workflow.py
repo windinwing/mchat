@@ -63,6 +63,14 @@ class WorkflowResponse(BaseModel):
     updated_at: datetime
 
 
+class WorkflowListResponse(BaseModel):
+    """Paginated workflow list envelope."""
+    items: list[WorkflowResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class WorkflowStepInput(BaseModel):
     step_key: str = Field(..., min_length=1, max_length=80)
     name: str = Field(..., min_length=1, max_length=120)
@@ -140,6 +148,14 @@ class WorkflowRunResponse(BaseModel):
     started_at: datetime
     finished_at: datetime | None = None
     duration_ms: int | None = None
+
+
+class WorkflowRunListResponse(BaseModel):
+    """Paginated workflow run list envelope."""
+    items: list[WorkflowRunResponse]
+    total: int
+    limit: int
+    offset: int
 
 
 class WorkflowRunDetailResponse(WorkflowRunResponse):

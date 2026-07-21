@@ -136,6 +136,11 @@ for patent_dir in "$PROJECT_DIR"/skills/patent-*; do
   [ -d "$patent_dir" ] || continue
   sync_skill_dir "$(basename "$patent_dir")"
 done
+# Stock intelligence skills (si_common depends on web-fetch via auto-discovery)
+for stock_dir in "$PROJECT_DIR"/skills/stock-*; do
+  [ -d "$stock_dir" ] || continue
+  sync_skill_dir "$(basename "$stock_dir")"
+done
 
 echo "==> Refresh tenant patent-search copies (Widget uses tenant workspace skills)"
 ssh "$REMOTE" "set -euo pipefail
@@ -148,6 +153,23 @@ for d in \"\${REMOTE_DIR}\"/data/tenants/*/skills/patent-search; do
     --exclude '.DS_Store' \
     --exclude 'config.json' \
     \"\${REMOTE_DIR}/skills/patent-search/\" \"\$d/\"
+done"
+
+echo "==> Refresh tenant stock-* copies (si_common fetcher depends on web-fetch)"
+ssh "$REMOTE" "set -euo pipefail
+REMOTE_DIR='${REMOTE_DIR}'
+cd \"\${REMOTE_DIR}/skills\"
+for skill in stock-*; do
+  src=\"\${REMOTE_DIR}/skills/\$skill\"
+  [ -d \"\$src\" ] || continue
+  for d in \"\${REMOTE_DIR}\"/data/tenants/*/skills/\$skill; do
+    [ -d \"\$d\" ] || continue
+    rsync -a --delete \
+      --exclude '__pycache__/' \
+      --exclude '.DS_Store' \
+      --exclude 'config.json' \
+      \"\$src/\" \"\$d/\"
+  done
 done"
 
 echo "==> Remote setup (pip, db migrate, restart Cloud services)"

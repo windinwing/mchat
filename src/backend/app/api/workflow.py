@@ -13,8 +13,10 @@ from app.schemas.workflow import (
     WorkflowApprovalResponse,
     WorkflowCreate,
     WorkflowCreateFromTemplateRequest,
+    WorkflowListResponse,
     WorkflowResponse,
     WorkflowRunDetailResponse,
+    WorkflowRunListResponse,
     WorkflowRunRenameRequest,
     WorkflowRunResumeRequest,
     WorkflowRunOnceRequest,
@@ -43,12 +45,22 @@ async def workflow_entitlements(
     return await get_workflow_entitlements(db, current_user)
 
 
-@router.get("", response_model=list[WorkflowResponse])
+@router.get("", response_model=WorkflowListResponse)
 async def list_workflows(
+    search: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     admin: User = Depends(require_permission(Permission.SKILLS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await WorkflowService(db).list_workflows(user_id=admin.id)
+    """List workflows with optional search + pagination.
+
+    Returns a paginated envelope { items, total, limit, offset }.
+    """
+    items, total = await WorkflowService(db).list_workflows(
+        user_id=admin.id, search=search, limit=limit, offset=offset,
+    )
+    return WorkflowListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.post("", response_model=WorkflowResponse, status_code=status.HTTP_201_CREATED)
@@ -208,16 +220,25 @@ async def run_workflow_once(
     )
 
 
-@router.get("/runs/list", response_model=list[WorkflowRunResponse])
+@router.get("/runs/list", response_model=WorkflowRunListResponse)
 async def list_workflow_runs(
     workflow_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None),
+    status: str | None = Query(default=None),
     admin: User = Depends(require_permission(Permission.SKILLS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await WorkflowService(db).list_runs(
-        user_id=admin.id, workflow_id=workflow_id, limit=limit
+    """List workflow runs with optional filters + pagination.
+
+    Returns a paginated envelope { items, total, limit, offset }.
+    """
+    items, total = await WorkflowService(db).list_runs(
+        user_id=admin.id, workflow_id=workflow_id, limit=limit, offset=offset,
+        search=search, status=status,
     )
+    return WorkflowRunListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/runs/{run_id}", response_model=WorkflowRunDetailResponse)

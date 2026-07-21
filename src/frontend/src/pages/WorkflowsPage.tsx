@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -10,6 +10,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Search,
   Store,
   Trash2,
   Workflow,
@@ -24,12 +25,15 @@ import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Switch } from '@/components/ui/Switch'
 import { Dialog } from '@/components/ui/Dialog'
+import { Tabs, TabPanel } from '@/components/ui/Tabs'
+import { Pagination } from '@/components/ui/Pagination'
 import { toast } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
 import { WorkflowGraphEditor, type WorkflowGraphValue } from '@/components/workflow/WorkflowGraphEditor'
 import { WorkflowReportPanel } from '@/components/workflow/WorkflowReportPanel'
 import { extractStartInputFields, graphNeedsReportTitle, buildDefaultReportTitle } from '@/lib/workflowSkillMeta'
 import { resolveRunDisplayName, runListSubtitle } from '@/lib/workflowRunLabel'
+import { humanizeRunError } from '@/lib/humanizeRunError'
 import {
   WorkflowEntitlementBanner,
   useWorkflowEntitlements,
@@ -193,8 +197,110 @@ export function WorkflowsPage() {
   const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(new Set())
   const [batchDeleting, setBatchDeleting] = useState(false)
 
+  // ── Tabs + pagination + search state ──────────────────────────────
+  const [activeTab, setActiveTab] = useState<'workflows' | 'runs'>('workflows')
+  const PAGE_SIZE = 10
+  // workflow list paging
+  const [wfPage, setWfPage] = useState(1)
+  const [wfSearch, setWfSearch] = useState('')
+  const [wfSearchInput, setWfSearchInput] = useState('')
+  const [wfTotal, setWfTotal] = useState(0)
+  const [wfLoading, setWfLoading] = useState(false)
+  // runs list paging
+  const [runsPage, setRunsPage] = useState(1)
+  const [runsSearch, setRunsSearch] = useState('')
+  const [runsSearchInput, setRunsSearchInput] = useState('')
+  const [runsStatus, setRunsStatus] = useState('')
+  const [runsTotal, setRunsTotal] = useState(0)
+  const [runsLoading, setRunsLoading] = useState(false)
+
+  // Paginated list envelopes returned by the backend.
+  type ListEnvelope<T> = { items: T[]; total: number; limit: number; offset: number }
+
+  const loadWorkflows = useCallback(
+    async (page: number, search: string) => {
+      setWfLoading(true)
+      try {
+        const params: Record<string, string> = { limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE) }
+        if (search.trim()) params.search = search.trim()
+        const data = await api.get<ListEnvelope<WorkflowItem>>('/workflows', params)
+        setWorkflows(data.items || [])
+        setWfTotal(data.total || 0)
+      } catch (err: any) {
+        toast(t('workflows.toastLoadFailed'), { type: 'error', message: err.message })
+      } finally {
+        setWfLoading(false)
+      }
+    },
+    [t],
+  )
+
+  const loadRuns = useCallback(
+    async (page: number, search: string, status: string) => {
+      setRunsLoading(true)
+      try {
+        const params: Record<string, string> = { limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE) }
+        if (search.trim()) params.search = search.trim()
+        if (status) params.status = status
+        const data = await api.get<ListEnvelope<WorkflowRun>>('/workflows/runs/list', params)
+        setRuns(data.items || [])
+        setRunsTotal(data.total || 0)
+      } catch (err: any) {
+        toast(t('workflows.toastLoadFailed'), { type: 'error', message: err.message })
+      } finally {
+        setRunsLoading(false)
+      }
+    },
+    [t],
+  )
+
+  // Initial load + when search/page/status change.
   useEffect(() => {
-    loadAll()
+    loadWorkflows(wfPage, wfSearch)
+  }, [wfPage, wfSearch, loadWorkflows])
+  useEffect(() => {
+    loadRuns(runsPage, runsSearch, runsStatus)
+  }, [runsPage, runsSearch, runsStatus, loadRuns])
+
+  // Debounced search: typing updates the *Input field immediately; the
+  // committed search value (which triggers the fetch) updates 300ms after.
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setWfSearch(wfSearchInput)
+      setWfPage(1)
+    }, 300)
+    return () => window.clearTimeout(id)
+  }, [wfSearchInput])
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setRunsSearch(runsSearchInput)
+      setRunsPage(1)
+    }, 300)
+    return () => window.clearTimeout(id)
+  }, [runsSearchInput])
+
+  // Load non-paginated aux data once.
+  useEffect(() => {
+    (async () => {
+      setLoading(true)
+      try {
+        const [skillData, templateData] = await Promise.all([
+          api.get<Skill[]>('/skills'),
+          api.get<WorkflowTemplate[]>(`/workflows/templates?locale=${uiLocale}`),
+        ])
+        setSkills(skillData)
+        setTemplates(templateData)
+        const approvals = await api.get<WorkflowApprovalTask[]>('/workflows/approvals/pending', {
+          limit: '50',
+        })
+        setPendingApprovals(approvals)
+      } catch (err: any) {
+        toast(t('workflows.toastLoadFailed'), { type: 'error', message: err.message })
+      } finally {
+        setLoading(false)
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiLocale])
 
   const hasRunningJobs = runs.some((r) => r.status === 'running' || r.status === 'paused')
@@ -204,11 +310,15 @@ export function WorkflowsPage() {
       return
     }
     const timer = window.setInterval(async () => {
+      // Re-fetch the CURRENT runs page (preserve offset) so polling doesn't
+      // reset pagination when a run completes mid-page.
       try {
-        const runData = await api.get<WorkflowRun[]>('/workflows/runs/list', { limit: '40' })
-        setRuns(runData)
-        // Also refresh pending approvals so paused-workflow approvals show up
-        // without manual refresh.
+        const params: Record<string, string> = { limit: String(PAGE_SIZE), offset: String((runsPage - 1) * PAGE_SIZE) }
+        if (runsSearch.trim()) params.search = runsSearch.trim()
+        if (runsStatus) params.status = runsStatus
+        const data = await api.get<ListEnvelope<WorkflowRun>>('/workflows/runs/list', params)
+        setRuns(data.items || [])
+        setRunsTotal(data.total || 0)
         try {
           const approvals = await api.get<WorkflowApprovalTask[]>('/workflows/approvals/pending', { limit: '50' })
           setPendingApprovals(approvals)
@@ -224,39 +334,10 @@ export function WorkflowsPage() {
       }
     }, 3000)
     return () => window.clearInterval(timer)
-  }, [hasRunningJobs, pendingApprovals.length, runDetailOpen, selectedRunDetail?.id, selectedRunDetail?.status])
+  }, [hasRunningJobs, pendingApprovals.length, runDetailOpen, selectedRunDetail?.id, selectedRunDetail?.status, runsPage, runsSearch, runsStatus])
 
-  const refreshRuns = async () => {
-    try {
-      const runData = await api.get<WorkflowRun[]>('/workflows/runs/list', { limit: '40' })
-      setRuns(runData)
-    } catch {
-      /* ignore */
-    }
-  }
-
-  const loadAll = async () => {
-    setLoading(true)
-    try {
-      const [workflowData, runData, skillData, templateData] = await Promise.all([
-        api.get<WorkflowItem[]>('/workflows'),
-        api.get<WorkflowRun[]>('/workflows/runs/list', { limit: '40' }),
-        api.get<Skill[]>('/skills'),
-        api.get<WorkflowTemplate[]>(`/workflows/templates?locale=${uiLocale}`),
-      ])
-      const approvals = await api.get<WorkflowApprovalTask[]>('/workflows/approvals/pending', {
-        limit: '50',
-      })
-      setWorkflows(workflowData)
-      setRuns(runData)
-      setSkills(skillData)
-      setTemplates(templateData)
-      setPendingApprovals(approvals)
-    } catch (err: any) {
-      toast(t('workflows.toastLoadFailed'), { type: 'error', message: err.message })
-    } finally {
-      setLoading(false)
-    }
+  const refreshAll = async () => {
+    await Promise.all([loadWorkflows(wfPage, wfSearch), loadRuns(runsPage, runsSearch, runsStatus)])
   }
 
   const showLimitToast = (err: unknown, fallbackKey: string) => {
@@ -274,7 +355,12 @@ export function WorkflowsPage() {
   }
 
   const openCreate = () => {
-    if (entitlements && !entitlements.can_create_workflow) {
+    // 权益未加载完时提示等待，避免填完表单才在提交时被拒。
+    if (entitlements === null) {
+      toast(t('workflows.entitlementsLoading', { defaultValue: '权益信息加载中，请稍后再试' }), { type: 'warning' })
+      return
+    }
+    if (!entitlements.can_create_workflow) {
       toast(t('portal.automationFreeHint'), { type: 'warning' })
       if (isPortal && entitlements.upgrade_template_id) {
         navigate(
@@ -310,7 +396,7 @@ export function WorkflowsPage() {
         enabled: enabledInput,
       })
       setCreateOpen(false)
-      await loadAll()
+      await refreshAll()
       toast(t('workflows.toastCreated'), { type: 'success' })
     } catch (err: unknown) {
       showLimitToast(err, 'workflows.toastSaveFailed')
@@ -329,7 +415,7 @@ export function WorkflowsPage() {
         enabled: enabledInput,
       })
       setEditOpen(false)
-      await loadAll()
+      await refreshAll()
       toast(t('workflows.toastUpdated'), { type: 'success' })
     } catch (err: any) {
       toast(t('workflows.toastSaveFailed'), { type: 'error', message: err.message })
@@ -370,12 +456,15 @@ export function WorkflowsPage() {
         payload,
       })
       toast(t('workflows.toastRunQueued'), { type: 'success' })
+      setRunsPage(1)
+      setActiveTab('runs')
       if (detail?.id) {
         setRuns((prev) => [detail as WorkflowRun, ...prev.filter((r) => r.id !== detail.id)])
+        setRunsTotal((prev) => prev + 1)
         setSelectedRunDetail(detail)
         setRunDetailOpen(true)
       } else {
-        await refreshRuns()
+        await loadRuns(1, runsSearch, runsStatus)
       }
     } catch (err: unknown) {
       showLimitToast(err, 'workflows.toastRunFailed')
@@ -450,7 +539,7 @@ export function WorkflowsPage() {
     }
     setSelectedRunIds(new Set())
     setBatchDeleting(false)
-    await refreshRuns()
+    await loadRuns(runsPage, runsSearch, runsStatus)
     toast(t('workflows.toastBatchDeleted', { count: deleted }), { type: 'success' })
   }
 
@@ -479,12 +568,16 @@ export function WorkflowsPage() {
         payload,
       })
       toast(t('workflows.toastRunQueued'), { type: 'success' })
+      // Jump to the run records tab + page 1 so the user sees the new run.
+      setRunsPage(1)
+      setActiveTab('runs')
       if (detail?.id) {
         setRuns((prev) => [detail as WorkflowRun, ...prev.filter((r) => r.id !== detail.id)])
+        setRunsTotal((prev) => prev + 1)
         setSelectedRunDetail(detail)
         setRunDetailOpen(true)
       } else {
-        await refreshRuns()
+        await loadRuns(1, runsSearch, runsStatus)
       }
     } catch (err: unknown) {
       showLimitToast(err, 'workflows.toastRunFailed')
@@ -592,7 +685,7 @@ export function WorkflowsPage() {
       toast(t('workflows.toastTemplateCreated'), { type: 'success' })
       setCreateFromTplOpen(false)
       setCreateFromTplTarget(null)
-      await loadAll()
+      await refreshAll()
     } catch (err: unknown) {
       showLimitToast(err, 'workflows.toastTemplateCreateFailed')
     } finally {
@@ -610,7 +703,7 @@ export function WorkflowsPage() {
     try {
       await api.post(`/workflows/from-template/${templateId}`, {})
       toast(t('workflows.toastTemplateCreated'), { type: 'success' })
-      await loadAll()
+      await refreshAll()
     } catch (err: unknown) {
       showLimitToast(err, 'workflows.toastTemplateCreateFailed')
     } finally {
@@ -644,7 +737,7 @@ export function WorkflowsPage() {
       toast(t('workflows.toastTemplateSaved'), { type: 'success' })
       setSaveTemplateOpen(false)
       setSaveTemplateTarget(null)
-      await loadAll()
+      await refreshAll()
     } catch (err: any) {
       toast(t('workflows.toastTemplateSaveFailed'), { type: 'error', message: err.message })
     } finally {
@@ -658,7 +751,7 @@ export function WorkflowsPage() {
     try {
       await api.delete(`/workflows/templates/${tpl.id}`)
       toast(t('workflows.toastTemplateDeleted'), { type: 'success' })
-      await loadAll()
+      await refreshAll()
     } catch (err: any) {
       toast(t('workflows.toastTemplateDeleteFailed'), { type: 'error', message: err.message })
     } finally {
@@ -781,7 +874,7 @@ export function WorkflowsPage() {
       toast(t('workflows.toastApprovalApproved'), { type: 'success' })
       setApprovalCandidates((prev) => { const n = { ...prev }; delete n[task.id]; return n })
       setSelectedCandidate((prev) => { const n = { ...prev }; delete n[task.id]; return n })
-      await loadAll()
+      await refreshAll()
     } catch (err: any) {
       toast(t('workflows.toastApprovalActionFailed'), { type: 'error', message: err.message })
     }
@@ -796,7 +889,7 @@ export function WorkflowsPage() {
         decision_payload: {},
       })
       toast(t('workflows.toastApprovalRejected'), { type: 'success' })
-      await loadAll()
+      await refreshAll()
     } catch (err: any) {
       toast(t('workflows.toastApprovalActionFailed'), { type: 'error', message: err.message })
     }
@@ -806,7 +899,7 @@ export function WorkflowsPage() {
     try {
       await api.post(`/workflows/runs/${runId}/resume`, { payload: {} })
       toast(t('workflows.toastRunResumed'), { type: 'success' })
-      await loadAll()
+      await refreshAll()
     } catch (err: any) {
       toast(t('workflows.toastResumeFailed'), { type: 'error', message: err.message })
     }
@@ -840,7 +933,7 @@ export function WorkflowsPage() {
           >
             {t('workflows.sidebarTemplates', '模板')}
           </Button>
-          <Button variant="ghost" size="sm" leftIcon={<RefreshCw className="w-4 h-4" />} onClick={loadAll}>
+          <Button variant="ghost" size="sm" leftIcon={<RefreshCw className="w-4 h-4" />} onClick={refreshAll}>
             {t('common.refresh')}
           </Button>
           <Button
@@ -965,13 +1058,38 @@ export function WorkflowsPage() {
       ) : null}
 
 
+      <Tabs
+        tabs={[
+          { id: 'workflows', label: t('workflows.listTitle'), badge: wfTotal },
+          { id: 'runs', label: t('workflows.runsTitle'), badge: runsTotal },
+        ]}
+        activeTab={activeTab}
+        onChange={(id) => setActiveTab(id as 'workflows' | 'runs')}
+        className="mb-4"
+      />
+
+      <TabPanel id="workflows" activeTab={activeTab}>
       <Card>
-        <CardHeader>{t('workflows.listTitle')}</CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <span>{t('workflows.listTitle')}</span>
+            <div className="w-64">
+              <Input
+                value={wfSearchInput}
+                onChange={(e) => setWfSearchInput(e.target.value)}
+                placeholder={t('workflows.searchPlaceholder', { defaultValue: '搜索工作流…' })}
+                leftIcon={<Search className="w-4 h-4" />}
+              />
+            </div>
+          </div>
+        </CardHeader>
         <CardContent className="p-0">
-          {workflows.length === 0 ? (
+          {wfLoading ? (
+            <div className="flex justify-center py-14"><Spinner size="lg" /></div>
+          ) : workflows.length === 0 ? (
             <div className="py-14 text-center text-gray-500 dark:text-gray-400">
               <Workflow className="w-10 h-10 mx-auto mb-2 opacity-60" />
-              {t('workflows.empty')}
+              {wfSearch ? t('workflows.noSearchResults', { defaultValue: '无匹配的工作流' }) : t('workflows.empty')}
             </div>
           ) : (
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -1034,9 +1152,16 @@ export function WorkflowsPage() {
             </div>
           )}
         </CardContent>
+        <Pagination
+          page={wfPage}
+          total={wfTotal}
+          pageSize={PAGE_SIZE}
+          onPageChange={setWfPage}
+        />
       </Card>
+      </TabPanel>
 
-
+      <TabPanel id="runs" activeTab={activeTab}>
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -1062,9 +1187,32 @@ export function WorkflowsPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {runs.length === 0 ? (
+          <div className="flex items-center gap-2 px-6 py-3 border-b border-gray-100 dark:border-gray-700">
+            <div className="flex-1 max-w-xs">
+              <Input
+                value={runsSearchInput}
+                onChange={(e) => setRunsSearchInput(e.target.value)}
+                placeholder={t('workflows.searchRunsPlaceholder', { defaultValue: '搜索运行记录…' })}
+                leftIcon={<Search className="w-4 h-4" />}
+              />
+            </div>
+            <select
+              value={runsStatus}
+              onChange={(e) => { setRunsStatus(e.target.value); setRunsPage(1) }}
+              className="h-9 rounded-md border border-gray-200 bg-white px-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+            >
+              <option value="">{t('workflows.statusAll', { defaultValue: '全部状态' })}</option>
+              <option value="running">{t('workflows.statusRunning', { defaultValue: '运行中' })}</option>
+              <option value="success">{t('workflows.statusCompleted', { defaultValue: '已完成' })}</option>
+              <option value="failed">{t('workflows.statusFailed', { defaultValue: '失败' })}</option>
+              <option value="paused">{t('workflows.statusPaused', { defaultValue: '已暂停' })}</option>
+            </select>
+          </div>
+          {runsLoading ? (
+            <div className="flex justify-center py-10"><Spinner size="lg" /></div>
+          ) : runs.length === 0 ? (
             <div className="py-10 text-center text-gray-500 dark:text-gray-400">
-              {t('workflows.noRuns')}
+              {runsSearch || runsStatus ? t('workflows.noSearchResults', { defaultValue: '无匹配的记录' }) : t('workflows.noRuns')}
             </div>
           ) : (
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -1161,7 +1309,14 @@ export function WorkflowsPage() {
             </div>
           )}
         </CardContent>
+        <Pagination
+          page={runsPage}
+          total={runsTotal}
+          pageSize={PAGE_SIZE}
+          onPageChange={setRunsPage}
+        />
       </Card>
+      </TabPanel>
 
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title={t('workflows.createDialogTitle')} size="md">
         <div className="space-y-4">
@@ -1208,17 +1363,13 @@ export function WorkflowsPage() {
                 <p className="text-xs text-blue-700/90 dark:text-blue-300/90 pl-6">
                   {t('workflows.runInProgressCloseHint')}
                 </p>
+                <p className="text-xs text-blue-700/90 dark:text-blue-300/90 pl-6">
+                  {t('workflows.runInProgressFirstRunHint', { defaultValue: '首次运行可能需要安装依赖（约 1 分钟），请耐心等待。' })}
+                </p>
               </div>
             ) : null}
             {selectedRunDetail.status === 'failed' && selectedRunDetail.error ? (
-              <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50/80 dark:bg-red-950/40 px-3 py-2 space-y-1">
-                <p className="text-sm font-medium text-red-800 dark:text-red-200">
-                  {t('workflows.detailError')}
-                </p>
-                <pre className="text-xs text-red-700 dark:text-red-300 whitespace-pre-wrap break-words">
-                  {selectedRunDetail.error}
-                </pre>
-              </div>
+              <RunErrorBlock error={selectedRunDetail.error} />
             ) : null}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
               <p className="text-gray-600 dark:text-gray-300">
@@ -1340,9 +1491,7 @@ export function WorkflowsPage() {
                         {formatDate(node.started_at)} · {node.duration_ms != null ? `${node.duration_ms}ms` : '-'}
                       </p>
                       {node.error ? (
-                        <pre className="text-xs rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-2 mt-2 text-red-800 dark:text-red-200 overflow-auto">
-{node.error}
-                        </pre>
+                        <RunErrorBlock error={node.error} compact />
                       ) : null}
                       <details className="mt-2">
                         <summary className="text-xs cursor-pointer text-gray-600 dark:text-gray-300">
@@ -1552,8 +1701,32 @@ export function WorkflowsPage() {
       <WorkflowTemplateGallery
         open={showTemplateGallery}
         onClose={() => setShowTemplateGallery(false)}
-        onApplied={() => void loadAll()}
+        onApplied={() => void refreshAll()}
       />
+    </div>
+  )
+}
+
+/** 友好的运行/节点错误展示：顶部一句话提示 + 可折叠的原始错误日志。 */
+function RunErrorBlock({ error, compact }: { error: string; compact?: boolean }) {
+  const { t } = useTranslation()
+  const humanized = humanizeRunError(error)
+  return (
+    <div className={'rounded-lg border border-red-200 dark:border-red-800 bg-red-50/80 dark:bg-red-950/40 ' + (compact ? 'px-2 py-1.5 mt-2' : 'px-3 py-2 space-y-1')}>
+      <p className={'font-medium text-red-800 dark:text-red-200 ' + (compact ? 'text-xs' : 'text-sm')}>
+        {humanized.title}
+      </p>
+      {humanized.hint ? (
+        <p className="text-xs text-red-700/90 dark:text-red-300/90">{humanized.hint}</p>
+      ) : null}
+      <details className="mt-1">
+        <summary className="text-xs cursor-pointer text-red-600 dark:text-red-300/80 hover:underline">
+          {t('workflows.viewRawError', { defaultValue: '查看详细错误日志' })}
+        </summary>
+        <pre className="text-xs text-red-700 dark:text-red-300 whitespace-pre-wrap break-words mt-1 max-h-64 overflow-auto">
+{error}
+        </pre>
+      </details>
     </div>
   )
 }

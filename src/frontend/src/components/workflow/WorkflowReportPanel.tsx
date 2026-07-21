@@ -43,6 +43,115 @@ const FORMAT_ICONS: Record<ReportArtifactFormat, React.ReactNode> = {
   other: <FileText className="w-4 h-4" />,
 }
 
+// ── Structured data extraction (stocks / signals / gainers) ──────────────
+interface StockRow { code: string; name: string; price?: number | null; changePct?: number | null; amount?: number | null; board?: string }
+interface SignalRow { type: string; direction?: string; note?: string; value?: unknown }
+interface StructuredBlock {
+  title?: string
+  stocks?: StockRow[]
+  signals?: SignalRow[]
+  topGainers?: StockRow[]
+  topLosers?: StockRow[]
+  boardAvgPct?: number | null
+}
+
+/** Scan node runs for skill outputs carrying structured lists and normalize
+ *  them into renderable blocks. Covers stock-search (stocks/top_gainers) and
+ *  stock-overseas / stock-quote (signals), plus any skill emitting `stocks`
+ *  or `signals` on its result. */
+function extractStructuredData(nodeRuns?: NodeRun[] | null): StructuredBlock[] {
+  if (!nodeRuns?.length) return []
+  const blocks: StructuredBlock[] = []
+  for (const nr of nodeRuns) {
+    const r = nr?.result as Record<string, unknown> | null | undefined
+    if (!r || typeof r !== 'object') continue
+    const block: StructuredBlock = {}
+    if (nr.node_name) block.title = String(nr.node_name)
+
+    // 成分股 / 股票列表
+    const stocksRaw = (r.stocks ?? r.items ?? r.rows) as unknown
+    if (Array.isArray(stocksRaw) && stocksRaw.length) {
+      block.stocks = stocksRaw.slice(0, 50).map((s) => normalizeStock(s as Record<string, unknown>)).filter((s) => s.code || s.name)
+    }
+    // 涨跌幅居前
+    if (Array.isArray(r.top_gainers)) {
+      block.topGainers = (r.top_gainers as Record<string, unknown>[]).slice(0, 5).map(normalizeStock)
+    }
+    if (Array.isArray(r.top_losers)) {
+      block.topLosers = (r.top_losers as Record<string, unknown>[]).slice(0, 5).map(normalizeStock)
+    }
+    // 板块平均涨跌幅
+    if (typeof r.board_avg_pct === 'number') block.boardAvgPct = r.board_avg_pct
+
+    // 技术信号（envelope.signals 或顶层 signals）
+    const sigSrc = (r.signals ?? (r.envelope as Record<string, unknown> | undefined)?.signals) as unknown
+    if (Array.isArray(sigSrc) && sigSrc.length) {
+      block.signals = (sigSrc as Record<string, unknown>[]).slice(0, 30).map((s) => ({
+        type: String(s.type ?? s.name ?? ''),
+        direction: typeof s.direction === 'string' ? s.direction : undefined,
+        note: typeof s.note === 'string' ? s.note : undefined,
+        value: s.value,
+      })).filter((s) => s.type)
+    }
+
+    if (block.stocks?.length || block.signals?.length || block.topGainers?.length || block.topLosers?.length || block.boardAvgPct != null) {
+      blocks.push(block)
+    }
+  }
+  return blocks
+}
+
+function normalizeStock(s: Record<string, unknown>): StockRow {
+  return {
+    code: String(s.code ?? s.symbol ?? s.f12 ?? ''),
+    name: String(s.name ?? s.f14 ?? ''),
+    price: numOrNull(s.price ?? s['最新价'] ?? s.currentPrice),
+    changePct: numOrNull(s.change_pct ?? s.changePct ?? s.pct_chg),
+    amount: numOrNull(s.amount ?? s['成交额']),
+    board: typeof s.board === 'string' ? s.board : undefined,
+  }
+}
+function numOrNull(v: unknown): number | null {
+  const n = typeof v === 'string' ? parseFloat(v) : (v as number)
+  return typeof n === 'number' && !Number.isNaN(n) ? n : null
+}
+function fmtNum(n: number | null | undefined): string {
+  return n == null ? '—' : n.toFixed(2)
+}
+function fmtPct(n: number | null | undefined): string {
+  return n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
+}
+function fmtAmount(yuan: number | null | undefined): string {
+  if (yuan == null) return '—'
+  if (yuan >= 1e8) return `${(yuan / 1e8).toFixed(2)}亿`
+  if (yuan >= 1e4) return `${(yuan / 1e4).toFixed(1)}万`
+  return `${yuan.toFixed(0)}`
+}
+function pctColor(n: number | null | undefined): string {
+  if (n == null) return 'text-gray-500 dark:text-gray-400'
+  return n > 0 ? 'text-red-600 dark:text-red-400' : n < 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'
+}
+function directionBadge(d?: string): string {
+  if (d === 'bull') return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+  if (d === 'bear') return 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+  return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+}
+
+function GainersLosersRow({ label, items }: { label: string; items: StockRow[] }) {
+  if (!items?.length) return null
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      <span className="font-medium text-gray-700 dark:text-gray-300">{label}</span>
+      {items.map((s, i) => (
+        <span key={s.code || i} className="inline-flex items-center gap-1">
+          <span className="text-gray-900 dark:text-gray-100">{s.name}</span>
+          <span className={pctColor(s.changePct)}>{fmtPct(s.changePct)}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 interface Props {
   nodeRuns?: NodeRun[] | null
   outputPayload?: Record<string, unknown> | null
@@ -62,6 +171,10 @@ export function WorkflowReportPanel({ nodeRuns, outputPayload }: Props) {
     () => extractWorkflowReportNarrative(nodeRuns, outputPayload),
     [nodeRuns, outputPayload]
   )
+  // Structured data blocks (stocks lists, technical signals, gainers/losers).
+  // Skills like stock-search / stock-overseas emit these on node.result; the
+  // panel renders them as tables instead of just the summary string.
+  const structuredBlocks = useMemo(() => extractStructuredData(nodeRuns), [nodeRuns])
   const officeFiles = artifacts
 
   const [previewOffice, setPreviewOffice] = useState<WorkflowReportArtifact | null>(() => {
@@ -91,7 +204,7 @@ export function WorkflowReportPanel({ nodeRuns, outputPayload }: Props) {
     }
   }
 
-  if (artifacts.length === 0 && images.length === 0 && !narrative) return null
+  if (artifacts.length === 0 && images.length === 0 && !narrative && structuredBlocks.length === 0) return null
 
   const officeEmbed = previewOffice ? officeOnlinePreviewUrl(previewOffice.url) : null
 
@@ -130,6 +243,77 @@ export function WorkflowReportPanel({ nodeRuns, outputPayload }: Props) {
           ) : null}
         </div>
       ) : null}
+
+      {structuredBlocks.map((blk, i) => (
+        <div key={i} className="space-y-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/50 p-3">
+          {blk.title ? (
+            <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{blk.title}</p>
+          ) : null}
+
+          {/* 涨跌幅居前（top gainers / losers） */}
+          {blk.topGainers?.length ? (
+            <GainersLosersRow label={t('workflows.reportTopGainers', { defaultValue: '📈 涨幅居前' })} items={blk.topGainers} />
+          ) : null}
+          {blk.topLosers?.length ? (
+            <GainersLosersRow label={t('workflows.reportTopLosers', { defaultValue: '📉 跌幅居前' })} items={blk.topLosers} />
+          ) : null}
+
+          {/* 板块强弱概览 */}
+          {blk.boardAvgPct != null ? (
+            <p className="text-xs text-gray-600 dark:text-gray-400">
+              {t('workflows.reportBoardTrend', { defaultValue: '板块平均涨跌幅' })}：
+              <span className={blk.boardAvgPct >= 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-green-600 dark:text-green-400 font-medium'}>
+                {blk.boardAvgPct >= 0 ? '+' : ''}{blk.boardAvgPct.toFixed(2)}%
+              </span>
+            </p>
+          ) : null}
+
+          {/* 成分股 / 股票列表表格 */}
+          {blk.stocks?.length ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-xs">
+                <thead>
+                  <tr className="text-left border-b border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
+                    <th className="py-1.5 pr-3">{t('workflows.colCode', { defaultValue: '代码' })}</th>
+                    <th className="py-1.5 pr-3">{t('workflows.colName', { defaultValue: '名称' })}</th>
+                    <th className="py-1.5 pr-3">{t('workflows.colPrice', { defaultValue: '最新价' })}</th>
+                    <th className="py-1.5 pr-3">{t('workflows.colChangePct', { defaultValue: '涨跌幅' })}</th>
+                    <th className="py-1.5 pr-3">{t('workflows.colAmount', { defaultValue: '成交额' })}</th>
+                    <th className="py-1.5 pr-3">{t('workflows.colBoard', { defaultValue: '板块' })}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {blk.stocks.map((s, idx) => (
+                    <tr key={s.code || idx} className="border-b border-gray-100 dark:border-gray-800">
+                      <td className="py-1.5 pr-3 font-mono text-gray-700 dark:text-gray-300">{s.code}</td>
+                      <td className="py-1.5 pr-3 text-gray-900 dark:text-gray-100">{s.name}</td>
+                      <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-300">{fmtNum(s.price)}</td>
+                      <td className={'py-1.5 pr-3 font-medium ' + pctColor(s.changePct)}>{fmtPct(s.changePct)}</td>
+                      <td className="py-1.5 pr-3 text-gray-500 dark:text-gray-400">{fmtAmount(s.amount)}</td>
+                      <td className="py-1.5 pr-3 text-gray-500 dark:text-gray-400">{s.board || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {/* 技术信号列表 */}
+          {blk.signals?.length ? (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{t('workflows.reportSignals', { defaultValue: '技术信号' })}</p>
+              {blk.signals.map((sig, idx) => (
+                <div key={idx} className="flex items-center gap-2 text-xs">
+                  <span className={'px-1.5 py-0.5 rounded font-medium ' + directionBadge(sig.direction)}>
+                    {sig.direction === 'bull' ? '多' : sig.direction === 'bear' ? '空' : '中'}
+                  </span>
+                  <span className="text-gray-700 dark:text-gray-300">{sig.type}{sig.note ? ` — ${sig.note}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ))}
 
       {images.length > 0 ? (
         <div className="space-y-2">
