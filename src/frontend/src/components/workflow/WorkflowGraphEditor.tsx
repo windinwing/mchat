@@ -362,7 +362,7 @@ export function WorkflowGraphEditor(props: Props) {
 function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowName, onBack, headerExtra, presets }: Props) {
   const { t, i18n } = useTranslation()
   const uiLocale = i18n.language || 'zh'
-  const { screenToFlowPosition, zoomIn, zoomOut, fitView, getViewport, setViewport } = useReactFlow()
+  const { screenToFlowPosition, zoomIn, zoomOut, fitView, getViewport, setViewport, setCenter } = useReactFlow()
   const { zoom } = useViewport()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null)
@@ -382,9 +382,15 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
   // Ref to always access latest nodes without recreating callbacks during drag
   const nodesRef = useRef(nodes)
   nodesRef.current = nodes
+  // Current subgraph container size + child card sizes, for manual drag clamping
+  // (React Flow's extent:'parent' is unreliable with dynamically-resized parents).
+  const subgraphBoundsRef = useRef<{ boxW: number; boxH: number; sizes: Record<string, { w: number; h: number }> } | null>(null)
   const [edges, setEdges, onEdgesChange] = useEdgesState(toFlowEdges(initial.edges))
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+  // Subgraph drill-in: the batch node currently focused (null = full graph view).
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null)
+  const savedTopViewportRef = useRef<{ x: number; y: number; zoom: number } | null>(null)
   const [fullScreen, setFullScreen] = useState(false)
   const [jsonDraft, setJsonDraft] = useState('')
   const [jsonError, setJsonError] = useState('')
@@ -483,6 +489,26 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
     window.addEventListener('mchat-batch-drop', handler)
     return () => window.removeEventListener('mchat-batch-drop', handler)
   }, [skills, nodes, pushHistory, setNodes, uiLocale])
+
+  // Listen for batch double-click → enter subgraph (reliable event-based path).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { batchNodeId?: string }
+      if (!detail?.batchNodeId) return
+      enterBatchSubgraph(detail.batchNodeId)
+    }
+    window.addEventListener('mchat-batch-enter', handler)
+    return () => window.removeEventListener('mchat-batch-enter', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, activeBatchId])
+
+  // Listen for batch "back" button → exit subgraph.
+  useEffect(() => {
+    const handler = () => exitBatchSubgraph()
+    window.addEventListener('mchat-batch-exit', handler)
+    return () => window.removeEventListener('mchat-batch-exit', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const filteredSkills = useMemo(() => {
     const q = skillSearch.trim().toLowerCase()
@@ -650,6 +676,19 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                 }
               }
             }
+          }
+        }
+      }
+      // Subgraph drag clamping: keep batch children inside the (enlarged) container.
+      const bounds = subgraphBoundsRef.current
+      if (bounds) {
+        for (const change of enriched) {
+          if (change.type !== 'position' || !change.position) continue
+          const sz = bounds.sizes[change.id]
+          if (!sz) continue
+          change.position = {
+            x: Math.max(0, Math.min(change.position.x, bounds.boxW - sz.w)),
+            y: Math.max(0, Math.min(change.position.y, bounds.boxH - sz.h)),
           }
         }
       }
@@ -864,6 +903,59 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
     })
     setEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId))
     if (selectedNodeId === nodeId) setSelectedNodeId(null)
+    // If the deleted node is the focused batch, drop back to the full view.
+    if (activeBatchId === nodeId) setActiveBatchId(null)
+  }
+
+  // --- Subgraph drill-in (ComfyUI-style) ---
+  const enterBatchSubgraph = (batchId: string) => {
+    // Remember the full-graph viewport only on the first drill-in.
+    if (!activeBatchId) savedTopViewportRef.current = getViewport()
+    setActiveBatchId(batchId)
+    const batch = nodes.find((n) => n.id === batchId)
+    if (!batch) return
+    const bw = (batch.measured?.width ?? batch.width ?? 320) as number
+    const bh = (batch.measured?.height ?? batch.height ?? 240) as number
+    // Gather absolute points: the batch rect plus each child (child positions are
+    // relative to the parent, so add the parent's position to get absolute coords).
+    const pts: { x: number; y: number }[] = [
+      { x: batch.position.x, y: batch.position.y },
+      { x: batch.position.x + bw, y: batch.position.y + bh },
+    ]
+    for (const c of nodes.filter((n) => n.parentId === batchId)) {
+      const cw = (c.measured?.width ?? c.width ?? 180) as number
+      const ch = (c.measured?.height ?? c.height ?? 80) as number
+      const ax = batch.position.x + c.position.x
+      const ay = batch.position.y + c.position.y
+      pts.push({ x: ax, y: ay }, { x: ax + cw, y: ay + ch })
+    }
+    const minX = Math.min(...pts.map((p) => p.x))
+    const maxX = Math.max(...pts.map((p) => p.x))
+    const minY = Math.min(...pts.map((p) => p.y))
+    const maxY = Math.max(...pts.map((p) => p.y))
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    const spanW = maxX - minX
+    const spanH = maxY - minY
+    // Zoom so the batch+children fit with padding; clamp to a readable range.
+    const wrapper = reactFlowWrapper.current
+    const vw = wrapper?.clientWidth ?? 800
+    const vh = wrapper?.clientHeight ?? 600
+    const targetZoom = Math.min(1.3, Math.max(0.4, Math.min((vw * 0.7) / spanW, (vh * 0.7) / spanH)))
+    requestAnimationFrame(() => {
+      setCenter(cx, cy, { zoom: targetZoom, duration: 400 })
+    })
+  }
+
+  const exitBatchSubgraph = () => {
+    setActiveBatchId(null)
+    const saved = savedTopViewportRef.current
+    if (saved) {
+      setViewport(saved, { duration: 300 })
+      savedTopViewportRef.current = null
+    } else {
+      fitView({ duration: 300, padding: 0.2 })
+    }
   }
 
   const deleteEdgeById = (edgeId: string) => {
@@ -1206,6 +1298,72 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
     setNodeSearch({ open: false, pos: null })
   }
 
+  // Subgraph view: when activeBatchId is set, show only that batch's children
+  // (and hide the top-level nodes). When null (overview), hide all batch children
+  // so the batch renders as a compact card until double-clicked.
+  const { visibleNodes, visibleEdges } = useMemo(() => {
+    if (!activeBatchId) {
+      // Overview: hide batch children so the container stays compact.
+      subgraphBoundsRef.current = null
+      const hiddenIds = new Set(
+        nodes.filter((n) => Boolean(n.parentId)).map((n) => n.id),
+      )
+      return {
+        visibleNodes: nodes.map((n) => (n.parentId ? { ...n, hidden: true } : n)),
+        visibleEdges: edges.map((e) =>
+          hiddenIds.has(e.source) || hiddenIds.has(e.target) ? { ...e, hidden: true } : e,
+        ),
+      }
+    }
+    // Inside a batch: show the batch node itself (enlarged to contain its
+    // children) plus its children. Other top-level nodes are hidden. Keeping
+    // parentId on children lets React Flow render them in the parent's coordinate
+    // space; enlarging the parent box prevents the extent-clamp from stacking them.
+    const childIds = new Set(
+      nodes.filter((n) => n.parentId === activeBatchId).map((n) => n.id),
+    )
+    // Compute the bounding box of children (relative coords) + node card size,
+    // then size the batch container to fit them with padding.
+    let maxRX = 200
+    let maxBY = 120
+    const sizes: Record<string, { w: number; h: number }> = {}
+    for (const n of nodes) {
+      if (!childIds.has(n.id)) continue
+      const cw = (n.measured?.width ?? n.width ?? 180) as number
+      const ch = (n.measured?.height ?? n.height ?? 80) as number
+      sizes[n.id] = { w: cw, h: ch }
+      maxRX = Math.max(maxRX, (n.position?.x ?? 0) + cw)
+      maxBY = Math.max(maxBY, (n.position?.y ?? 0) + ch)
+    }
+    const pad = 40
+    const boxW = Math.ceil(maxRX + pad)
+    const boxH = Math.ceil(maxBY + pad)
+    // Persist bounds for manual drag clamping in onNodesChangeWrapped.
+    subgraphBoundsRef.current = { boxW, boxH, sizes }
+    return {
+      visibleNodes: nodes.map((n) => {
+        if (n.id === activeBatchId) {
+          // Show the batch container enlarged to hold all children; mark active
+          // so its card header shows a "back" button instead of "enter".
+          return {
+            ...n,
+            hidden: false,
+            style: { width: boxW, height: boxH },
+            width: boxW,
+            height: boxH,
+            measured: { width: boxW, height: boxH },
+            data: { ...n.data, isActiveBatch: true },
+          }
+        }
+        if (childIds.has(n.id)) return { ...n, hidden: false }
+        return { ...n, hidden: true }
+      }),
+      visibleEdges: edges.map((e) =>
+        childIds.has(e.source) && childIds.has(e.target) ? { ...e, hidden: false } : { ...e, hidden: true },
+      ),
+    }
+  }, [nodes, edges, activeBatchId])
+
   return (
     <div ref={containerRef} className="flex h-full min-h-0 flex-col bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-2 py-1 dark:border-gray-800">
@@ -1216,6 +1374,31 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
             </button>
           )}
           <p className="truncate text-xs font-semibold text-gray-700 dark:text-gray-200">{workflowName || t('workflows.graphEditorTitle')}</p>
+          {activeBatchId ? (
+            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+              <ChevronRight className="h-3 w-3 shrink-0" />
+              <button
+                type="button"
+                onClick={exitBatchSubgraph}
+                className="rounded px-1 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-200"
+                title={t('workflows.graphExitSubgraph')}
+              >
+                {t('workflows.graphViewAll')}
+              </button>
+              <ChevronRight className="h-3 w-3 shrink-0" />
+              <span className="truncate font-medium text-cyan-600 dark:text-cyan-400 max-w-[160px]">
+                {String(nodes.find((n) => n.id === activeBatchId)?.data?.label ?? activeBatchId)}
+              </span>
+              <button
+                type="button"
+                onClick={exitBatchSubgraph}
+                className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800"
+                title={t('workflows.graphExitSubgraph')}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ) : null}
         </div>
         <div className="flex items-center gap-1">
           {headerExtra}
@@ -1292,14 +1475,17 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
           <ReactFlow
             className="h-full w-full"
             nodeTypes={{ ...workflowNodeTypes, ...groupNodeTypes }}
-            nodes={nodes}
-            edges={edges}
+            nodes={visibleNodes}
+            edges={visibleEdges}
             onNodesChange={onNodesChangeWrapped}
             onEdgesChange={onEdgesChangeWrapped}
             onConnect={onConnect}
             onNodeDragStart={onNodeDragStart}
             onNodeDragStop={(event, node) => {
               onNodeDragStop()
+              // Inside a subgraph view, never reparent/detach on drag — children
+              // must stay in their batch (detaching makes them vanish from the view).
+              if (activeBatchId) return
               const halfW = ((node.style as any)?.width || 180) / 2
               const halfH = ((node.style as any)?.height || 40) / 2
               // node.position is relative to parent when the node is already a child;
@@ -1380,6 +1566,11 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
               setSelectedEdgeId(null)
               setSelectedTab('visual')
               setPropsOpen(true)
+            }}
+            onNodeDoubleClick={(_, node) => {
+              if (!isPointerTool) return
+              if ((node.data as any)?.nodeType !== 'batch') return
+              enterBatchSubgraph(node.id)
             }}
             onEdgeClick={(_, edge) => {
               if (!isPointerTool) return
@@ -1522,7 +1713,7 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                                   className="inline-flex h-5 w-5 items-center justify-center rounded text-xs text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-950"
                                   onClick={() => {
                                     const fields = [...(Array.isArray(selectedNodeConfig.input_fields) ? selectedNodeConfig.input_fields : [])]
-                                    fields.push({ key: '', label: '', placeholder: '', required: false })
+                                    fields.push({ key: '', label: '', placeholder: '', required: false, default: '' })
                                     updateNodeConfig('input_fields', fields)
                                   }}
                                 >
@@ -1600,6 +1791,15 @@ function WorkflowGraphEditorInner({ value, skills, onSave, workflowId, workflowN
                                       <option value="file">{t('workflows.fieldTypeFile')}</option>
                                     </select>
                                   </div>
+                                  <Input
+                                    placeholder={t('workflows.startFieldDefault')}
+                                    value={field.default || ''}
+                                    onChange={(e) => {
+                                      const fields = [...(selectedNodeConfig.input_fields as InputFieldDef[])]
+                                      fields[idx] = { ...fields[idx], default: e.target.value }
+                                      updateNodeConfig('input_fields', fields)
+                                    }}
+                                  />
                                 </div>
                               ))}
                             </div>

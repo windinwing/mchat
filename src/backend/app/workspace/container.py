@@ -126,7 +126,13 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
             return {"error": f"容器内依赖安装失败: {exc}"}
 
         env = {**self.execution_env(), **(extra_env or {})}
-        env["MCHAT_SKILL_ARGS"] = json.dumps(args, ensure_ascii=False)
+        # MCHAT_SKILL_ARGS can grow large (e.g. stock-analysis receives a
+        # multi-MB merged-sections payload). Passing it via `docker exec -e`
+        # puts it on the command line, which blows past ARG_MAX (2MB on Linux)
+        # and raises "[Errno 7] Argument list too long". Instead, pipe the
+        # args JSON through stdin (`docker exec -i`); the in-container runner
+        # reads stdin first and falls back to the env var for compatibility.
+        args_json = json.dumps(args, ensure_ascii=False)
         env_args: list[str] = []
         for key, value in env.items():
             env_args.extend(["-e", f"{key}={value}"])
@@ -134,6 +140,7 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
         cmd = [
             *self._docker_cmd(),
             "exec",
+            "-i",  # read MCHAT_SKILL_ARGS from stdin (bypass ARG_MAX)
             *env_args,
             name,
             settings.workspace_container_python,
@@ -145,6 +152,7 @@ class ContainerWorkspaceProvider(LocalWorkspaceProvider):
             cmd,
             capture_output=True,
             text=True,
+            input=args_json,
             check=False,
         )
         from app.workspace.sidecar_lifecycle import touch_sidecar_activity

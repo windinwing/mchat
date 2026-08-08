@@ -64,7 +64,10 @@ function ParamField({
 
   return (
     <label className="block text-xs">
-      <span className="font-medium text-gray-700 dark:text-gray-200">{field.label}</span>
+      <span className="font-medium text-gray-700 dark:text-gray-200">
+        {field.label}
+        {field.required ? <span className="ml-0.5 text-red-500">*</span> : null}
+      </span>
       {field.hint ? (
         <span className="mt-0.5 block text-[10px] leading-snug text-gray-500 dark:text-gray-400">{field.hint}</span>
       ) : null}
@@ -85,7 +88,12 @@ function ParamField({
         ) : (
           <input
             type={field.type === 'number' ? 'number' : 'text'}
-            className="block w-full rounded border border-gray-300 bg-white px-2 py-1 font-mono text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            className={
+              'block w-full rounded border bg-white px-2 py-1 font-mono text-xs dark:bg-gray-800 dark:text-gray-100 ' +
+              (field.required && !value
+                ? 'border-red-400 dark:border-red-500'
+                : 'border-gray-300 dark:border-gray-600')
+            }
             value={value}
             placeholder={field.placeholder}
             onChange={(e) => onChange(e.target.value)}

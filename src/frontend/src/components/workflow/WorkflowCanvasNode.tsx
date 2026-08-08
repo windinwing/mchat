@@ -2,7 +2,9 @@ import React, { memo, useEffect, useRef, useState } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { useTranslation } from 'react-i18next'
 import {
+  ArrowLeft,
   BarChart3,
+  ChevronRight,
   CirclePlay,
   GitMerge,
   Repeat,
@@ -27,6 +29,7 @@ type WorkflowCanvasNodeData = {
   batchListPath?: string
   batchChildCount?: number
   batchChildLabels?: string[]
+  isActiveBatch?: boolean
 }
 
 const ICONS: Partial<Record<GraphNodeType, React.ComponentType<{ className?: string }>>> = {
@@ -107,6 +110,13 @@ function WorkflowCanvasNodeComponent({ id, data, selected }: NodeProps) {
     window.dispatchEvent(new CustomEvent('mchat-batch-drop', { detail: { raw, batchNodeId: id } }))
   }
 
+  // Double-click anywhere on the batch container enters its subgraph (ComfyUI-style).
+  const handleBatchDoubleClick = (e: React.MouseEvent) => {
+    if (nodeType !== 'batch') return
+    e.stopPropagation()
+    window.dispatchEvent(new CustomEvent('mchat-batch-enter', { detail: { batchNodeId: id } }))
+  }
+
   return (
     <div
       className={cn(
@@ -137,6 +147,7 @@ function WorkflowCanvasNodeComponent({ id, data, selected }: NodeProps) {
           onDragOver={handleBatchDragOver}
           onDragLeave={handleBatchDragLeave}
           onDrop={handleBatchDrop}
+          onDoubleClick={handleBatchDoubleClick}
         >
           <div className="flex items-center gap-1.5">
             <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded" style={{ backgroundColor: `${color}22`, color }}>
@@ -148,6 +159,39 @@ function WorkflowCanvasNodeComponent({ id, data, selected }: NodeProps) {
             ) : (
               <span className="text-[10px] text-gray-400">{t('workflows.batchDropHint')}</span>
             )}
+            {d.batchChildCount ? (
+              d.isActiveBatch ? (
+                <button
+                  type="button"
+                  title={t('workflows.graphExitSubgraph')}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    window.dispatchEvent(new CustomEvent('mchat-batch-exit', { detail: { batchNodeId: id } }))
+                  }}
+                  className="ml-auto inline-flex h-5 items-center gap-0.5 rounded bg-gray-500/10 px-1.5 text-[10px] font-medium text-gray-600 hover:bg-gray-500/20 dark:text-gray-300"
+                >
+                  <ArrowLeft className="h-2.5 w-2.5" />
+                  {t('workflows.graphViewAll')}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  title={t('workflows.batchDoubleClickHint')}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    window.dispatchEvent(new CustomEvent('mchat-batch-enter', { detail: { batchNodeId: id } }))
+                  }}
+                  className="ml-auto inline-flex h-5 items-center gap-0.5 rounded bg-cyan-500/10 px-1.5 text-[10px] font-medium text-cyan-600 hover:bg-cyan-500/20 dark:text-cyan-400"
+                >
+                  <ChevronRight className="h-2.5 w-2.5" />
+                  {t('workflows.batchEnter')}
+                </button>
+              )
+            ) : null}
+          </div>
+          <div className="mt-0.5 flex items-center gap-0.5 text-[9px] text-gray-400 dark:text-gray-500">
+            <ChevronRight className="h-2.5 w-2.5" />
+            <span>{t('workflows.batchDoubleClickHint')}</span>
           </div>
           {d.batchListPath ? (
             <p className="text-[9px] text-gray-400 mt-0.5">← {d.batchListPath}</p>

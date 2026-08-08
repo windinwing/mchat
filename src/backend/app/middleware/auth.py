@@ -104,6 +104,22 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str]] = {
         Permission.SPEECH_READ,
         Permission.SPEECH_WRITE,
     ],
+    # 推广者：在 user 基础上增加发布账号 / 发送记录（内容分发用）。
+    "promoter": [
+        Permission.CONVERSATIONS_READ,
+        Permission.CONVERSATIONS_WRITE,
+        Permission.KNOWLEDGE_READ,
+        Permission.KNOWLEDGE_WRITE,
+        Permission.SKILLS_READ,
+        Permission.SKILLS_WRITE,
+        Permission.AGENTS_READ,
+        Permission.AGENTS_WRITE,
+        Permission.DASHBOARD_READ,
+        Permission.SPEECH_READ,
+        Permission.SPEECH_WRITE,
+        Permission.CHANNELS_READ,
+        Permission.CHANNELS_WRITE,
+    ],
 }
 
 # Portal tenant accounts always need these (even if role_permissions in DB is stale).
@@ -148,7 +164,7 @@ async def get_user_permissions(user: User, db: AsyncSession | None = None) -> se
                 Permission.DEVBRIDGE_SETTINGS_WRITE,
             }
         )
-    if user.role == "user":
+    if user.role in ("user", "promoter"):
         perms.update(_PORTAL_TENANT_MIN_PERMISSIONS)
     return perms
 

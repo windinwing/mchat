@@ -10,7 +10,8 @@ import {
   Users,
 } from 'lucide-react'
 import api from '@/lib/api'
-import { extractAutomationLimit, automationCheckoutPath } from '@/lib/automationLimit'
+import { extractAutomationLimit, automationCheckoutPath, limitMessage, type AutomationLimitDetail } from '@/lib/automationLimit'
+import { EntitlementConfirmDialog } from '@/components/workflow/EntitlementConfirmDialog'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -58,6 +59,7 @@ export function WorkflowCenterPage() {
   const [tab, setTab] = useState<TabKey>('all')
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('all')
+  const [entitlementLimit, setEntitlementLimit] = useState<AutomationLimitDetail | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -111,10 +113,7 @@ export function WorkflowCenterPage() {
     } catch (err: unknown) {
       const limit = extractAutomationLimit(err)
       if (limit) {
-        toast(limit.message || t('workflows.toastTemplateCreateFailed'), { type: 'error' })
-        if (isPortal && limit.upgrade_template_id) {
-          navigate(automationCheckoutPath(limit))
-        }
+        setEntitlementLimit(limit)
       } else {
         toast(err instanceof Error ? err.message : t('workflows.toastTemplateCreateFailed'), {
           type: 'error',
@@ -310,6 +309,11 @@ export function WorkflowCenterPage() {
           ))}
         </div>
       )}
+      <EntitlementConfirmDialog
+        limit={entitlementLimit}
+        onClose={() => setEntitlementLimit(null)}
+        isPortal={isPortal}
+      />
     </div>
   )
 }

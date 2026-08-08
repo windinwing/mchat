@@ -4,7 +4,7 @@ import api, { setToken, removeToken } from '@/lib/api'
 export interface User {
   id: string
   username: string
-  role: 'admin' | 'agent' | 'user'
+  role: 'admin' | 'agent' | 'user' | 'promoter'
   account_status?: string
   display_name?: string | null
   avatar_url?: string | null

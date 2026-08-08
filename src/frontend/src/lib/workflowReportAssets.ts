@@ -76,6 +76,22 @@ function collectFromResult(
 ) {
   if (!result || typeof result !== 'object') return
   const r = result as Record<string, unknown>
+  // Batch node: recurse into each item's children results.
+  if (Array.isArray(r.items)) {
+    for (const it of r.items) {
+      if (it && typeof it === 'object') {
+        const children = (it as Record<string, unknown>).children
+        if (children && typeof children === 'object') {
+          for (const childRes of Object.values(children as Record<string, unknown>)) {
+            if (childRes && typeof childRes === 'object') {
+              const cr = (childRes as Record<string, unknown>).result
+              if (cr) collectFromResult(cr, items, seen)
+            }
+          }
+        }
+      }
+    }
+  }
   for (const key of ['report_files', 'files']) {
     const list = r[key]
     if (Array.isArray(list)) {
@@ -123,6 +139,23 @@ export interface WorkflowReportNarrative {
 function narrativeFromResult(result: unknown): WorkflowReportNarrative | null {
   if (!result || typeof result !== 'object') return null
   const r = result as Record<string, unknown>
+  // Batch node: dive into item children to find an analysis narrative.
+  if (Array.isArray(r.items)) {
+    for (const it of r.items) {
+      if (it && typeof it === 'object') {
+        const children = (it as Record<string, unknown>).children
+        if (children && typeof children === 'object') {
+          for (const childRes of Object.values(children as Record<string, unknown>)) {
+            if (childRes && typeof childRes === 'object') {
+              const cr = (childRes as Record<string, unknown>).result
+              const found = narrativeFromResult(cr)
+              if (found) return found
+            }
+          }
+        }
+      }
+    }
+  }
   const summary = typeof r.summary === 'string' ? r.summary.trim() : ''
   const interpretation =
     typeof r.interpretation === 'string' ? r.interpretation.trim() : ''
@@ -204,24 +237,45 @@ export function extractWorkflowReportCharts(
   for (const node of sorted) {
     if (!node.result || typeof node.result !== 'object') continue
     const r = node.result as Record<string, unknown>
-    for (const key of ['report_charts', 'charts']) {
-      const list = r[key]
-      if (Array.isArray(list)) {
-        for (const c of list) {
-          if (c && typeof c === 'object') {
-            const row = c as Record<string, string>
-            addArtifact(items, seen, {
-              url: row.url,
-              filename: row.filename,
-              format: 'png',
-              name: row.name,
-            })
+    // Batch node: dive into item children charts.
+    if (Array.isArray(r.items)) {
+      for (const it of r.items) {
+        if (it && typeof it === 'object') {
+          const children = (it as Record<string, unknown>).children
+          if (children && typeof children === 'object') {
+            for (const childRes of Object.values(children as Record<string, unknown>)) {
+              if (childRes && typeof childRes === 'object') {
+                collectCharts((childRes as Record<string, unknown>).result, items, seen)
+              }
+            }
           }
         }
       }
     }
+    collectCharts(node.result, items, seen)
   }
   return items
+}
+
+function collectCharts(result: unknown, items: WorkflowReportArtifact[], seen: Set<string>) {
+  if (!result || typeof result !== 'object') return
+  const r = result as Record<string, unknown>
+  for (const key of ['report_charts', 'charts']) {
+    const list = r[key]
+    if (Array.isArray(list)) {
+      for (const c of list) {
+        if (c && typeof c === 'object') {
+          const row = c as Record<string, string>
+          addArtifact(items, seen, {
+            url: row.url,
+            filename: row.filename,
+            format: 'png',
+            name: row.name,
+          })
+        }
+      }
+    }
+  }
 }
 
 export function absoluteArtifactUrl(url: string): string {

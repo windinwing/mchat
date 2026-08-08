@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { resolveUploadUrl } from '@/lib/mediaUrl'
 
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
@@ -454,7 +455,12 @@ export function WorkflowReportPanel({ nodeRuns, outputPayload }: Props) {
             <p className="text-sm text-gray-500 dark:text-gray-400">{t('common.loading', { defaultValue: '加载中…' })}</p>
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{mdText}</ReactMarkdown>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    urlTransform={(url) => resolveUploadUrl(url) || url}
+                  >
+                    {mdText}
+                  </ReactMarkdown>
             </div>
           )}
         </div>

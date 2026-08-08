@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.middleware.auth import require_permission, Permission
+from app.middleware.auth import has_global_scope, require_permission, Permission
 from app.models.user import User
 from app.schemas.agent import (
     AIConfigCreate,
@@ -74,8 +74,9 @@ async def update_ai_config(
 ):
     """Update an AI configuration."""
     service = AgentService(db)
+    is_admin = await has_global_scope(admin, db)
     config = await service.update_ai_config(
-        config_id=config_id, user_id=admin.id, data=request
+        config_id=config_id, user_id=admin.id, data=request, is_admin=is_admin
     )
     if config is None:
         raise HTTPException(
@@ -145,8 +146,9 @@ async def delete_ai_config(
 ):
     """Delete an AI configuration."""
     service = AgentService(db)
+    is_admin = await has_global_scope(admin, db)
     success = await service.delete_ai_config(
-        config_id=config_id, user_id=admin.id
+        config_id=config_id, user_id=admin.id, is_admin=is_admin
     )
     if not success:
         raise HTTPException(

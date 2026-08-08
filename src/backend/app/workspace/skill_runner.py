@@ -196,6 +196,25 @@ import importlib.util
 import inspect
 from types import SimpleNamespace
 
+
+def _load_skill_args():
+    """Read skill args JSON.
+
+    Priority: stdin (when the control plane pipes a large payload to avoid
+    ARG_MAX on `docker exec -e`) → MCHAT_SKILL_ARGS env var (legacy/local).
+    """
+    if not sys.stdin.isatty():
+        try:
+            data = sys.stdin.read()
+        except Exception:
+            data = ""
+        if data and data.strip():
+            try:
+                return json.loads(data)
+            except Exception:
+                pass  # fall through to env var
+    return json.loads(os.environ.get("MCHAT_SKILL_ARGS") or "{}")
+
 def _filter_kwargs(func, args):
     sig = inspect.signature(func)
     params = sig.parameters
@@ -310,7 +329,7 @@ def main():
         print(json.dumps({"error": "usage: run_skill.py <script_path>"}))
         sys.exit(1)
     script = Path(sys.argv[1]).resolve()
-    args = json.loads(os.environ.get("MCHAT_SKILL_ARGS") or "{}")
+    args = _load_skill_args()
     spec = importlib.util.spec_from_file_location("skill_entry", script)
     if spec is None or spec.loader is None:
         print(json.dumps({"error": f"Failed to load {script}"}))

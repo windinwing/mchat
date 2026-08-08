@@ -9,6 +9,8 @@ export interface SkillParamFieldDef {
   options?: Array<{ value: string; label: string }>
   /** When omitted, field is always shown for the resolved schema group. */
   show?: (payload: Record<string, unknown>) => boolean
+  /** When true, the field is required and marked with a red asterisk. */
+  required?: boolean
 }
 
 const PATENT_ANALYSIS_DIMENSIONS = [

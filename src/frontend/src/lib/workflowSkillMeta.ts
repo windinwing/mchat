@@ -174,6 +174,7 @@ export interface InputFieldDef {
   required?: boolean
   type?: 'text' | 'number' | 'multiline' | 'file' | 'publishing_account' | 'select'
   options?: { value: string; label: string }[]
+  default?: string
 }
 
 /** True when graph includes patent-report chart/export nodes. */
@@ -236,6 +237,7 @@ export function extractStartInputFields(
       label: String(f.label || f.key || ''),
       placeholder: f.placeholder ? String(f.placeholder) : undefined,
       required: Boolean(f.required),
+      default: f.default != null && String(f.default).trim() !== '' ? String(f.default) : undefined,
       type: (f.type === 'number' ? 'number' : f.type === 'multiline' ? 'multiline' : f.type === 'file' ? 'file' : f.type === 'publishing_account' ? 'publishing_account' : f.type === 'select' ? 'select' : 'text') as InputFieldDef['type'],
     })).filter((f) => f.key)
   }
@@ -260,6 +262,19 @@ export function extractStartInputFields(
     }
   }
   return result
+}
+
+/**
+ * True when every required start-node input field has a non-empty default,
+ * so the workflow can be run with one click (no input dialog needed).
+ */
+export function canQuickRun(
+  nodes: Array<{ type: string; config?: Record<string, unknown> | null }>,
+  options?: { t?: (key: string) => string; skills?: Array<{ id: string; name: string }> },
+): boolean {
+  const fields = extractStartInputFields(nodes, options)
+  if (fields.length === 0) return false
+  return fields.every((f) => !f.required || (f.default && f.default.trim() !== ''))
 }
 
 export const PRESET_VAR_GROUPS = [

@@ -163,8 +163,11 @@ export function ChannelsPage() {
 
   const loadWorkflows = async () => {
     try {
-      const data = await api.get<WorkflowOption[]>('/workflows')
-      setWorkflows(data)
+      const data = await api.get<WorkflowOption[] | { items?: WorkflowOption[] }>(
+        '/workflows',
+      )
+      // /workflows returns a paginated envelope { items, total, ... }; fall back to array.
+      setWorkflows(Array.isArray(data) ? data : data.items ?? [])
     } catch {
       /* optional */
     }

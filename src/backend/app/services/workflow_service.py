@@ -62,6 +62,8 @@ from app.data.workflow_templates import get_workflow_template, list_workflow_tem
 from app.skill.loader import SkillLoader
 from app.skill.executor import execute_skill
 from app.services.skill_filter import tenant_facing_skill_error
+from app.services.workflow_payload_store import maybe_offload as _maybe_offload_payload
+from app.services.workflow_payload_store import hydrate as _hydrate_payload
 from app.workspace.automation_context import build_automation_workspace_context
 from app.workspace.context import workspace_execution_scope
 from app.utils.datetime_utils import duration_ms as _duration_ms
@@ -1097,6 +1099,10 @@ class WorkflowService:
         graph_data = _ensure_graph_valid(workflow.graph_json)
         graph = WorkflowGraph.model_validate(graph_data or {})
         nodes = {n.id: n for n in graph.nodes}
+        # Nodes that live inside a batch container (have a parentId) are executed
+        # by their parent batch node, NOT by the main graph loop. Exclude them so
+        # they aren't run as standalone skill nodes (which would lack ${item.*}).
+        batch_child_ids = {n.id for n in graph.nodes if n.parentId}
         incoming: dict[str, list[str]] = {nid: [] for nid in nodes}
         outgoing: dict[str, list[Any]] = {nid: [] for nid in nodes}
         for edge in graph.edges:
@@ -1108,6 +1114,19 @@ class WorkflowService:
         )
         clean_input = dict(input_payload or {})
         run_locale = str(clean_input.pop("_locale", None) or "zh")
+        # Backfill missing input keys from start node field defaults so that
+        # manual runs, scheduled runs and direct API calls all honor defaults.
+        start_node = next((n for n in graph.nodes if n.type == "start"), None)
+        if start_node and isinstance(start_node.config, dict):
+            for field in start_node.config.get("input_fields") or []:
+                if not isinstance(field, dict):
+                    continue
+                fkey = str(field.get("key") or "").strip()
+                default = field.get("default")
+                if not fkey or default is None or str(default).strip() == "":
+                    continue
+                if str(clean_input.get(fkey) or "").strip() == "":
+                    clean_input[fkey] = str(default)
         outputs: dict[str, Any] = {"input": clean_input, "nodes": {}}
         if isinstance((resume_state or {}).get("outputs"), dict):
             outputs["nodes"] = dict((resume_state or {}).get("outputs") or {})
@@ -1117,7 +1136,7 @@ class WorkflowService:
         if resume_state and isinstance(resume_state.get("ready_nodes"), list):
             ready = [str(x) for x in (resume_state.get("ready_nodes") or []) if str(x) in nodes]
         if not ready:
-            ready = [n.id for n in graph.nodes if n.type == "start" or (not incoming[n.id] and n.id not in done)]
+            ready = [n.id for n in graph.nodes if n.id not in batch_child_ids and (n.type == "start" or (not incoming[n.id] and n.id not in done))]
         if done:
             for nid in nodes:
                 if nid in done:
@@ -1300,6 +1319,67 @@ class WorkflowService:
                             sorted_children = [n.id for n in child_nodes]
                         child_node_map = {n.id: n for n in child_nodes}
 
+                        async def _run_one_child(cid: str, local_outputs: dict[str, Any], child_db: AsyncSession) -> dict[str, Any]:
+                            """Execute a single child node; returns {result, status}."""
+                            cn = child_node_map[cid]
+                            ccfg = cn.config or {}
+                            # merge: aggregate upstream child results into sections.
+                            if cn.type == "merge":
+                                sections: dict[str, Any] = {}
+                                for src_id in child_incoming.get(cid, []):
+                                    src_cn = child_node_map.get(src_id)
+                                    label = (src_cn.name if src_cn and src_cn.name else None) or src_id
+                                    sections[str(label)] = {
+                                        "node_id": src_id,
+                                        "result": _snapshot_node_result(local_outputs["nodes"].get(src_id, {}).get("result")),
+                                    }
+                                return {"result": {"sections": sections, "merged": True}, "status": "success"}
+                            # condition: evaluate left op right (mirrors main executor).
+                            if cn.type == "condition":
+                                left_path = str((ccfg.get("left") or "")).strip()
+                                op = str((ccfg.get("op") or "==")).strip().lower()
+                                right_raw = ccfg.get("right")
+                                left = _resolve_path(left_path, local_outputs) if left_path else None
+                                right = _render_template(right_raw, local_outputs) if right_raw is not None else None
+                                ok = _eval_condition(left, op, right)
+                                return {"result": {"condition": ok, "left": left, "right": right, "op": op}, "status": "success"}
+                            # Non-skill, non-control nodes are visual-only.
+                            if cn.type != "skill":
+                                return {"result": {}, "status": "skipped"}
+                            child_skill_name = str(ccfg.get("skill_name") or "").strip()
+                            child_skill_id = str(ccfg.get("skill_id") or "").strip()
+                            try:
+                                skill = await _resolve_workflow_skill(
+                                    child_db,
+                                    skill_id=child_skill_id,
+                                    skill_name=child_skill_name,
+                                    user_id=workflow.user_id,
+                                    require_enabled=True,
+                                )
+                            except Exception as exc:
+                                return {"result": {"error": f"解析技能失败：{exc}"}, "status": "failed"}
+                            if skill is None:
+                                return {"result": {"error": f"Skill not found: {child_skill_name or child_skill_id}"}, "status": "failed"}
+                            pt = ccfg.get("payload_template") or {}
+                            payload = _render_template(pt, local_outputs)
+                            if not isinstance(payload, dict):
+                                payload = {"value": payload}
+                            else:
+                                payload = _strip_blank_skill_params(payload)
+                            # Validate required skill fields.
+                            for wf_key, wf_def in (skill.config or {}).get("workflow_fields", {}).items():
+                                if isinstance(wf_def, dict) and wf_def.get("required"):
+                                    val = payload.get(wf_key)
+                                    if val is None or (isinstance(val, str) and not val.strip()):
+                                        wf_label = str(wf_def.get("label") or wf_key)
+                                        return {"result": {"error": f"缺少必填参数：{wf_label}"}, "status": "failed"}
+                            try:
+                                raw = await _execute_skill_for_user(child_db, workflow.user_id, skill, payload, tenant_facing=tenant_facing)
+                                result = _to_result_dict(raw)
+                                return {"result": result, "status": "success"}
+                            except Exception as exc:
+                                return {"result": {"error": str(exc)}, "status": "failed"}
+
                         async def _run_batch_child(item_idx: int, item: Any, child_db: AsyncSession) -> dict:
                             local_outputs = {
                                 "input": dict(outputs.get("input") or {}),
@@ -1308,38 +1388,26 @@ class WorkflowService:
                                 "item_value": item.get("line") if isinstance(item, dict) and "line" in item else item,
                             }
                             node_results: dict[str, Any] = {}
-                            for cid in sorted_children:
-                                cn = child_node_map[cid]
-                                if cn.type != "skill":
-                                    node_results[cid] = {"result": {}, "status": "skipped"}
-                                    local_outputs["nodes"][cid] = node_results[cid]
-                                    continue
-                                child_skill_name = str((cn.config or {}).get("skill_name") or "").strip()
-                                child_skill_id = str((cn.config or {}).get("skill_id") or "").strip()
-                                skill = await _resolve_workflow_skill(
-                                    child_db,
-                                    skill_id=child_skill_id,
-                                    skill_name=child_skill_name,
-                                    user_id=workflow.user_id,
-                                    require_enabled=True,
-                                )
-                                if skill is None:
-                                    node_results[cid] = {"result": {"error": f"Skill not found: {child_skill_name or child_skill_id}"}, "status": "failed"}
-                                    local_outputs["nodes"][cid] = node_results[cid]
-                                    continue
-                                pt = (cn.config or {}).get("payload_template") or {}
-                                payload = _render_template(pt, local_outputs)
-                                if not isinstance(payload, dict):
-                                    payload = {"value": payload}
-                                else:
-                                    payload = _strip_blank_skill_params(payload)
-                                try:
-                                    raw = await _execute_skill_for_user(child_db, workflow.user_id, skill, payload, tenant_facing=tenant_facing)
-                                    result = _to_result_dict(raw)
-                                    node_results[cid] = {"result": result, "status": "success"}
-                                except Exception as exc:
-                                    node_results[cid] = {"result": {"error": str(exc)}, "status": "failed"}
-                                local_outputs["nodes"][cid] = node_results[cid]
+                            done: set[str] = set()
+                            # Wave-based execution: run all ready (no pending deps) nodes
+                            # concurrently per wave, so parallel collectors finish together
+                            # before their merge downstream runs. Each node in a wave gets
+                            # its own DB session to avoid "session already handling a request"
+                            # when multiple skills query concurrently.
+                            while len(done) < len(sorted_children):
+                                ready = [cid for cid in sorted_children if cid not in done and all(d in done for d in child_incoming.get(cid, []))]
+                                if not ready:
+                                    break  # cycle guard
+
+                                async def _run_with_session(cid: str) -> tuple[str, dict[str, Any]]:
+                                    async with async_session_factory() as node_db:
+                                        return cid, await _run_one_child(cid, local_outputs, node_db)
+
+                                wave = await asyncio.gather(*[_run_with_session(cid) for cid in ready])
+                                for cid, res in wave:
+                                    node_results[cid] = res
+                                    local_outputs["nodes"][cid] = res
+                                    done.add(cid)
                             return {"index": item_idx, "item": item, "children": node_results}
 
                         sem = asyncio.Semaphore(max_concurrent)
@@ -1446,6 +1514,15 @@ class WorkflowService:
                         payload = {"value": payload}
                     else:
                         payload = _strip_blank_skill_params(payload)
+                    # Validate required skill fields (declared via SKILL.md workflow_fields).
+                    for wf_key, wf_def in (skill.config or {}).get("workflow_fields", {}).items():
+                        if isinstance(wf_def, dict) and wf_def.get("required"):
+                            val = payload.get(wf_key)
+                            if val is None or (isinstance(val, str) and not val.strip()):
+                                wf_label = str(wf_def.get("label") or wf_key)
+                                raise RuntimeError(
+                                    f"节点「{node.name or node_id}」缺少必填参数：{wf_label}"
+                                )
                     if skill.name == "patent-report":
                         payload = _apply_patent_report_input(
                             payload,
@@ -1518,6 +1595,8 @@ class WorkflowService:
                 if not hit_pause:
                     for edge in outgoing.get(node_id, []):
                         target = edge.target
+                        if target in batch_child_ids:
+                            continue  # batch children run inside their batch node
                         deps = incoming[target]
                         if all(dep in done for dep in deps) and target not in done:
                             target_node = nodes[target]
@@ -1610,7 +1689,7 @@ class WorkflowService:
             finished_at = datetime.now(timezone.utc)
             run.status = final_status
             run.error = final_error
-            run.output_payload = _json_safe(output_payload)
+            run.output_payload = _maybe_offload_payload(_json_safe(output_payload), run.id)
             run.duration_ms = _duration_ms(run.started_at, finished_at)
             if final_status in {"success", "failed"}:
                 run.finished_at = finished_at
@@ -1720,7 +1799,7 @@ class WorkflowService:
         finished_at = datetime.now(timezone.utc)
         run.status = final_status
         run.error = final_error
-        run.output_payload = _json_safe({"steps": context.get("steps")})
+        run.output_payload = _maybe_offload_payload(_json_safe({"steps": context.get("steps")}), run.id)
         run.finished_at = finished_at
         run.duration_ms = _duration_ms(run.started_at, finished_at)
         if final_status != "success":
@@ -1937,9 +2016,10 @@ class WorkflowService:
                 }
 
         resume_state = {}
-        if isinstance(run.output_payload, dict):
-            resume_state = dict(run.output_payload.get("engine_state") or {})
-            resume_state["node_runs"] = list(run.output_payload.get("node_runs") or [])
+        _resumed_payload = _hydrate_payload(run.output_payload)
+        if isinstance(_resumed_payload, dict):
+            resume_state = dict(_resumed_payload.get("engine_state") or {})
+            resume_state["node_runs"] = list(_resumed_payload.get("node_runs") or [])
 
         run.status = "running"
         run.error = None
@@ -1955,7 +2035,7 @@ class WorkflowService:
         run.status = final_status
         run.error = final_error
         run.input_payload = merged_payload
-        run.output_payload = _json_safe(output_payload)
+        run.output_payload = _maybe_offload_payload(_json_safe(output_payload), run.id)
         if final_status in {"success", "failed"}:
             run.finished_at = now
             run.duration_ms = _duration_ms(run.started_at, now)
@@ -2106,6 +2186,7 @@ class WorkflowService:
             for a in sorted(pending_rows, key=lambda x: x.created_at)
         ]
 
+        _detail_payload = _hydrate_payload(run.output_payload)
         return WorkflowRunDetailResponse(
             id=run.id,
             workflow_id=run.workflow_id,
@@ -2114,15 +2195,15 @@ class WorkflowService:
             trigger_type=run.trigger_type,
             status=run.status,
             input_payload=run.input_payload,
-            output_payload=run.output_payload,
+            output_payload=_detail_payload,
             error=run.error,
             started_at=run.started_at,
             finished_at=run.finished_at,
             duration_ms=run.duration_ms,
             step_runs=step_responses,
             node_runs=(
-                run.output_payload.get("node_runs")
-                if isinstance(run.output_payload, dict)
+                _detail_payload.get("node_runs")
+                if isinstance(_detail_payload, dict)
                 else None
             ),
             pending_approvals=pending_items,

@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { ReactFlow, Background, type Node, type Edge } from '@xyflow/react'
 import { Loader2, Eye, Plus, X, Layers, Search, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import api from '@/lib/api'
 import { toast } from '@/components/ui/Toast'
+import { automationCheckoutPath, extractAutomationLimit, limitMessage, type AutomationLimitDetail } from '@/lib/automationLimit'
+import { EntitlementConfirmDialog } from '@/components/workflow/EntitlementConfirmDialog'
 import { NODE_COLORS } from '@/lib/workflowSkillMeta'
 
 interface TemplateItem {
@@ -79,6 +82,9 @@ function MiniGraphPreview({ graph }: { graph: TemplateItem['graph_json'] }) {
 
 export function WorkflowTemplateGallery({ open, onClose, onSelectTemplate, onApplied }: WorkflowTemplateGalleryProps) {
   const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const isPortal = location.pathname.startsWith('/portal')
   const locale = i18n.language?.startsWith('zh') ? 'zh' : 'en'
   const [templates, setTemplates] = useState<TemplateItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -86,6 +92,7 @@ export function WorkflowTemplateGallery({ open, onClose, onSelectTemplate, onApp
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [applyingId, setApplyingId] = useState<string | null>(null)
+  const [entitlementLimit, setEntitlementLimit] = useState<AutomationLimitDetail | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -141,7 +148,13 @@ export function WorkflowTemplateGallery({ open, onClose, onSelectTemplate, onApp
         onApplied(wf.id)
       }
     } catch (err) {
-      toast(err instanceof Error ? err.message : t('workflows.toastTemplateCreateFailed', '应用失败'), { type: 'error' })
+      // 402 权益不足：弹出确认框，用户点「前往开通」才跳转
+      const limit = extractAutomationLimit(err)
+      if (limit) {
+        setEntitlementLimit(limit)
+      } else {
+        toast(err instanceof Error ? err.message : t('workflows.toastTemplateCreateFailed', '应用失败'), { type: 'error' })
+      }
     } finally {
       setApplyingId(null)
     }
@@ -194,7 +207,7 @@ export function WorkflowTemplateGallery({ open, onClose, onSelectTemplate, onApp
                     : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800',
                 )}
               >
-                {cat === 'all' ? t('common.all', '全部') : cat}
+                {cat === 'all' ? t('common.all', '全部') : t(`workflowCategory.${cat}`, { defaultValue: cat })}
               </button>
             ))}
           </div>
@@ -242,7 +255,7 @@ export function WorkflowTemplateGallery({ open, onClose, onSelectTemplate, onApp
                         <span>{nodeCount} {t('workflows.nodes', '节点')}</span>
                         <span>{edgeCount} {t('workflows.edges', '连线')}</span>
                         {tpl.category && (
-                          <span className="rounded bg-gray-100 dark:bg-gray-700 px-1 py-0.5">{tpl.category}</span>
+                          <span className="rounded bg-gray-100 dark:bg-gray-700 px-1 py-0.5">{t(`workflowCategory.${tpl.category}`, { defaultValue: tpl.category })}</span>
                         )}
                       </div>
                     </div>
@@ -307,6 +320,11 @@ export function WorkflowTemplateGallery({ open, onClose, onSelectTemplate, onApp
           )}
         </div>
       </div>
+      <EntitlementConfirmDialog
+        limit={entitlementLimit}
+        onClose={() => setEntitlementLimit(null)}
+        isPortal={isPortal}
+      />
     </div>
   )
 }

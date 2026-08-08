@@ -59,9 +59,12 @@ export function resolveUploadUrl(url?: string): string | undefined {
     if (proxied) return proxied
     return url
   }
-  if (url.startsWith('/uploads/')) return url
+  // Edge gateways whitelist /api/ but 404 the bare /uploads/ path, so route
+  // signed upload URLs through /api/uploads/ to reach the backend.
+  if (url.startsWith('/uploads/')) return `/api${url}`
+  if (url.startsWith('/api/uploads/')) return url
   if (url.startsWith('/')) return url
-  return `/uploads/${url}`
+  return `/api/uploads/${url}`
 }
 
 type AttachmentMeta = { url?: string; name?: string; mime?: string; pending?: boolean }

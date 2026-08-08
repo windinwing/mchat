@@ -12,6 +12,7 @@ import { Tabs, TabPanel } from '@/components/ui/Tabs'
 import { Dialog } from '@/components/ui/Dialog'
 import { toast } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
+import { useAuthStore } from '@/stores/auth'
 import {
   getDefaultModel,
   PROVIDER_DEFAULT_BASE_URLS,
@@ -38,6 +39,8 @@ interface AgentConfig {
 
 export function AgentConfig() {
   const { t } = useTranslation()
+  // Admins may edit shared system defaults (owned by another account).
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const tabs = useMemo(
     () => [
       { id: 'prompt', label: t('agents.tabPrompt') },
@@ -180,7 +183,7 @@ export function AgentConfig() {
   }
 
   const selectedLabel = agents.find((a) => a.id === selectedAgentId)?.name
-  const isShared = !!config.shared
+  const isShared = !!config.shared && !isAdmin
 
   return (
     <div className="space-y-4">

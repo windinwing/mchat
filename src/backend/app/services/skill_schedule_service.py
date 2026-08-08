@@ -34,6 +34,8 @@ def _as_result_dict(result: Any) -> dict:
     return {"value": str(result)}
 
 
+
+
 class SkillScheduleService:
     """Business logic for skill schedule CRUD and execution."""
 
@@ -318,14 +320,89 @@ class SkillScheduleService:
                 if not workflow.enabled:
                     raise RuntimeError(f"workflow '{workflow.name}' is disabled")
                 run.target_name = workflow.name
-                workflow_run = await WorkflowService(self.db).execute_workflow(
-                    workflow=workflow,
-                    trigger_type=trigger_type,
-                    input_payload=payload,
+                # Fire-and-forget: create the workflow run row synchronously (so the
+                # schedule run is linked immediately), then execute the (potentially
+                # long-running) workflow in the background. A synchronous await would
+                # hold the request's DB connection open for minutes and trip MySQL's
+                # wait_timeout, losing the run record.
+                from app.models.workflow import SkillWorkflowRun
+                from app.services.workflow_service import (
+                    WorkflowService as _WFS,
+                    _run_workflow_in_background,
                 )
-                run.status = "success" if workflow_run.status == "success" else "failed"
-                run.result = workflow_run.output_payload
-                run.error = workflow_run.error
+                import asyncio as _asyncio
+
+                wf_run = SkillWorkflowRun(
+                    workflow_id=workflow.id,
+                    user_id=workflow.user_id,
+                    trigger_type=trigger_type,
+                    status="running",
+                    input_payload=payload,
+                    started_at=datetime.now(timezone.utc),
+                )
+                self.db.add(wf_run)
+                await self.db.flush()
+                run.result = {"workflow_run_id": wf_run.id}
+                run.status = "running"
+                schedule_run_id = run.id
+                workflow_id = workflow.id
+                user_id = schedule.user_id
+                wf_run_id = wf_run.id
+                # Commit so the background task (separate session) can see the rows.
+                await self.db.commit()
+
+                async def _bg_update_schedule_run() -> None:
+                    """Run workflow in background, then update the schedule run."""
+                    await _run_workflow_in_background(
+                        run_id=wf_run_id,
+                        workflow_id=workflow_id,
+                        user_id=user_id,
+                        input_payload=payload,
+                        trigger_type=trigger_type,
+                    )
+                    from app.core.database import async_session_factory as _asf
+
+                    async with _asf() as bg_db:
+                        finished_at = datetime.now(timezone.utc)
+                        wf_detail = await _WFS(bg_db).get_run_detail(
+                            run_id=wf_run_id, user_id=user_id
+                        )
+                        sr = (
+                            await bg_db.execute(
+                                select(SkillScheduleRun).where(
+                                    SkillScheduleRun.id == schedule_run_id
+                                )
+                            )
+                        ).scalar_one_or_none()
+                        if sr is not None:
+                            sr.status = (
+                                "success" if wf_detail.status == "success" else "failed"
+                            )
+                            # Avoid mirroring the (potentially multi-MB) workflow
+                            # output_payload into the schedule run column — it
+                            # duplicates skill_workflow_runs and can blow past
+                            # max_allowed_packet. Store a lightweight reference
+                            # + the slim node_runs the report panel needs inline.
+                            full_payload = wf_detail.output_payload or {}
+                            raw_node_runs = (
+                                full_payload.get("node_runs")
+                                if isinstance(full_payload, dict)
+                                else None
+                            )
+                            from app.services.workflow_payload_store import (
+                                _slim_node_runs as _slim_runs,
+                            )
+
+                            sr.result = {
+                                "workflow_run_id": wf_run_id,
+                                "node_runs": _slim_runs(raw_node_runs),
+                            }
+                            sr.error = wf_detail.error
+                            sr.finished_at = finished_at
+                            sr.duration_ms = _duration_ms(sr.started_at, finished_at)
+                            await bg_db.commit()
+
+                _asyncio.create_task(_bg_update_schedule_run())
             else:
                 skill = schedule.skill
                 if skill is None and schedule.skill_id:
@@ -351,8 +428,11 @@ class SkillScheduleService:
                 run.error = str(result_dict.get("error")) if has_error else None
 
             finished_at = datetime.now(timezone.utc)
-            run.finished_at = finished_at
-            run.duration_ms = _duration_ms(started_at, finished_at)
+            # Workflow runs execute in the background; don't mark them finished here
+            # (the background task updates status/finished_at when done).
+            if run.status != "running":
+                run.finished_at = finished_at
+                run.duration_ms = _duration_ms(started_at, finished_at)
             schedule.last_run_at = finished_at
         except Exception as e:
             finished_at = datetime.now(timezone.utc)

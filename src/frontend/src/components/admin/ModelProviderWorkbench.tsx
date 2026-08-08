@@ -19,6 +19,7 @@ import { Select } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/Switch'
 import { Dialog } from '@/components/ui/Dialog'
 import { toast } from '@/components/ui/Toast'
+import { useAuthStore } from '@/stores/auth'
 import { cn } from '@/lib/utils'
 import {
   applyProviderDefaults,
@@ -63,6 +64,8 @@ function withProviderDefaults(data: Partial<AIConfig>): Partial<AIConfig> {
 
 export function ModelProviderWorkbench() {
   const { t } = useTranslation()
+  // Admins may edit shared system defaults (owned by another account).
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const providerOptions = useMemo(
     () => [
       { value: 'openai', label: t('agents.providerOpenai') },
@@ -403,7 +406,7 @@ export function ModelProviderWorkbench() {
                     )}
                   </h3>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {draft.shared
+                    {draft.shared && !isAdmin
                       ? t('agents.workbenchSharedReadOnly')
                       : t('agents.workbenchCredentialHint')}
                   </p>
@@ -412,7 +415,7 @@ export function ModelProviderWorkbench() {
                   <span className="text-xs text-gray-500 dark:text-gray-400">{t('agents.workbenchDefaultModel')}</span>
                   <Switch
                     checked={draft.is_default ?? false}
-                    disabled={!!draft.shared}
+                    disabled={!!draft.shared && !isAdmin}
                     onChange={(checked) =>
                       setDraft({ ...draft, is_default: checked })
                     }
@@ -429,7 +432,7 @@ export function ModelProviderWorkbench() {
                   <Button
                     size="sm"
                     onClick={handleSave}
-                    disabled={!!draft.shared}
+                    disabled={!!draft.shared && !isAdmin}
                     isLoading={saving}
                     leftIcon={<Save className="w-4 h-4" />}
                   >
@@ -438,7 +441,7 @@ export function ModelProviderWorkbench() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    disabled={!!draft.shared}
+                    disabled={!!draft.shared && !isAdmin}
                     onClick={() => handleDelete(selectedId)}
                   >
                     <Trash2 className="w-4 h-4 text-red-500" />
@@ -450,14 +453,14 @@ export function ModelProviderWorkbench() {
                 <Input
                   label={t('agents.workbenchConfigName')}
                   value={draft.name || ''}
-                  disabled={!!draft.shared}
+                  disabled={!!draft.shared && !isAdmin}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 />
                 <Select
                   label={t('agents.workbenchProvider')}
                   options={providerOptions}
                   value={draft.provider || 'deepseek'}
-                  disabled={!!draft.shared}
+                  disabled={!!draft.shared && !isAdmin}
                   onChange={(e) => {
                     const provider = e.target.value
                     const next = applyProviderDefaults(draft, provider)
@@ -473,7 +476,7 @@ export function ModelProviderWorkbench() {
                   label={t('agents.workbenchApiKey')}
                   type="password"
                   value={draft.api_key || ''}
-                  disabled={!!draft.shared}
+                  disabled={!!draft.shared && !isAdmin}
                   onChange={(e) =>
                     setDraft({ ...draft, api_key: e.target.value })
                   }

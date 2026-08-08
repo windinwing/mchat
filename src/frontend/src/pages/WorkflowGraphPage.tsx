@@ -9,7 +9,8 @@ import { WorkflowSidebar } from '@/components/workflow/WorkflowSidebar'
 import type { PresetItem } from '@/components/workflow/WorkflowSidebar'
 import { toast } from '@/components/ui/Toast'
 import api from '@/lib/api'
-import { automationCheckoutPath, extractAutomationLimit } from '@/lib/automationLimit'
+import { automationCheckoutPath, extractAutomationLimit, limitMessage, type AutomationLimitDetail } from '@/lib/automationLimit'
+import { EntitlementConfirmDialog } from '@/components/workflow/EntitlementConfirmDialog'
 import { useAuthStore } from '@/stores/auth'
 import { getPatentPresetTitle, getPatentPresetDescription, buildPatentWorkflowPresets } from '@/lib/patentWorkflowPresets'
 import type { WorkflowSkillOption } from '@/lib/workflowSkillMeta'
@@ -34,6 +35,7 @@ export function WorkflowGraphPage() {
   const [skills, setSkills] = useState<WorkflowSkillOption[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [entitlementLimit, setEntitlementLimit] = useState<AutomationLimitDetail | null>(null)
 
   // Overlays
   const [showTemplates, setShowTemplates] = useState(false)
@@ -77,13 +79,10 @@ export function WorkflowGraphPage() {
         await api.patch(`/workflows/${workflowId}`, { graph_json: graph })
         setWorkflow((prev) => (prev ? { ...prev, graph_json: graph } : prev))
       } catch (err: unknown) {
-        // 402 权益不足：友好提示 + 引导升级（对齐 WorkflowsPage 的处理）
+        // 402 权益不足：弹确认框，用户点「前往开通」才跳转
         const limit = extractAutomationLimit(err)
         if (limit) {
-          toast(limit.message || t('workflows.dagPlanRequired', '图形编排需开通权益'), { type: 'error' })
-          if (isPortal && limit.upgrade_template_id) {
-            navigate(automationCheckoutPath(limit))
-          }
+          setEntitlementLimit(limit)
         } else {
           const msg = err instanceof Error ? err.message : t('workflows.toastSaveFailed', '保存失败')
           toast(msg, { type: 'error' })
@@ -150,6 +149,11 @@ export function WorkflowGraphPage() {
         open={showRuns}
         onClose={() => setShowRuns(false)}
         workflowId={workflowId}
+      />
+      <EntitlementConfirmDialog
+        limit={entitlementLimit}
+        onClose={() => setEntitlementLimit(null)}
+        isPortal={isPortal}
       />
     </div>
   )

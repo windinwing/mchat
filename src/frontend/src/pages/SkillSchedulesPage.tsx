@@ -18,6 +18,17 @@ import {
   useWorkflowEntitlements,
 } from '@/components/portal/WorkflowEntitlementBanner'
 import { automationCheckoutPath, extractAutomationLimit } from '@/lib/automationLimit'
+import {
+  CRON_PRESETS,
+  COMMON_TIMEZONES,
+  timezoneLabel,
+  describeCron,
+  isValidCron,
+  nextRunTimes,
+  formatRunTime,
+} from '@/lib/cronPresets'
+import { extractStartInputFields, type InputFieldDef } from '@/lib/workflowSkillMeta'
+import { WorkflowReportPanel } from '@/components/workflow/WorkflowReportPanel'
 
 interface Skill {
   id: string
@@ -99,10 +110,48 @@ export function SkillSchedulesPage() {
   const [formTimezone, setFormTimezone] = useState('UTC')
   const [formPayload, setFormPayload] = useState('{}')
   const [formEnabled, setFormEnabled] = useState(true)
+  // Structured payload: for workflows, key→value map of the start-node input fields.
+  const [workflowFields, setWorkflowFields] = useState<InputFieldDef[]>([])
+  const [payloadValues, setPayloadValues] = useState<Record<string, string>>({})
+  // Raw JSON (advanced fallback), synced from structured values.
+  const [rawMode, setRawMode] = useState(false)
 
   useEffect(() => {
     loadAll()
   }, [])
+
+  // When the selected workflow changes, fetch its graph to render structured input fields.
+  useEffect(() => {
+    if (formTargetType !== 'workflow' || !formWorkflowId) {
+      setWorkflowFields([])
+      setPayloadValues({})
+      return
+    }
+    let cancelled = false
+    api
+      .get<{ graph_json?: { nodes?: Array<{ type: string; config?: Record<string, unknown> | null }> } | null }>(
+        `/workflows/wf/${formWorkflowId}`,
+      )
+      .then((detail) => {
+        if (cancelled) return
+        const nodes = detail?.graph_json?.nodes || []
+        const fields = extractStartInputFields(nodes)
+        setWorkflowFields(fields)
+        // Preserve existing values for keys that match, prefill defaults for new ones.
+        setPayloadValues((prev) => {
+          const next: Record<string, string> = {}
+          for (const f of fields) next[f.key] = prev[f.key] ?? f.default ?? ''
+          return next
+        })
+      })
+      .catch(() => {
+        if (cancelled) return
+        setWorkflowFields([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [formTargetType, formWorkflowId])
 
   const filteredSchedules = useMemo(() => {
     const needle = search.trim().toLowerCase()
@@ -118,14 +167,14 @@ export function SkillSchedulesPage() {
   const loadAll = async () => {
     setLoading(true)
     try {
-      const [skillList, workflowList, scheduleList, runList] = await Promise.all([
+      const [skillList, workflowEnvelope, scheduleList, runList] = await Promise.all([
         api.get<Skill[]>('/skills'),
-        api.get<WorkflowItem[]>('/workflows'),
+        api.get<{ items?: WorkflowItem[] }>('/workflows'),
         api.get<SkillSchedule[]>('/skills/schedules'),
         api.get<SkillScheduleRun[]>('/skills/schedules/runs', { limit: '40' }),
       ])
       setSkills(skillList)
-      setWorkflows(workflowList)
+      setWorkflows(workflowEnvelope.items ?? [])
       setSchedules(scheduleList)
       setRuns(runList)
     } catch (err: any) {
@@ -140,10 +189,13 @@ export function SkillSchedulesPage() {
     setFormName('')
     setFormTargetType('skill')
     setFormSkillId(skills[0]?.id || '')
-    setFormWorkflowId(workflows[0]?.id || '')
+    setFormWorkflowId('')
     setFormCron(DEFAULT_CRON)
-    setFormTimezone('UTC')
+    setFormTimezone('Asia/Shanghai')
     setFormPayload('{}')
+    setPayloadValues({})
+    setWorkflowFields([])
+    setRawMode(false)
     setFormEnabled(true)
   }
 
@@ -185,8 +237,17 @@ export function SkillSchedulesPage() {
     setFormSkillId(item.skill_id || '')
     setFormWorkflowId(item.workflow_id || '')
     setFormCron(item.cron_expr)
-    setFormTimezone(item.timezone)
-    setFormPayload(JSON.stringify(item.payload || {}, null, 2))
+    setFormTimezone(item.timezone || 'Asia/Shanghai')
+    const stored = item.payload || {}
+    // Seed structured payload values from stored JSON (stringified scalars).
+    const seed: Record<string, string> = {}
+    for (const [k, v] of Object.entries(stored)) {
+      if (typeof v === 'string' || typeof v === 'number') seed[k] = String(v)
+    }
+    setPayloadValues(seed)
+    setWorkflowFields([])
+    setRawMode(false)
+    setFormPayload(JSON.stringify(stored, null, 2))
     setFormEnabled(item.enabled)
     setDialogOpen(true)
   }
@@ -202,20 +263,36 @@ export function SkillSchedulesPage() {
       return
     }
 
+    // Client-side cron validation (mirrors backend APScheduler parsing).
+    if (!isValidCron(formCron.trim())) {
+      toast(t('schedules.toastCronInvalid'), { type: 'error' })
+      return
+    }
+
     let payload: Record<string, unknown> | null = null
-    const payloadText = formPayload.trim()
-    if (payloadText) {
-      try {
-        const parsed = JSON.parse(payloadText)
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          payload = parsed
-        } else {
-          throw new Error('payload must be object')
+    if (rawMode) {
+      // Advanced: parse the raw JSON textarea.
+      const payloadText = formPayload.trim()
+      if (payloadText) {
+        try {
+          const parsed = JSON.parse(payloadText)
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            payload = parsed
+          } else {
+            throw new Error('payload must be object')
+          }
+        } catch {
+          toast(t('schedules.toastPayloadInvalid'), { type: 'error' })
+          return
         }
-      } catch {
-        toast(t('schedules.toastPayloadInvalid'), { type: 'error' })
-        return
       }
+    } else {
+      // Structured: build payload from the field values (omit empty).
+      const obj: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(payloadValues)) {
+        if (v && v.trim() !== '') obj[k] = v
+      }
+      payload = Object.keys(obj).length > 0 ? obj : null
     }
 
     setSaving(true)
@@ -363,7 +440,7 @@ export function SkillSchedulesPage() {
                       <Badge variant="default">{item.target_type}</Badge>
                     </div>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      cron: <code>{item.cron_expr}</code> · tz: <code>{item.timezone}</code>
+                      {describeCron(item.cron_expr)} · <code className="text-[10px]">{item.cron_expr}</code> · {timezoneLabel(item.timezone)}
                     </p>
                     <p className="text-xs text-gray-400 mt-1">
                       {t('schedules.nextRun')}: {item.next_run_at ? formatDate(item.next_run_at) : '-'} ·{' '}
@@ -522,33 +599,185 @@ export function SkillSchedulesPage() {
             </div>
           )}
 
-          <Input
-            label={t('schedules.formCron')}
-            value={formCron}
-            onChange={(e) => setFormCron(e.target.value)}
-            placeholder="*/30 * * * *"
-            required
-          />
-
-          <Input
-            label={t('schedules.formTimezone')}
-            value={formTimezone}
-            onChange={(e) => setFormTimezone(e.target.value)}
-            placeholder="UTC"
-            required
-          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t('schedules.formCron')}
+            </label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {CRON_PRESETS.map((preset) => {
+                const active = formCron.trim() === preset.cron
+                return (
+                  <button
+                    key={preset.cron}
+                    type="button"
+                    onClick={() => setFormCron(preset.cron)}
+                    className={
+                      'rounded-full px-2.5 py-1 text-xs border transition-colors ' +
+                      (active
+                        ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-950 dark:text-primary-300'
+                        : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800')
+                    }
+                  >
+                    {t(preset.labelKey)}
+                  </button>
+                )
+              })}
+            </div>
+            <Input
+              value={formCron}
+              onChange={(e) => setFormCron(e.target.value)}
+              placeholder="*/30 * * * *"
+              required
+            />
+            {formCron.trim() && isValidCron(formCron.trim()) ? (
+              <div className="mt-1.5 space-y-0.5">
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  {t('schedules.cronMeaning')}: <span className="font-medium text-primary-600 dark:text-primary-400">{describeCron(formCron.trim())}</span>
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500">
+                  {t('schedules.cronNextRuns')}: {nextRunTimes(formCron.trim(), 3, new Date(), formTimezone).map((iso) => formatRunTime(iso, formTimezone)).join('、')}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-1.5 text-xs text-red-500">{t('schedules.cronInvalidHint')}</p>
+            )}
+          </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('schedules.formPayload')}
+              {t('schedules.formTimezone')}
             </label>
-            <textarea
-              className="w-full h-28 text-xs font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-3"
-              value={formPayload}
-              onChange={(e) => setFormPayload(e.target.value)}
-              placeholder='{"query":"status"}'
-            />
+            <select
+              className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
+              value={COMMON_TIMEZONES.includes(formTimezone) ? formTimezone : '__other'}
+              onChange={(e) => {
+                const v = e.target.value
+                if (v === '__other') {
+                  setFormTimezone('UTC')
+                } else {
+                  setFormTimezone(v)
+                }
+              }}
+            >
+              {COMMON_TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>
+                  {timezoneLabel(tz)}
+                </option>
+              ))}
+              {!COMMON_TIMEZONES.includes(formTimezone) ? <option value="__other">{formTimezone}</option> : null}
+            </select>
           </div>
+
+          {/* Execution payload: structured fields for workflows, raw JSON otherwise. */}
+          {formTargetType === 'workflow' && !rawMode ? (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('schedules.formPayload')}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Sync structured values into the raw JSON box before switching.
+                    const obj: Record<string, unknown> = {}
+                    for (const [k, v] of Object.entries(payloadValues)) {
+                      if (v && v.trim() !== '') obj[k] = v
+                    }
+                    setFormPayload(JSON.stringify(obj, null, 2))
+                    setRawMode(true)
+                  }}
+                  className="text-xs text-primary-600 hover:underline dark:text-primary-400"
+                >
+                  {t('schedules.payloadAdvanced')}
+                </button>
+              </div>
+              {workflowFields.length > 0 ? (
+                <div className="space-y-2">
+                  {workflowFields.map((field) => (
+                    <div key={field.key}>
+                      <label className="block text-xs text-gray-600 dark:text-gray-300 mb-0.5">
+                        {field.label}{field.required ? ' *' : ''}
+                      </label>
+                      {field.type === 'multiline' ? (
+                        <textarea
+                          className="w-full min-h-[80px] text-sm rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                          placeholder={field.placeholder}
+                          value={payloadValues[field.key] ?? ''}
+                          onChange={(e) =>
+                            setPayloadValues((prev) => ({ ...prev, [field.key]: e.target.value }))
+                          }
+                        />
+                      ) : field.type === 'select' ? (
+                        <select
+                          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                          value={payloadValues[field.key] ?? ''}
+                          onChange={(e) =>
+                            setPayloadValues((prev) => ({ ...prev, [field.key]: e.target.value }))
+                          }
+                        >
+                          <option value="">{t('common.select', '请选择')}</option>
+                          {(field.options || []).map((opt) => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <Input
+                          type={field.type === 'number' ? 'number' : 'text'}
+                          placeholder={field.placeholder}
+                          value={payloadValues[field.key] ?? ''}
+                          onChange={(e) =>
+                            setPayloadValues((prev) => ({ ...prev, [field.key]: e.target.value }))
+                          }
+                        />
+                      )}
+                    </div>
+                  ))}
+                  <p className="text-xs text-gray-400 dark:text-gray-500">{t('schedules.payloadWorkflowHint')}</p>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 dark:text-gray-500">{t('schedules.payloadLoading')}</p>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('schedules.formPayload')}
+                </label>
+                {formTargetType === 'workflow' && rawMode ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Parse raw JSON back into structured values.
+                      try {
+                        const parsed = JSON.parse(formPayload || '{}')
+                        const seed: Record<string, string> = {}
+                        for (const [k, v] of Object.entries(parsed)) {
+                          if (typeof v === 'string' || typeof v === 'number') seed[k] = String(v)
+                        }
+                        setPayloadValues((prev) => ({ ...seed, ...prev }))
+                      } catch {
+                        /* keep raw as-is */
+                      }
+                      setRawMode(false)
+                    }}
+                    className="text-xs text-primary-600 hover:underline dark:text-primary-400"
+                  >
+                    {t('schedules.payloadStructured')}
+                  </button>
+                ) : null}
+              </div>
+              <textarea
+                className="w-full h-28 text-xs font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-3"
+                value={formPayload}
+                onChange={(e) => setFormPayload(e.target.value)}
+                placeholder={formTargetType === 'skill' ? '{"query":"status"}' : '{"keyword":"无人机"}'}
+              />
+              {formTargetType === 'skill' ? (
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t('schedules.payloadSkillHint')}</p>
+              ) : null}
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
             <Switch checked={formEnabled} onChange={setFormEnabled} label={t('schedules.formEnabled')} />
@@ -612,6 +841,20 @@ export function SkillSchedulesPage() {
 {JSON.stringify(selectedRun.payload || {}, null, 2)}
               </pre>
             </div>
+
+            {(() => {
+              // For workflow schedule runs, the result is the workflow output_payload
+              // (with node_runs). Render the report panel so charts/files are visible.
+              const res = (selectedRun.result || {}) as Record<string, unknown>
+              const nodeRuns = Array.isArray(res.node_runs) ? res.node_runs : undefined
+              if (!nodeRuns) return null
+              return (
+                <WorkflowReportPanel
+                  nodeRuns={nodeRuns as Array<{ node_id: string; node_type: string; node_name?: string; result?: unknown }>}
+                  outputPayload={res as Record<string, unknown> | undefined}
+                />
+              )
+            })()}
 
             <div className="space-y-1">
               <p className="text-sm font-medium text-gray-800 dark:text-gray-200">

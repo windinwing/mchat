@@ -105,12 +105,14 @@ sync_skill_dir() {
     --exclude '.DS_Store' \
     --exclude 'config.json' \
     --exclude 'dist/' \
+    --exclude 'fonts/' \
     "$src/" "${REMOTE}:${REMOTE_DIR}/skills/$name/"
 }
 
 sync_skill_dir mchat-help
 sync_skill_dir mchat-ops
 sync_skill_dir mchat-notify
+sync_skill_dir feishu-push
 sync_skill_dir dev-assistant
 sync_skill_dir gamecenter-dev-agent
 sync_skill_dir gamecenter-image-guide
@@ -141,6 +143,14 @@ for stock_dir in "$PROJECT_DIR"/skills/stock-*; do
   [ -d "$stock_dir" ] || continue
   sync_skill_dir "$(basename "$stock_dir")"
 done
+
+# Ensure CJK font for stock-analysis charts (so titles/labels aren't mojibake).
+ssh "$REMOTE" "set -euo pipefail
+SA='${REMOTE_DIR}/skills/stock-analysis'
+if [ -d \"\$SA\" ] && [ ! -s \"\$SA/fonts/NotoSansCJKsc-Regular.otf\" ]; then
+  echo '==> Download CJK font for stock-analysis charts'
+  bash \"\$SA/ensure-font.sh\" || echo 'font download skipped'
+fi"
 
 echo "==> Refresh tenant patent-search copies (Widget uses tenant workspace skills)"
 ssh "$REMOTE" "set -euo pipefail

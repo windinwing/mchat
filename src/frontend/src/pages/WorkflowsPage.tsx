@@ -31,14 +31,15 @@ import { toast } from '@/components/ui/Toast'
 import { Spinner } from '@/components/ui/Spinner'
 import { WorkflowGraphEditor, type WorkflowGraphValue } from '@/components/workflow/WorkflowGraphEditor'
 import { WorkflowReportPanel } from '@/components/workflow/WorkflowReportPanel'
-import { extractStartInputFields, graphNeedsReportTitle, buildDefaultReportTitle } from '@/lib/workflowSkillMeta'
+import { extractStartInputFields, graphNeedsReportTitle, buildDefaultReportTitle, canQuickRun } from '@/lib/workflowSkillMeta'
 import { resolveRunDisplayName, runListSubtitle } from '@/lib/workflowRunLabel'
 import { humanizeRunError } from '@/lib/humanizeRunError'
+import { EntitlementConfirmDialog } from '@/components/workflow/EntitlementConfirmDialog'
 import {
   WorkflowEntitlementBanner,
   useWorkflowEntitlements,
 } from '@/components/portal/WorkflowEntitlementBanner'
-import { automationCheckoutPath, extractAutomationLimit } from '@/lib/automationLimit'
+import { automationCheckoutPath, extractAutomationLimit, limitMessage, type AutomationLimitDetail } from '@/lib/automationLimit'
 
 interface Skill {
   id: string
@@ -157,6 +158,7 @@ export function WorkflowsPage() {
   const reportTitleTouchedRef = useRef(false)
   const [runTarget, setRunTarget] = useState<WorkflowItem | null>(null)
   const [publishingAccounts, setPublishingAccounts] = useState<{id:string;name:string;channel_type:string}[]>([])
+  const [moreMenuId, setMoreMenuId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!runInputOpen) return
@@ -196,6 +198,7 @@ export function WorkflowsPage() {
   const [showTemplateGallery, setShowTemplateGallery] = useState(false)
   const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(new Set())
   const [batchDeleting, setBatchDeleting] = useState(false)
+  const [entitlementLimit, setEntitlementLimit] = useState<AutomationLimitDetail | null>(null)
 
   // ── Tabs + pagination + search state ──────────────────────────────
   const [activeTab, setActiveTab] = useState<'workflows' | 'runs'>('workflows')
@@ -343,10 +346,8 @@ export function WorkflowsPage() {
   const showLimitToast = (err: unknown, fallbackKey: string) => {
     const limit = extractAutomationLimit(err)
     if (limit) {
-      toast(limit.message || t(fallbackKey), { type: 'error' })
-      if (isPortal && limit.upgrade_template_id) {
-        navigate(automationCheckoutPath(limit))
-      }
+      // 弹确认框：用户点「前往开通」才跳转（portal），避免无声跳走
+      setEntitlementLimit(limit)
       return true
     }
     const msg = err instanceof Error ? err.message : String(err)
@@ -594,7 +595,7 @@ export function WorkflowsPage() {
     const nodes = row.graph_json?.nodes || []
     const fields = extractStartInputFields(nodes, { t, skills: skillOpts })
     const defaults: Record<string, string> = {}
-    for (const f of fields) defaults[f.key] = ''
+    for (const f of fields) defaults[f.key] = f.default || ''
     reportTitleTouchedRef.current = false
     setRunTarget(row)
     setRunInputValues(defaults)
@@ -1118,7 +1119,19 @@ export function WorkflowsPage() {
                       variant="secondary"
                       leftIcon={<Play className="w-3.5 h-3.5" />}
                       isLoading={!!runningMap[row.id]}
-                      onClick={() => openRunDialog(row)}
+                      onClick={() => {
+                        // If every required input has a default, run directly (one-click);
+                        // otherwise open the input dialog.
+                        if (canQuickRun(row.graph_json?.nodes || [], { t, skills: skillOpts })) {
+                          const defaults: Record<string, string> = {}
+                          for (const f of extractStartInputFields(row.graph_json?.nodes || [], { t, skills: skillOpts })) {
+                            defaults[f.key] = f.default || ''
+                          }
+                          runOnce(row, { ...defaults, _locale: uiLocale })
+                        } else {
+                          openRunDialog(row)
+                        }
+                      }}
                       disabled={!hasGraph || (entitlements !== null && !entitlements.can_run_workflow)}
                     >
                       {t('workflows.runOnce')}
@@ -1129,21 +1142,31 @@ export function WorkflowsPage() {
                     <Button size="sm" variant="danger" leftIcon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => deleteWorkflow(row)}>
                       {t('common.delete')}
                     </Button>
-                    <div className="relative group">
-                      <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" title="更多">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        title={t('common.more', '更多')}
+                        onClick={() => setMoreMenuId(moreMenuId === row.id ? null : row.id)}
+                      >
                         <MoreVertical className="h-4 w-4" />
                       </button>
-                      <div className="absolute right-0 top-full mt-1 hidden group-hover:block z-20 min-w-[140px] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg py-1">
-                        <button type="button" onClick={() => openEdit(row)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
-                          <Pencil className="inline w-3 h-3 mr-1.5" />{t('common.edit')}
-                        </button>
-                        <button type="button" onClick={() => openSaveTemplate(row)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
-                          <LayoutTemplate className="inline w-3 h-3 mr-1.5" />{t('workflows.saveAsTemplate')}
-                        </button>
-                        <button type="button" onClick={() => deleteWorkflow(row)} className="block w-full px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40">
-                          <Trash2 className="inline w-3 h-3 mr-1.5" />{t('common.delete')}
-                        </button>
-                      </div>
+                      {moreMenuId === row.id ? (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setMoreMenuId(null)} />
+                          <div className="absolute right-0 top-9 z-20 min-w-[140px] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg py-1">
+                            <button type="button" onClick={() => { setMoreMenuId(null); openEdit(row) }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
+                              <Pencil className="inline w-3 h-3 mr-1.5" />{t('common.edit')}
+                            </button>
+                            <button type="button" onClick={() => { setMoreMenuId(null); openSaveTemplate(row) }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
+                              <LayoutTemplate className="inline w-3 h-3 mr-1.5" />{t('workflows.saveAsTemplate')}
+                            </button>
+                            <button type="button" onClick={() => { setMoreMenuId(null); deleteWorkflow(row) }} className="block w-full px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40">
+                              <Trash2 className="inline w-3 h-3 mr-1.5" />{t('common.delete')}
+                            </button>
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -1702,6 +1725,11 @@ export function WorkflowsPage() {
         open={showTemplateGallery}
         onClose={() => setShowTemplateGallery(false)}
         onApplied={() => void refreshAll()}
+      />
+      <EntitlementConfirmDialog
+        limit={entitlementLimit}
+        onClose={() => setEntitlementLimit(null)}
+        isPortal={isPortal}
       />
     </div>
   )

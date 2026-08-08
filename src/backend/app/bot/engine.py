@@ -480,9 +480,18 @@ async def process_message(
         if channel_extra:
             system_prompt = system_prompt.rstrip() + "\n\n" + channel_extra
 
+        # Skills and knowledge bases are owned by the conversation/customer owner,
+        # NOT by the AI config's owner. A shared system-default AI config
+        # (is_default, owned by another account) would otherwise load skills/KBs
+        # under the wrong user_id → zero tools, zero knowledge hits. Prefer the
+        # customer/widget owner; fall back to the AI config owner only when there
+        # is no customer context (e.g. admin chat).
+        chat_owner_id = (
+            getattr(customer_config, "user_id", None) or ai_config.user_id
+        )
         prompt_skills, tool_skills = await load_skills_for_chat(
             db_session,
-            user_id=ai_config.user_id,
+            user_id=chat_owner_id,
             customer_config=customer_config,
             skill_ids_override=skill_ids_override,
             end_user=end_user,
@@ -573,7 +582,7 @@ async def process_message(
         system_prompt, knowledge_hits = await _append_rag_context(
             system_prompt,
             message.content,
-            ai_config.user_id,
+            chat_owner_id,
             customer_config,
             db_session,
             conversation,

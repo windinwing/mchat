@@ -153,16 +153,25 @@ class AgentService:
         return resp
 
     async def update_ai_config(
-        self, config_id: str, user_id: str, data: AIConfigUpdate
+        self, config_id: str, user_id: str, data: AIConfigUpdate, is_admin: bool = False
     ) -> AIConfigResponse | None:
-        """Update an AI config."""
+        """Update an AI config.
+
+        Owners always update their own configs. Admins (``is_admin``) may
+        additionally update a *shared system default* — an ``is_default``
+        config owned by another account — so platform-wide defaults can be
+        maintained without reassigning ownership.
+        """
         result = await self.db.execute(
-            select(AIConfig).where(
-                AIConfig.id == config_id, AIConfig.user_id == user_id
-            )
+            select(AIConfig).where(AIConfig.id == config_id)
         )
         config = result.scalar_one_or_none()
         if config is None:
+            return None
+        is_shared_default = (
+            config.user_id != user_id and bool(config.is_default)
+        )
+        if config.user_id != user_id and not (is_admin and is_shared_default):
             return None
 
         update_data = data.model_dump(exclude_unset=True)
@@ -171,9 +180,14 @@ class AgentService:
         if "api_key" in update_data and not (update_data.get("api_key") or "").strip():
             update_data.pop("api_key")
 
-        # If setting as default, unset other defaults
+        # If setting as default, unset other defaults for this config's owner.
+        # For a shared default edited by an admin, that owner is the config's
+        # original ``user_id`` (not the acting admin) — keeps one default per
+        # account intact.
         if update_data.get("is_default"):
-            await self._unset_default_ai_configs(user_id, exclude_id=config_id)
+            await self._unset_default_ai_configs(
+                config.user_id, exclude_id=config_id
+            )
 
         for key, value in update_data.items():
             setattr(config, key, value)
@@ -183,16 +197,23 @@ class AgentService:
         return AIConfigResponse.model_validate(config)
 
     async def delete_ai_config(
-        self, config_id: str, user_id: str
+        self, config_id: str, user_id: str, is_admin: bool = False
     ) -> bool:
-        """Delete an AI config."""
+        """Delete an AI config.
+
+        As with updates, admins may delete a shared system default owned by
+        another account; everyone else is scoped to their own configs.
+        """
         result = await self.db.execute(
-            select(AIConfig).where(
-                AIConfig.id == config_id, AIConfig.user_id == user_id
-            )
+            select(AIConfig).where(AIConfig.id == config_id)
         )
         config = result.scalar_one_or_none()
         if config is None:
+            return False
+        is_shared_default = (
+            config.user_id != user_id and bool(config.is_default)
+        )
+        if config.user_id != user_id and not (is_admin and is_shared_default):
             return False
         # Null out dangling foreign-key references so conversations, groups,
         # customer configs and channel templates don't point at a deleted row.

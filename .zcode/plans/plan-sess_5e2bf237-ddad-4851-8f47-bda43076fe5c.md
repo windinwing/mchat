@@ -1,0 +1,1 @@
+已批准。按已讨论方案实施：admin 可编辑/删除"系统默认模型"。修改后端 agent_service.py 与 agent.py 接入 is_admin；前端 ModelProviderWorkbench.tsx 与 AgentConfig.tsx 对 admin 解锁只读；最后用 make 命令部署到 10.98.8.15。

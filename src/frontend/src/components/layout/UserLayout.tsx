@@ -27,19 +27,27 @@ import { ThemeToggle } from '@/components/common/ThemeToggle'
 import { AppModeSwitch } from '@/components/common/AppModeSwitch'
 import { useState } from 'react'
 
+// 导航项。roles 为空数组 = 所有角色可见；非空 = 仅列出的角色可见。
+// 发布账号 / 发送记录仅推广者(promoter)与管理员可见，普通 user 不显示。
 const navItems = [
-  { path: '/portal/dashboard', label: 'portal.dashboard', icon: LayoutDashboard },
-  { path: '/portal/templates', label: 'portal.templates', icon: ShoppingBag },
-  { path: '/portal/channels', label: 'portal.myChannels', icon: MessageSquare },
-  { path: '/portal/publishing-accounts', label: 'portal.publishingAccounts', icon: Send },
-  { path: '/portal/send-records', label: 'portal.sendRecords', icon: BarChart3 },
-  { path: '/portal/workflows', label: 'portal.workflowsNav', icon: Workflow },
-  { path: '/portal/workflow-center', label: 'portal.workflowCenterNav', icon: LayoutTemplate },
-  { path: '/portal/schedules', label: 'portal.schedulesNav', icon: Clock3 },
-  { path: '/portal/groups', label: 'portal.groups', icon: Users },
-  { path: '/portal/orders', label: 'portal.orders', icon: Receipt },
-  { path: '/portal/account', label: 'portal.account', icon: Settings },
+  { path: '/portal/dashboard', label: 'portal.dashboard', icon: LayoutDashboard, roles: [] as string[] },
+  { path: '/portal/templates', label: 'portal.templates', icon: ShoppingBag, roles: [] },
+  { path: '/portal/channels', label: 'portal.myChannels', icon: MessageSquare, roles: [] },
+  { path: '/portal/publishing-accounts', label: 'portal.publishingAccounts', icon: Send, roles: ['promoter', 'admin'] },
+  { path: '/portal/send-records', label: 'portal.sendRecords', icon: BarChart3, roles: ['promoter', 'admin'] },
+  { path: '/portal/workflows', label: 'portal.workflowsNav', icon: Workflow, roles: [] },
+  { path: '/portal/workflow-center', label: 'portal.workflowCenterNav', icon: LayoutTemplate, roles: [] },
+  { path: '/portal/schedules', label: 'portal.schedulesNav', icon: Clock3, roles: [] },
+  { path: '/portal/groups', label: 'portal.groups', icon: Users, roles: [] },
+  { path: '/portal/orders', label: 'portal.orders', icon: Receipt, roles: [] },
+  { path: '/portal/account', label: 'portal.account', icon: Settings, roles: [] },
 ]
+
+/** 按角色过滤导航项：roles 为空=全员可见；非空=仅指定角色。 */
+function filterNavByRole(items: typeof navItems, role: string | undefined) {
+  if (!role) return items
+  return items.filter((it) => it.roles.length === 0 || it.roles.includes(role))
+}
 
 export function UserLayout({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
@@ -68,6 +76,7 @@ export function UserLayout({ children }: { children: ReactNode }) {
   }
 
   const isActive = (path: string) => location.pathname.startsWith(path)
+  const visibleNav = filterNavByRole(navItems, user?.role)
 
   return (
     <div className="h-screen overflow-hidden bg-gray-50 dark:bg-gray-900">
@@ -107,7 +116,7 @@ export function UserLayout({ children }: { children: ReactNode }) {
               </button>
             </div>
             <nav className="flex-1 space-y-1">
-              {navItems.map((item) => (
+              {visibleNav.map((item) => (
                 <Link
                   key={item.path}
                   to={item.path}
@@ -170,7 +179,7 @@ export function UserLayout({ children }: { children: ReactNode }) {
             </button>
           </div>
           <nav className="flex-1 space-y-1 overflow-y-auto scrollbar-hide">
-            {navItems.map((item) => (
+            {visibleNav.map((item) => (
               <Link
                 key={item.path}
                 to={item.path}

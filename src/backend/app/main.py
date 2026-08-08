@@ -289,10 +289,13 @@ def create_app() -> FastAPI:
             content={"detail": "Internal server error"},
         )
 
-    # Same-origin /uploads — proxies MinIO/S3 or serves local files
+    # Same-origin /uploads — proxies MinIO/S3 or serves local files.
+    # Also mounted under /api/uploads so it reaches the backend through edge
+    # gateways that only whitelist /api/ (the bare /uploads/ path 404s there).
     from app.api.uploads import router as uploads_router
 
     app.include_router(uploads_router)
+    app.include_router(uploads_router, prefix="/api")
 
     # Skill 生成物的对外静态访问（如 textbook-review 的 HTML 复习提纲）。
     # 无签名、公开可访问，便于在浏览器/手机直接打开分享。

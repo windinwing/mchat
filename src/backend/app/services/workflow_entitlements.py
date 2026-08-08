@@ -248,12 +248,14 @@ def _limit_error(
     code: str,
     message: str,
     ent: WorkflowEntitlementsResponse,
+    message_key: str = "",
 ) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
         detail={
             "code": code,
             "message": message,
+            "message_key": message_key,
             "plan": ent.plan,
             "upgrade_template_id": ent.upgrade_template_id,
             "upgrade_channel_id": ent.upgrade_channel_id,
@@ -270,11 +272,13 @@ async def ensure_can_create_workflow(db: AsyncSession, user: User) -> None:
             code="workflow_plan_required",
             message="工作流编排需开通试用或 Pro 权益，请在工作流页点击「开通工作流编排」",
             ent=ent,
+            message_key="workflowEntitlement.planRequired",
         )
     raise _limit_error(
         code="workflow_limit",
         message=f"已达工作流数量上限（{ent.workflow_count}/{ent.max_workflows}）",
         ent=ent,
+        message_key="workflowEntitlement.workflowLimit",
     )
 
 
@@ -287,11 +291,13 @@ async def ensure_can_create_schedule(db: AsyncSession, user: User) -> None:
             code="schedule_plan_required",
             message="定时任务需 Pro 或试用版套餐",
             ent=ent,
+            message_key="workflowEntitlement.schedulePlanRequired",
         )
     raise _limit_error(
         code="schedule_limit",
         message=f"已达定时任务数量上限（{ent.schedule_count}/{ent.max_schedules}）",
         ent=ent,
+        message_key="workflowEntitlement.scheduleLimit",
     )
 
 
@@ -304,11 +310,13 @@ async def ensure_can_run_workflow(db: AsyncSession, user: User) -> None:
             code="workflow_run_plan_required",
             message="运行工作流需 Pro 或试用版套餐",
             ent=ent,
+            message_key="workflowEntitlement.runPlanRequired",
         )
     raise _limit_error(
         code="workflow_run_limit",
         message=f"本月运行次数已用尽（{ent.runs_month}/{ent.max_runs_month}）",
         ent=ent,
+        message_key="workflowEntitlement.runLimit",
     )
 
 
@@ -320,4 +328,5 @@ async def ensure_can_save_dag(db: AsyncSession, user: User) -> None:
         code="workflow_dag_plan_required",
         message="图形编排需 Pro 或试用版套餐",
         ent=ent,
+        message_key="workflowEntitlement.dagPlanRequired",
     )
