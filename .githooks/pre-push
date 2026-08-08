@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# GitHub (origin): only allow pushes from local dev branch.
-# Allowed targets on origin: dev (normal) and main (release via dev:main).
+# GitHub (origin): only allow pushes of the pure-Core branch.
+# origin/main is the public Core release; it must never contain Cloud code.
+# Cloud/feature branches go to the private remote.
 # Install: make install-git-hooks
 
 set -euo pipefail
@@ -19,16 +20,26 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     continue
   fi
 
-  if [[ "$local_ref" != refs/heads/dev ]]; then
-    echo "✗ 拒绝 push 到 origin：仅允许从本地 dev 推送（当前: ${local_ref#refs/heads/}）" >&2
+  # Only the pure-Core branch may be pushed to origin.
+  if [[ "$local_ref" != refs/heads/core ]]; then
+    echo "✗ 拒绝 push 到 origin：仅允许从本地 core 分支推送（当前: ${local_ref#refs/heads/}）" >&2
     echo "  功能/Cloud 分支请推 private。" >&2
     exit 1
   fi
 
-  if [[ "$remote_ref" != refs/heads/dev && "$remote_ref" != refs/heads/main ]]; then
-    echo "✗ 拒绝 push 到 origin：目标仅允许 dev 或 main（当前: ${remote_ref#refs/heads/}）" >&2
-    echo "  发布 main 请用: git push origin dev:main" >&2
+  if [[ "$remote_ref" != refs/heads/main && "$remote_ref" != refs/heads/core ]]; then
+    echo "✗ 拒绝 push 到 origin：目标仅允许 main 或 core（当前: ${remote_ref#refs/heads/}）" >&2
+    echo "  发布 main 请用: git push origin core:main" >&2
     exit 1
+  fi
+
+  # Block any Cloud-only path from entering origin/main.
+  if [[ "$remote_ref" == refs/heads/main ]]; then
+    if git ls-tree -r "$local_sha" --name-only | grep -qE '^src/backend/cloud/|^src/frontend/src/pages/portal/|^src/frontend/src/(AppPortal|main-portal)\.tsx$|^src/frontend/portal\.html$'; then
+      echo "✗ 拒绝 push 到 origin/main：检测到 Cloud 专属文件" >&2
+      echo "  Core 分支不得包含 cloud/ 或 portal/ 代码。" >&2
+      exit 1
+    fi
   fi
 done
 
