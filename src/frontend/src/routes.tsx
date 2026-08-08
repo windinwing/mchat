@@ -3,7 +3,6 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { isCloudEdition, isSignupEnabled } from '@/lib/edition'
 import { lazyNamed } from '@/lib/chunkLoadRecovery'
 import { AdminLayout } from './components/layout/AdminLayout'
-import { UserLayout } from './components/layout/UserLayout'
 import { Spinner } from './components/ui/Spinner'
 import { DocumentTitle } from './components/common/DocumentTitle'
 
@@ -30,7 +29,6 @@ const CustomerAgentsPage = lazyNamed(() => import('./pages/CustomerAgentsPage'),
 const SettingsPage = lazyNamed(() => import('./pages/SettingsPage'), 'SettingsPage')
 const ChannelsPage = lazyNamed(() => import('./pages/ChannelsPage'), 'ChannelsPage')
 const PublishingAccountsPage = lazyNamed(() => import('./pages/PublishingAccountsPage'), 'PublishingAccountsPage')
-const PortalSendRecords = lazyNamed(() => import('./pages/portal/SendRecordsPage'), 'SendRecordsPage')
 const AdminSendRecords = lazyNamed(() => import('./pages/SendRecordsAdminPage'), 'SendRecordsAdminPage')
 const ChatHomePage = lazyNamed(() => import('./pages/ChatHomePage'), 'ChatHomePage')
 const ChatPage = lazyNamed(() => import('./pages/ChatPage'), 'ChatPage')
@@ -46,28 +44,11 @@ const GroupsPage = lazyNamed(() => import('./pages/GroupsPage'), 'GroupsPage')
 const GroupMemoryPage = lazyNamed(() => import('./pages/GroupMemoryPage'), 'GroupMemoryPage')
 const DevBridgePage = lazyNamed(() => import('./pages/DevBridgePage'), 'DevBridgePage')
 const DevBridgeSettingsPage = lazyNamed(() => import('./pages/DevBridgeSettingsPage'), 'DevBridgeSettingsPage')
-const TemplateManagerPage = lazyNamed(() => import('./pages/admin/TemplateManagerPage'), 'TemplateManagerPage')
-const AdminOrdersPage = lazyNamed(() => import('./pages/admin/AdminOrdersPage'), 'AdminOrdersPage')
-const AdminSubscriptionsPage = lazyNamed(
-  () => import('./pages/admin/AdminSubscriptionsPage'),
-  'AdminSubscriptionsPage',
-)
 
 const RegisterPage = lazyNamed(() => import('./pages/RegisterPage'), 'RegisterPage')
 const Auth9235CallbackPage = lazyNamed(
   () => import('./pages/Auth9235CallbackPage'),
   'Auth9235CallbackPage',
-)
-const PortalDashboard = lazyNamed(() => import('./pages/portal/DashboardPage'), 'DashboardPage')
-const PortalTemplates = lazyNamed(() => import('./pages/portal/TemplatesPage'), 'TemplatesPage')
-const PortalTemplateDetail = lazyNamed(
-  () => import('./pages/portal/TemplateDetailPage'),
-  'TemplateDetailPage',
-)
-const PortalMyChannels = lazyNamed(() => import('./pages/portal/MyChannelsPage'), 'MyChannelsPage')
-const PortalChannelDetail = lazyNamed(
-  () => import('./pages/portal/ChannelDetailPage'),
-  'ChannelDetailPage',
 )
 
 export function PageSuspense({ children }: { children: React.ReactNode }) {
@@ -127,9 +108,6 @@ export function CoreRoutes() {
         <Route path="/admin/group-memory" element={<AdminLayout><PageSuspense><GroupMemoryPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/devbridge" element={<AdminLayout><PageSuspense><DevBridgePage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/devbridge/settings" element={<AdminLayout><PageSuspense><DevBridgeSettingsPage /></PageSuspense></AdminLayout>} />
-        <Route path="/admin/templates" element={<AdminLayout><PageSuspense><TemplateManagerPage /></PageSuspense></AdminLayout>} />
-        <Route path="/admin/orders" element={<AdminLayout><PageSuspense><AdminOrdersPage /></PageSuspense></AdminLayout>} />
-        <Route path="/admin/subscriptions" element={<AdminLayout><PageSuspense><AdminSubscriptionsPage /></PageSuspense></AdminLayout>} />
         <Route path="/admin/users" element={<AdminLayout><PageSuspense><UsersPage /></PageSuspense></AdminLayout>} />
         <Route path="/chat/:conversationId" element={<PageSuspense><ChatPage /></PageSuspense>} />
         <Route path="/widget/demo" element={<PageSuspense><WidgetDemo /></PageSuspense>} />
@@ -140,27 +118,5 @@ export function CoreRoutes() {
         <Route path="/showcase" element={<PageSuspense><SkillShowcasePage /></PageSuspense>} />
       </Routes>
     </>
-  )
-}
-
-export function PortalRoutes() {
-  if (!isCloudEdition) {
-    return null
-  }
-  return (
-    <Routes>
-      <Route path="/register" element={<PageSuspense><RegisterPage /></PageSuspense>} />
-      <Route path="/portal/chat" element={<Navigate to="/chat" replace />} />
-      <Route path="/portal" element={<UserLayout><PageSuspense><PortalDashboard /></PageSuspense></UserLayout>} />
-      <Route path="/portal/dashboard" element={<UserLayout><PageSuspense><PortalDashboard /></PageSuspense></UserLayout>} />
-      <Route path="/portal/templates" element={<UserLayout><PageSuspense><PortalTemplates /></PageSuspense></UserLayout>} />
-      <Route path="/portal/templates/:id" element={<UserLayout><PageSuspense><PortalTemplateDetail /></PageSuspense></UserLayout>} />
-      <Route path="/portal/channels" element={<UserLayout><PageSuspense><PortalMyChannels /></PageSuspense></UserLayout>} />
-      <Route path="/portal/channels/:id" element={<UserLayout><PageSuspense><PortalChannelDetail /></PageSuspense></UserLayout>} />
-      <Route path="/portal/publishing-accounts" element={<UserLayout><PageSuspense><PublishingAccountsPage /></PageSuspense></UserLayout>} />
-      <Route path="/portal/send-records" element={<UserLayout><PageSuspense><PortalSendRecords /></PageSuspense></UserLayout>} />
-      <Route path="/portal/workflows" element={<UserLayout><PageSuspense><WorkflowsPage /></PageSuspense></UserLayout>} />
-      <Route path="/portal/workflow-center" element={<UserLayout><PageSuspense><WorkflowCenterPage /></PageSuspense></UserLayout>} />
-    </Routes>
   )
 }

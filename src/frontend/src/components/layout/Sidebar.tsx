@@ -9,7 +9,6 @@ import {
   Clock3,
   Code2,
   Container,
-  DollarSign,
   FolderOpen,
   Globe,
   Headphones,
@@ -23,10 +22,8 @@ import {
   PanelLeftOpen,
   Puzzle,
   Settings,
-  Store,
   Send,
   BarChart3,
-  BadgeCheck,
   Users,
   Workflow as WorkflowIcon,
   X,
@@ -89,14 +86,6 @@ const adminNavGroups: NavGroup[] = [
       { path: '/admin/users', labelKey: 'nav.users', icon: Users },
       { path: '/admin/roles', labelKey: 'nav.roles', icon: Lock },
       { path: '/admin/groups', labelKey: 'nav.groups', icon: Users },
-    ],
-  },
-  {
-    titleKey: 'navGroup.business',
-    items: [
-      { path: '/admin/templates', labelKey: 'nav.templates', icon: Store },
-      { path: '/admin/orders', labelKey: 'nav.orders', icon: DollarSign },
-      { path: '/admin/subscriptions', labelKey: 'nav.subscriptions', icon: BadgeCheck },
     ],
   },
 ]

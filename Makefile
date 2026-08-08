@@ -8,7 +8,7 @@ FIND_PYTHON := bash ops/scripts/find-python.sh
 DOCKER_COMPOSE := $(shell if [ -x ops/scripts/docker-compose-cmd.sh ] 2>/dev/null || [ -f ops/scripts/docker-compose-cmd.sh ]; then echo 'bash ops/scripts/docker-compose-cmd.sh'; elif docker info >/dev/null 2>&1; then echo 'docker compose'; else echo 'sudo docker compose'; fi)
 DOCKER_LITE_ENV := -f ops/docker/docker-compose.lite.yml --env-file ops/docker/.env
 
-.PHONY: help install setup install-git-hooks dev dev-worker dev-stop cloud cloud-stop worker dev-backend deploy-core deploy-cloud dev-frontend build start docker-up docker-down docker-build clean reset-fresh test lint coverage db-init db-seed fmt patent-skills-env patent-skills-reload patent-skills-prune test-patent-showcase seed-devbridge-group env-hint
+.PHONY: help install setup install-git-hooks dev dev-worker dev-stop worker dev-backend deploy-core dev-frontend build start docker-up docker-down docker-build clean reset-fresh test lint coverage db-init db-seed fmt patent-skills-env patent-skills-reload patent-skills-prune test-patent-showcase seed-devbridge-group env-hint
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -56,22 +56,12 @@ dev-stop: ## Stop processes on ports 3001 and 5173
 dev-db: ## Start local dev MySQL (Docker)
 	@bash ops/scripts/ensure-dev-mysql.sh
 
-cloud: ## Start Cloud (Core + signup/portal/templates) dev servers
-	@bash ops/scripts/cloud-start.sh
-
-cloud-stop: ## Stop Cloud dev servers (same as dev-stop)
-	@bash ops/scripts/cloud-stop.sh
-
 worker: ## Run independent background worker (default disabled)
 	$(WITH_VENV) python -m app.worker.main
 
 deploy-core: ## Deploy Core (set MCHAT_DEPLOY_REMOTE=user@host)
 	@test -n "$${MCHAT_DEPLOY_REMOTE:-}" || { echo "Set MCHAT_DEPLOY_REMOTE=user@host"; exit 1; }
 	@bash ops/scripts/deploy-remote-core.sh "$${MCHAT_DEPLOY_REMOTE}"
-
-deploy-cloud: ## Deploy Cloud (set MCHAT_DEPLOY_REMOTE=user@host)
-	@test -n "$${MCHAT_DEPLOY_REMOTE:-}" || { echo "Set MCHAT_DEPLOY_REMOTE=user@host"; exit 1; }
-	@bash ops/scripts/deploy-remote-cloud.sh "$${MCHAT_DEPLOY_REMOTE}"
 
 dev-backend: ## Start backend only (frees port 3001 first)
 	@bash ops/scripts/dev-stop.sh 2>/dev/null || true
