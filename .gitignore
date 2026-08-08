@@ -42,6 +42,9 @@ ops/deploy/mchat.*.conf
 .DS_Store
 Thumbs.db
 
+# ZCode agent (local plans/session files)
+.zcode/
+
 # Database (local dev)
 *.db
 *.sqlite
