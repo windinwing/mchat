@@ -38,7 +38,7 @@ import { EntitlementConfirmDialog } from '@/components/workflow/EntitlementConfi
 import {
   WorkflowEntitlementBanner,
   useWorkflowEntitlements,
-} from '@/components/portal/WorkflowEntitlementBanner'
+} from '@/components/core/WorkflowEntitlementBanner'
 import { automationCheckoutPath, extractAutomationLimit, limitMessage, type AutomationLimitDetail } from '@/lib/automationLimit'
 
 interface Skill {

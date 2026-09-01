@@ -34,6 +34,11 @@ jobs:
           cd src/backend
           python -m pytest ../../tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=40
 
+      - name: Reject fatal Python lint errors
+        run: |
+          cd src/backend
+          ruff check --select E9,F63,F7,F82 app ../../tests
+
   frontend-test:
     runs-on: ubuntu-latest
     env:
@@ -58,7 +63,10 @@ jobs:
         run: cd src/frontend && npm run lint
 
       - name: Build (Core)
-        run: cd src/frontend && VITE_MCHAT_EDITION=core npm run build:core
+        run: cd src/frontend && npm run build:core
+
+      - name: Verify Core build boundary
+        run: bash ops/scripts/check-core-build-boundary.sh
 
   docker-build:
     runs-on: ubuntu-latest
@@ -69,10 +77,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Validate shell and Compose configuration
+        run: |
+          find ops/scripts ops/deploy -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          cp ops/docker/.env.example ops/docker/.env
+          cp ops/docker/.env.production.example ops/docker/.env.production
+          trap 'rm -f ops/docker/.env ops/docker/.env.production' EXIT
+          docker compose -f ops/docker/docker-compose.lite.yml --env-file ops/docker/.env.example config --quiet
+          docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/.env.example config --quiet
+          docker compose -f ops/docker/docker-compose.prod.yml --env-file ops/docker/.env.production config --quiet
+
       - name: Build backend image
         uses: docker/build-push-action@v6
         with:
-          context: src/backend
+          context: .
+          file: src/backend/Dockerfile
           push: false
           tags: mchat-backend:latest
 

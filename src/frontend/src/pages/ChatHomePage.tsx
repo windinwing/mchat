@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api from '@/lib/api'
-import { portalApi } from '@/lib/portalApi'
+import { coreChatApi } from '@/core/coreApiAdapter'
 import { isCloudEdition } from '@/lib/edition'
 import {
   getPreferredStaffMode,
@@ -38,7 +38,7 @@ async function loadChannels(
   mode: 'portal' | 'agent',
 ): Promise<ChannelOption[]> {
   if (mode === 'portal') {
-    const rows = await portalApi.getMyChannels()
+    const rows = await coreChatApi.getMyChannels()
     return rows.filter((c) => c.enabled !== false).map((c) => ({ id: c.id, name: c.name }))
   }
   const rows = await api.get<Array<{ id: string; name: string; enabled?: boolean }>>(
@@ -99,7 +99,7 @@ export function ChatHomePage({ mode: modeProp }: ChatHomePageProps) {
   const navigate = useNavigate()
   const { user, checkAuth, isAuthenticated, isLoading: authLoading } = useAuthStore()
   const mode: 'portal' | 'agent' =
-    modeProp ?? (user?.role === 'user' ? 'portal' : 'agent')
+    modeProp ?? (user?.role === 'user' && isCloudEdition ? 'portal' : 'agent')
   const isPortalUser = user?.role === 'user'
   const showModeSwitch =
     user?.role === 'agent' ||

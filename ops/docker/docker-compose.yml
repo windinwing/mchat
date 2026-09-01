@@ -12,7 +12,7 @@ services:
       - "${MYSQL_PORT}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --sort-buffer-size=8M
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
@@ -88,8 +88,8 @@ services:
   # 后端服务
   backend:
     build:
-      context: ../../src/backend
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: src/backend/Dockerfile
     container_name: mchat-backend
     env_file:
       - .env

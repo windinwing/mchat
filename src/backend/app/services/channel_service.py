@@ -84,6 +84,7 @@ from app.models.customer import CustomerConfig
 from app.models.workflow import ChannelWorkflowBinding, SkillWorkflow
 from app.models.workflow import SkillWorkflowRun
 from app.models.setting import Setting
+from app.services.llm_credentials import get_platform_default_ai_config
 from app.services.workflow_service import WorkflowService
 from app.schemas.channel import (
     ChannelCreate,
@@ -194,7 +195,7 @@ async def channel_get_or_create_conversation(
 async def channel_resolve_ai_config(
     db: AsyncSession, customer: CustomerConfig
 ) -> AIConfig | None:
-    """Resolve AI config from customer or fall back to default."""
+    """Resolve AI config from customer or the administrator platform default."""
     if customer.ai_config_id:
         result = await db.execute(
             select(AIConfig).where(AIConfig.id == customer.ai_config_id)
@@ -202,13 +203,7 @@ async def channel_resolve_ai_config(
         cfg = result.scalar_one_or_none()
         if cfg is not None:
             return cfg
-    result = await db.execute(
-        select(AIConfig)
-        .where(AIConfig.is_default == True)
-        .order_by(AIConfig.updated_at.desc())
-        .limit(1)
-    )
-    return result.scalars().first()
+    return await get_platform_default_ai_config(db)
 
 
 async def channel_trigger_bound_workflows(

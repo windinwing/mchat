@@ -3,6 +3,7 @@
 import re
 import secrets
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -21,6 +22,7 @@ from app.schemas.auth import TokenResponse, UserResponse
 _UNSET = object()
 _PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
 _EXTERNAL_PROVIDER_9235 = "patent9235"
+SignupRole = Literal["agent", "user"]
 
 
 class AuthService:
@@ -119,8 +121,9 @@ class AuthService:
         password: str,
         email: str | None = None,
         display_name: str | None = None,
+        role: SignupRole = "user",
     ) -> TokenResponse:
-        """Register a new public user with role='user'."""
+        """Register a new public user using the edition's public role."""
         result = await self.db.execute(
             select(User).where(User.username == username)
         )
@@ -144,7 +147,7 @@ class AuthService:
             username=username,
             email=email,
             password_hash=get_password_hash(password),
-            role="user",
+            role=role,
             display_name=display_name or username,
             account_status="active",
             password_set_at=now,
@@ -183,6 +186,29 @@ class AuthService:
         await self.db.flush()
         await self.db.refresh(user)
         return user
+
+    async def rotate_legacy_admin_passwords(
+        self,
+        replacement_password: str,
+    ) -> list[str]:
+        """Replace the historical ``admin123`` password on every admin.
+
+        Production deployments may reuse a database first created in
+        development. Merely changing ``ADMIN_PASSWORD`` does not update an
+        existing row, so the old bootstrap credential would otherwise remain
+        valid indefinitely.
+        """
+        result = await self.db.execute(select(User).where(User.role == "admin"))
+        rotated_usernames: list[str] = []
+        now = datetime.now(timezone.utc)
+        for user in result.scalars().all():
+            if await verify_password_async("admin123", user.password_hash):
+                user.password_hash = get_password_hash(replacement_password)
+                user.password_set_at = now
+                rotated_usernames.append(user.username)
+        if rotated_usernames:
+            await self.db.flush()
+        return rotated_usernames
 
     async def change_password(
         self,
@@ -353,8 +379,13 @@ class AuthService:
         safe = re.sub(r"[^a-zA-Z0-9_]", "_", account).strip("_") or "user"
         return f"e{safe[:90]}"
 
-    async def signup_by_phone(self, phone: str) -> TokenResponse:
-        """Register or sign in with a verified phone number (portal/Core signup)."""
+    async def signup_by_phone(
+        self,
+        phone: str,
+        *,
+        role: SignupRole = "user",
+    ) -> TokenResponse:
+        """Register or sign in with a verified phone number."""
         phone = phone.strip()
         result = await self.db.execute(select(User).where(User.phone == phone))
         user = result.scalar_one_or_none()
@@ -376,7 +407,7 @@ class AuthService:
         user = User(
             username=username,
             password_hash=self._random_password_hash(),
-            role="user",
+            role=role,
             display_name=phone,
             phone=phone,
             phone_verified_at=now,
@@ -407,8 +438,13 @@ class AuthService:
         await self.db.refresh(user)
         return self._token_for_user(user)
 
-    async def login_or_link_9235(self, *, account: str) -> TokenResponse:
-        """Sign in via 9235.net SSO; create or link a portal user."""
+    async def login_or_link_9235(
+        self,
+        *,
+        account: str,
+        role: SignupRole = "user",
+    ) -> TokenResponse:
+        """Sign in via 9235.net SSO; create or link an edition user."""
         account = (account or "").strip()
         if account.startswith("+86") and len(account) > 3:
             account = account[3:]
@@ -443,7 +479,7 @@ class AuthService:
             user = User(
                 username=username,
                 password_hash=self._random_password_hash(),
-                role="user",
+                role=role,
                 display_name=account,
                 phone=account if _PHONE_RE.match(account) else None,
                 phone_verified_at=datetime.now(timezone.utc) if _PHONE_RE.match(account) else None,

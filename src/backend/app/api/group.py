@@ -54,10 +54,10 @@ async def create_group(
 async def update_group(
     group_id: str,
     request: GroupUpdateRequest,
-    _admin: User = Depends(require_permission(Permission.USERS_WRITE)),
+    admin: User = Depends(require_permission(Permission.USERS_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await GroupService(db).update_group(group_id, request)
+    return await GroupService(db).update_group(group_id, admin.id, request)
 
 
 @router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)

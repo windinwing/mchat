@@ -24,6 +24,7 @@ interface AgentConfig {
   provider: string
   model: string
   api_key: string
+  has_api_key: boolean
   api_base: string | null
   system_prompt: string | null
   temperature: number
@@ -140,7 +141,6 @@ export function AgentConfig() {
         name: newName.trim(),
         provider: config.provider || 'deepseek',
         model: config.model || getDefaultModel(config.provider || 'deepseek'),
-        api_key: config.api_key || '',
         api_base: config.api_base || '',
         system_prompt: config.system_prompt || '',
         temperature: config.temperature ?? 0.7,

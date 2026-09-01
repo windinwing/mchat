@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Stop local dev servers (backend 3001, frontend 5173).
+# Stop local Core dev servers (defaults: backend 3001, frontend 5173).
 
 set -euo pipefail
+
+BACKEND_PORT="${MCHAT_BACKEND_PORT:-3001}"
+FRONTEND_PORT="${MCHAT_FRONTEND_PORT:-5173}"
 
 kill_port() {
   local port=$1
@@ -14,6 +17,6 @@ kill_port() {
   fi
 }
 
-kill_port 3001
-kill_port 5173
+kill_port "$BACKEND_PORT"
+kill_port "$FRONTEND_PORT"
 echo "Dev servers stopped."

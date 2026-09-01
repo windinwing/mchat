@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import shutil
+import stat
 import uuid
 import zipfile
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import select
@@ -51,16 +53,52 @@ def _resolve_model_root(extract_dir: Path) -> Path:
 
 
 def _safe_extract_zip(zip_path: Path, dest: Path) -> None:
-    dest.mkdir(parents=True, exist_ok=True)
+    if dest.is_symlink():
+        raise ValueError("模型解压目录不能是符号链接")
+
     with zipfile.ZipFile(zip_path) as archive:
-        for member in archive.namelist():
-            member_path = Path(member)
-            if member_path.is_absolute() or ".." in member_path.parts:
+        validated: list[tuple[zipfile.ZipInfo, str]] = []
+        total_size = 0
+        for member in archive.infolist():
+            normalized = member.filename.replace("\\", "/")
+            path = PurePosixPath(normalized)
+            if (
+                not normalized
+                or "\x00" in normalized
+                or normalized.startswith("/")
+                or re.match(r"^[A-Za-z]:", normalized)
+                or path.is_absolute()
+                or ".." in path.parts
+            ):
                 raise ValueError("压缩包包含非法路径")
-            target = (dest / member).resolve()
-            if not str(target).startswith(str(dest.resolve())):
-                raise ValueError("压缩包路径越界")
-        archive.extractall(dest)
+
+            unix_mode = (member.external_attr >> 16) & 0xFFFF
+            file_type = stat.S_IFMT(unix_mode)
+            if stat.S_ISLNK(unix_mode):
+                raise ValueError("压缩包不能包含符号链接")
+            if file_type not in (0, stat.S_IFREG, stat.S_IFDIR):
+                raise ValueError("压缩包包含不支持的特殊文件")
+
+            total_size += member.file_size
+            if total_size > settings.embedding_model_max_mb * 1024 * 1024:
+                raise ValueError("模型包解压后超过大小限制")
+            validated.append((member, path.as_posix()))
+
+        dest.mkdir(parents=True, exist_ok=True)
+        extract_root = dest.resolve()
+        for member, normalized in validated:
+            target = (extract_root / normalized).resolve()
+            try:
+                target.relative_to(extract_root)
+            except ValueError as exc:
+                raise ValueError("压缩包路径越界") from exc
+
+            if member.is_dir() or normalized.endswith("/"):
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, target.open("wb") as output:
+                shutil.copyfileobj(source, output)
 
 
 class EmbeddingModelService:

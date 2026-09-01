@@ -1,5 +1,5 @@
 # Production Docker Compose - MySQL + Backend + Frontend
-# Copy ops/docker/.env.example to .env.production and adjust values before deploy.
+# Copy ops/docker/.env.production.example to .env.production and set real secrets before deploy.
 
 services:
   mysql:
@@ -25,12 +25,14 @@ services:
 
   backend:
     build:
-      context: ../../src/backend
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: src/backend/Dockerfile
     container_name: mchat-backend-prod
     env_file:
       - .env.production
     environment:
+      ENVIRONMENT: "production"
+      SHOW_BOOTSTRAP_CREDENTIALS: "false"
       DATABASE_URL: "mysql+aiomysql://${MYSQL_USER:-mchat}:${MYSQL_PASSWORD:-mchat_password_change_me}@mysql:3306/${MYSQL_DATABASE:-mchat}"
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "3001"

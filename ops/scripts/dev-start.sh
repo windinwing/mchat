@@ -47,25 +47,8 @@ if [[ "$WITH_WORKER" == "1" ]]; then
 fi
 
 cd "$ROOT/src/frontend"
-if grep -q 'main-portal.tsx' index.html 2>/dev/null; then
-  cat > index.html <<'HTMLEOF'
-<!DOCTYPE html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MChat</title>
-  </head>
-  <body class="antialiased">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-HTMLEOF
-fi
-
 echo "Starting frontend http://0.0.0.0:${FRONTEND_PORT}"
 [[ -n "$lan_ip" ]] && echo "  Open: http://${lan_ip}:${FRONTEND_PORT}/chat  (admin / admin123, 顶部可切到管理)"
 export VITE_MCHAT_EDITION=core
+export VITE_BACKEND_PROXY_TARGET="${VITE_BACKEND_PROXY_TARGET:-http://127.0.0.1:${BACKEND_PORT}}"
 exec env -u NODE_ENV npm run dev

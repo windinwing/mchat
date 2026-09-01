@@ -53,11 +53,23 @@ if [[ "$SETUP_MYSQL" == "1" ]]; then
   docker_compose -f "${COMPOSE_LITE[@]}" "${COMPOSE_ENV[@]}" up -d mysql
 
   echo "Waiting for MySQL..."
+  mysql_ready=0
   for _ in $(seq 1 30); do
-    docker_compose -f "${COMPOSE_LITE[@]}" "${COMPOSE_ENV[@]}" exec -T mysql \
-      mysqladmin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null && break
+    if docker_compose -f "${COMPOSE_LITE[@]}" "${COMPOSE_ENV[@]}" exec -T mysql \
+      mysqladmin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null; then
+      mysql_ready=1
+      break
+    fi
     sleep 2
   done
+
+  if [[ "$mysql_ready" != "1" ]]; then
+    echo "ERROR: MySQL did not become ready; existing volumes were left untouched." >&2
+    echo "Inspect: docker logs mchat-mysql" >&2
+    echo "If the database can be discarded, reset it explicitly:" >&2
+    echo "  make db-docker-reset-lite && make setup" >&2
+    exit 1
+  fi
 
   mysql_auth_ok() {
     docker_compose -f "${COMPOSE_LITE[@]}" "${COMPOSE_ENV[@]}" exec -T mysql \
@@ -66,11 +78,10 @@ if [[ "$SETUP_MYSQL" == "1" ]]; then
   if mysql_auth_ok; then
     echo "MySQL ready (localhost:${MYSQL_PORT})"
   else
-    echo "MySQL password mismatch; recreating volume..."
-    docker_compose -f "${COMPOSE_LITE[@]}" "${COMPOSE_ENV[@]}" down -v
-    docker_compose -f "${COMPOSE_LITE[@]}" "${COMPOSE_ENV[@]}" up -d mysql
-    for _ in $(seq 1 30); do mysql_auth_ok && break; sleep 2; done
-    mysql_auth_ok && echo "MySQL recreated with ops/docker/.env credentials" || echo "MySQL still unreachable; check ops/docker/.env"
+    echo "ERROR: MySQL rejected the configured application credentials; existing volumes were left untouched." >&2
+    echo "Align MYSQL_USER/MYSQL_PASSWORD with the existing database, or explicitly discard it with:" >&2
+    echo "  make db-docker-reset-lite && make setup" >&2
+    exit 1
   fi
 fi
 

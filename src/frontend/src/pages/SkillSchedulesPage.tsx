@@ -16,7 +16,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import {
   WorkflowEntitlementBanner,
   useWorkflowEntitlements,
-} from '@/components/portal/WorkflowEntitlementBanner'
+} from '@/components/core/WorkflowEntitlementBanner'
 import { automationCheckoutPath, extractAutomationLimit } from '@/lib/automationLimit'
 import {
   CRON_PRESETS,

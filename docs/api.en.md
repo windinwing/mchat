@@ -181,7 +181,7 @@ Initialize a visitor conversation (no auth required).
 | POST | `/agents/ai-configs/models` | Fetch model catalog from provider |
 | POST | `/agents/ai-configs/test` | Test API connection |
 
-**AIConfig object:**
+**AIConfig create/update request:**
 ```json
 {
   "name": "GPT-4 Support",
@@ -195,6 +195,10 @@ Initialize a visitor conversation (no auth required).
   "is_default": true
 }
 ```
+
+API keys are write-only. Create, list, detail, and update responses always
+return an empty `api_key`; use `has_api_key` to detect whether one is configured.
+Omitting or leaving the key blank on update preserves the stored key.
 
 ### Customer Configuration
 

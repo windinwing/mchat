@@ -145,6 +145,8 @@ class SkillDraftService:
         from app.models.ai_config import AIConfig
         from app.services.llm_credentials import (
             ensure_ai_config_api_key,
+            ensure_ai_config_endpoint_allowed,
+            get_platform_default_ai_config,
             is_ai_config_ready,
         )
 
@@ -156,22 +158,14 @@ class SkillDraftService:
         if ai_config is None and conversation.ai_config_id:
             ai_config = await self.db.get(AIConfig, conversation.ai_config_id)
         if ai_config is None:
-            result = await self.db.execute(
-                select(AIConfig)
-                .where(AIConfig.is_default == True)  # noqa: E712
-                .order_by(AIConfig.updated_at.desc())
-                .limit(1)
-            )
-            ai_config = result.scalars().first()
-        if ai_config is None:
-            result = await self.db.execute(select(AIConfig).limit(1))
-            ai_config = result.scalars().first()
+            ai_config = await get_platform_default_ai_config(self.db)
         if ai_config is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="No AI configuration available for skill drafting",
             )
         ai_config = await ensure_ai_config_api_key(self.db, ai_config)
+        await ensure_ai_config_endpoint_allowed(self.db, ai_config)
         if not is_ai_config_ready(ai_config.provider, ai_config.api_key):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

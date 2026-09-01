@@ -13,14 +13,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from fastapi import HTTPException, UploadFile, status
 import httpx
+from fastapi import HTTPException, UploadFile, status
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.models.skill import Skill
+from app.models.user import User
 from app.schemas.skill import (
     SkillCacheEntry,
     SkillCacheRefreshResponse,
@@ -30,44 +30,66 @@ from app.schemas.skill import (
     SkillUpdate,
 )
 from app.skill.loader import SkillLoader
-from app.skill.ops_policy import SCOPE_NOTIFICATION, SCOPE_SERVER_OPS, is_server_ops_skill
+from app.skill.ops_policy import (
+    SCOPE_NOTIFICATION,
+    SCOPE_SERVER_OPS,
+    is_server_ops_skill,
+)
 from app.skill.utils import read_skill_md_body
-from app.skill.zip_utils import extract_skill_zip, read_skill_meta_from_zip
+from app.skill.zip_utils import (
+    SKILL_ZIP_MAX_ARCHIVE_BYTES,
+    inspect_skill_zip,
+    install_skill_zip_atomic,
+    read_skill_meta_from_zip,
+)
+
+_TRUSTED_TENANT_SKILL_HOSTS = frozenset({"clawhub.ai"})
+_TRUSTED_TENANT_SKILL_SUFFIXES = (".clawhub.ai", ".convex.site")
 
 
-_BLOCKED_CIDR = [
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("0.0.0.0/8"),
-    ipaddress.ip_network("224.0.0.0/4"),
-    ipaddress.ip_network("240.0.0.0/4"),
-]
+def _is_trusted_tenant_skill_url(url: str) -> bool:
+    """Limit untrusted accounts to the supported public skill registry."""
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        return bool(
+            parsed.scheme.lower() == "https"
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.port in (None, 443)
+            and (
+                host in _TRUSTED_TENANT_SKILL_HOSTS
+                or host.endswith(_TRUSTED_TENANT_SKILL_SUFFIXES)
+            )
+        )
+    except ValueError:
+        return False
 
 
 def _is_url_safe(url: str) -> bool:
     """Check that a URL doesn't point to internal/private IPs (SSRF protection)."""
+    host: str | None = None
     try:
         parsed = urlparse(url)
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return False
+        if parsed.username is not None or parsed.password is not None:
+            return False
         host = parsed.hostname
         if not host:
             return False
         addr = ipaddress.ip_address(host)
-        for net in _BLOCKED_CIDR:
-            if addr in net:
-                return False
-        return True
+        return addr.is_global
     except ValueError:
+        if not host:
+            return False
         try:
             resolved = socket.getaddrinfo(host, None)
             for _, _, _, _, sockaddr in resolved:
-                addr_str = sockaddr[0]
+                addr_str = sockaddr[0].split("%", 1)[0]
                 addr = ipaddress.ip_address(addr_str)
-                for net in _BLOCKED_CIDR:
-                    if addr in net:
-                        return False
+                if not addr.is_global:
+                    return False
         except (OSError, ValueError):
             return False
         return True
@@ -344,6 +366,7 @@ class SkillService:
 
         try:
             meta = read_skill_meta_from_zip(content)
+            inspection = inspect_skill_zip(content)
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -386,14 +409,19 @@ class SkillService:
                 detail="Invalid skill install path",
             ) from e
 
-        if extract_path.exists():
-            shutil.rmtree(extract_path)
-        extract_path.mkdir(parents=True, exist_ok=True)
+        from app.workspace.disk_usage import dir_size_bytes
 
-        await self._enforce_quota(user_id, additional_bytes=len(content))
+        existing_size = dir_size_bytes(extract_path) if extract_path.exists() else 0
+        await self._enforce_quota(
+            user_id,
+            additional_bytes=max(
+                0,
+                inspection.uncompressed_size - existing_size,
+            ),
+        )
 
         try:
-            extract_skill_zip(content, extract_path)
+            install_skill_zip_atomic(content, extract_path)
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -763,34 +791,105 @@ class SkillService:
             "message": f"Reloaded {count} skills",
         }
 
-    async def _download_archive(self, url: str) -> bytes:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-            resp = await client.get(url)
-            if resp.status_code >= 400:
+    async def _download_archive_candidate(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        *,
+        trusted_tenant_source: bool = False,
+    ) -> tuple[bytes, str, str]:
+        current_url = url
+        for _redirect_count in range(6):
+            if not _is_url_safe(current_url) or (
+                trusted_tenant_source
+                and not _is_trusted_tenant_skill_url(current_url)
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"下载失败: {url} (HTTP {resp.status_code})",
+                    detail="不允许访问该技能下载地址",
                 )
-            content = resp.content
+
+            async with client.stream("GET", current_url) as resp:
+                if resp.status_code in {301, 302, 303, 307, 308}:
+                    location = resp.headers.get("location")
+                    if not location:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="技能下载重定向缺少目标地址",
+                        )
+                    current_url = urljoin(str(resp.url), location)
+                    continue
+                if resp.status_code >= 400:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"下载失败: {current_url} "
+                            f"(HTTP {resp.status_code})"
+                        ),
+                    )
+
+                content_length = resp.headers.get("content-length")
+                if content_length:
+                    try:
+                        if int(content_length) > SKILL_ZIP_MAX_ARCHIVE_BYTES:
+                            raise HTTPException(
+                                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                detail="技能压缩包超过大小限制",
+                            )
+                    except ValueError:
+                        pass
+
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > SKILL_ZIP_MAX_ARCHIVE_BYTES:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail="技能压缩包超过大小限制",
+                        )
+                    chunks.append(chunk)
+
+                return (
+                    b"".join(chunks),
+                    resp.headers.get("content-type", "").lower(),
+                    str(resp.url),
+                )
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="技能下载重定向次数过多",
+        )
+
+    async def _download_archive(
+        self,
+        url: str,
+        *,
+        trusted_tenant_source: bool = False,
+    ) -> bytes:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
+            content, content_type, response_url = (
+                await self._download_archive_candidate(
+                    client,
+                    url,
+                    trusted_tenant_source=trusted_tenant_source,
+                )
+            )
             if content and self._looks_like_zip(content):
                 return content
 
-            content_type = resp.headers.get("content-type", "").lower()
             if "html" in content_type or not self._looks_like_zip(content):
-                archive_url = self._extract_clawhub_download_url(resp.text, str(resp.url))
+                html_text = content.decode("utf-8", errors="replace")
+                archive_url = self._extract_clawhub_download_url(
+                    html_text,
+                    response_url,
+                )
                 if archive_url and archive_url != url:
-                    if not _is_url_safe(archive_url):
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="不允许访问内网地址或保留 IP 地址",
-                        )
-                    archive_resp = await client.get(archive_url)
-                    if archive_resp.status_code >= 400:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"下载失败: {archive_url} (HTTP {archive_resp.status_code})",
-                        )
-                    archive_content = archive_resp.content
+                    archive_content, _, _ = await self._download_archive_candidate(
+                        client,
+                        archive_url,
+                        trusted_tenant_source=trusted_tenant_source,
+                    )
                     if archive_content and self._looks_like_zip(archive_content):
                         return archive_content
 
@@ -818,7 +917,21 @@ class SkillService:
                 detail="不允许访问内网地址或保留 IP 地址",
             )
 
-        content = await self._download_archive(target_url)
+        user = await self.db.get(User, user_id)
+        trusted_tenant_source = user is None or user.role != "admin"
+        if trusted_tenant_source and not _is_trusted_tenant_skill_url(target_url):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "普通账号仅可从 ClawHub 安装远程技能；"
+                    "也可以直接上传技能 ZIP"
+                ),
+            )
+
+        content = await self._download_archive(
+            target_url,
+            trusted_tenant_source=trusted_tenant_source,
+        )
         parsed = urlparse(target_url)
         source_name = Path(parsed.path).name or "skill.zip"
         if not source_name.lower().endswith(".zip"):
@@ -1177,7 +1290,12 @@ class SkillService:
         self, user_id: str, file: UploadFile
     ) -> SkillResponse:
         """Upload a skill zip; overwrites same-name skill directory on disk."""
-        content = await file.read()
+        content = await file.read(SKILL_ZIP_MAX_ARCHIVE_BYTES + 1)
+        if len(content) > SKILL_ZIP_MAX_ARCHIVE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="技能压缩包超过大小限制",
+            )
         return await self._install_skill_archive(
             user_id=user_id,
             content=content,

@@ -587,6 +587,20 @@ def apply_schema_patches(conn: Connection) -> list[str]:
                 )
                 applied.append(f"skill_workflow_templates.{col_name}")
 
+    # ---- ai_configs: thinking toggle ----
+    if "ai_configs" in inspect(conn).get_table_names():
+        cols = _column_names(conn, "ai_configs")
+        if "thinking_enabled" not in cols:
+            col_def = (
+                "BOOLEAN NOT NULL DEFAULT 1"
+                if dialect == "mysql"
+                else "BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+            conn.execute(
+                text(f"ALTER TABLE ai_configs ADD COLUMN thinking_enabled {col_def}")
+            )
+            applied.append("ai_configs.thinking_enabled")
+
     # Ensure any new tables from models exist
     Base.metadata.create_all(conn)
     return applied

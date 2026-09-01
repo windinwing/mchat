@@ -19,6 +19,11 @@ from app.schemas.agent import (
     UploadedAssetResponse,
 )
 from app.services.agent_service import AgentService
+from app.services.llm_credentials import (
+    ensure_ai_config_api_key,
+    ensure_ai_config_endpoint_allowed,
+    ensure_llm_endpoint_allowed,
+)
 from app.services.model_catalog import ConnectionParams, list_models, test_connection
 from app.utils.chat_upload import save_chat_attachment
 
@@ -94,16 +99,35 @@ async def fetch_model_catalog(
 ):
     """List models from provider API (OpenAI-compatible, Anthropic, Google)."""
     api_key = request.api_key
+    provider = request.provider
+    api_base = request.api_base
+    stored_config = None
     if not api_key.strip() and request.config_id:
         service = AgentService(db)
-        cfg = await service.get_ai_config(request.config_id, admin.id)
-        if cfg:
-            api_key = cfg.api_key
+        cfg = await service.get_ai_config_record(request.config_id, admin.id)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail="AI config not found")
+        cfg = await ensure_ai_config_api_key(db, cfg)
+        stored_config = cfg
+        api_key = cfg.api_key
+        # A stored credential may only be sent to its server-side connection
+        # target. Never combine a shared secret with caller-controlled routing.
+        provider = cfg.provider
+        api_base = cfg.api_base
+    if stored_config is not None:
+        await ensure_ai_config_endpoint_allowed(db, stored_config)
+    else:
+        await ensure_llm_endpoint_allowed(
+            db,
+            user_id=admin.id,
+            provider=provider,
+            api_base=api_base,
+        )
     models = await list_models(
         ConnectionParams(
-            provider=request.provider,
+            provider=provider,
             api_key=api_key,
-            api_base=request.api_base,
+            api_base=api_base,
         )
     )
     return ModelCatalogResponse(models=models)
@@ -118,22 +142,37 @@ async def test_ai_connection(
     """Send a minimal chat request to verify API credentials."""
     api_key = request.api_key
     api_base = request.api_base
+    provider = request.provider
+    model = request.model
+    stored_config = None
     if request.config_id:
         service = AgentService(db)
-        cfg = await service.get_ai_config(request.config_id, admin.id)
+        cfg = await service.get_ai_config_record(request.config_id, admin.id)
         if cfg is None:
             raise HTTPException(status_code=404, detail="AI config not found")
         if not api_key.strip():
+            cfg = await ensure_ai_config_api_key(db, cfg)
             api_key = cfg.api_key
-        if api_base is None:
             api_base = cfg.api_base
+            provider = cfg.provider
+            model = cfg.model
+            stored_config = cfg
+    if stored_config is not None:
+        await ensure_ai_config_endpoint_allowed(db, stored_config)
+    else:
+        await ensure_llm_endpoint_allowed(
+            db,
+            user_id=admin.id,
+            provider=provider,
+            api_base=api_base,
+        )
     ok, message = await test_connection(
         ConnectionParams(
-            provider=request.provider,
+            provider=provider,
             api_key=api_key,
             api_base=api_base,
         ),
-        model=request.model,
+        model=model,
     )
     return ConnectionTestResponse(ok=ok, message=message)
 

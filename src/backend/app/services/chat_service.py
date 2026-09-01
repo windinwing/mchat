@@ -1,5 +1,6 @@
 """Chat service - business logic for conversations and messages."""
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -7,6 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.event_bus import event_bus
 from app.models.ai_config import AIConfig
 from app.models.conversation import Conversation
@@ -18,7 +20,11 @@ from app.schemas.chat import (
     MessageResponse,
     ModelCapabilitiesResponse,
 )
-from app.services.llm_credentials import is_ai_config_ready
+from app.services.llm_credentials import (
+    get_accessible_ai_config,
+    get_platform_default_ai_config,
+    platform_default_ai_config_predicate,
+)
 from app.services.model_capabilities import model_capabilities
 from app.utils.outbound_assets import enrich_message_extra_data
 
@@ -59,25 +65,57 @@ class ChatService:
         actor_user_id: str,
         conversation: Conversation,
     ) -> bool:
-        if conversation.scope_type == "group" and conversation.scope_id:
-            return await self._can_access_group(actor_user_id, conversation.scope_id)
-        return conversation.user_id == actor_user_id
+        user = await self.db.get(User, actor_user_id)
+        if user is None:
+            return False
+        return await self.can_access_conversation(conversation, user=user)
+
+    async def can_access_conversation(
+        self,
+        conversation: Conversation,
+        *,
+        user: User | None = None,
+        visitor_token: str | None = None,
+    ) -> bool:
+        """Return whether exactly one authenticated actor owns the conversation.
+
+        Authenticated users may access their personal conversations, groups they
+        belong to, and visitor conversations belonging to one of their channel
+        configurations. Global-scope administrators may access every
+        conversation. Anonymous callers must present the exact visitor token;
+        an ownerless conversation is never public merely because both owner
+        fields are empty.
+        """
+        if user is not None:
+            from app.middleware.auth import has_global_scope
+
+            if await has_global_scope(user, self.db):
+                return True
+            if conversation.scope_type == "group" and conversation.scope_id:
+                return await self._is_group_member(user.id, conversation.scope_id)
+            if conversation.user_id == user.id:
+                return True
+            if conversation.customer_id:
+                from app.models.customer import CustomerConfig
+
+                channel = await self.db.get(CustomerConfig, conversation.customer_id)
+                if channel is not None and channel.user_id == user.id:
+                    return True
+            return False
+
+        token = (visitor_token or "").strip()
+        return bool(
+            token
+            and conversation.user_id is None
+            and conversation.visitor_id
+            and conversation.visitor_id == token
+        )
 
     async def _resolve_platform_ai_config(self) -> AIConfig | None:
-        default_result = await self.db.execute(
-            select(AIConfig)
-            .where(AIConfig.is_default == True)
-            .order_by(AIConfig.updated_at.desc())
-            .limit(1)
+        return await get_platform_default_ai_config(
+            self.db,
+            require_ready=True,
         )
-        cfg = default_result.scalars().first()
-        if cfg is not None and is_ai_config_ready(cfg.provider, cfg.api_key):
-            return cfg
-        all_result = await self.db.execute(select(AIConfig))
-        for candidate in all_result.scalars().all():
-            if is_ai_config_ready(candidate.provider, candidate.api_key):
-                return candidate
-        return None
 
     async def init_visitor_conversation(
         self,
@@ -90,10 +128,29 @@ class ChatService:
         """Initialize a conversation for a visitor (no auth)."""
         import uuid
 
+        resolved_ai_config_id = None
+        if ai_config_id:
+            config_result = await self.db.execute(
+                select(AIConfig.id).where(
+                    AIConfig.id == ai_config_id,
+                    platform_default_ai_config_predicate(),
+                )
+            )
+            resolved_ai_config_id = config_result.scalar_one_or_none()
+            if resolved_ai_config_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="AI config not found",
+                )
+        else:
+            platform_default = await get_platform_default_ai_config(self.db)
+            if platform_default is not None:
+                resolved_ai_config_id = platform_default.id
+
         conversation = Conversation(
             id=str(uuid.uuid4()),
             visitor_id=visitor_id or f"visitor_{uuid.uuid4().hex[:8]}",
-            ai_config_id=ai_config_id,
+            ai_config_id=resolved_ai_config_id,
             title=title or "Visitor Chat",
             contact_info=contact_info,
             client_ip=client_ip,
@@ -113,25 +170,11 @@ class ChatService:
         content: str,
         role: str = "user",
         user: User | None = None,
+        visitor_token: str | None = None,
         extra_data: dict | None = None,
     ) -> MessageResponse:
         """Send a message and trigger AI response processing."""
         normalized_extra_data = enrich_message_extra_data(content, extra_data)
-
-        # Chat-driven skill authoring: slash command or natural-language intent.
-        if role == "user" and user is not None and conversation_id:
-            from app.middleware.auth import has_global_scope
-            from app.services.skill_draft_service import SkillDraftService
-
-            hint = SkillDraftService.parse_create_intent(content)
-            if hint is not None:
-                return await self._handle_skill_create_slash(
-                    conversation_id=conversation_id,
-                    content=content,
-                    hint=hint,
-                    user=user,
-                    is_admin=await has_global_scope(user, self.db),
-                )
 
         # Find or create conversation
         if conversation_id:
@@ -147,6 +190,32 @@ class ChatService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Active conversation not found",
                 )
+            if not await self.can_access_conversation(
+                conversation,
+                user=user,
+                visitor_token=visitor_token,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Conversation access denied",
+                )
+
+            # Chat-driven skill authoring: slash command or natural-language
+            # intent. Authorization must happen before this alternate path.
+            if role == "user" and user is not None:
+                from app.middleware.auth import has_global_scope
+                from app.services.skill_draft_service import SkillDraftService
+
+                hint = SkillDraftService.parse_create_intent(content)
+                if hint is not None:
+                    return await self._handle_skill_create_slash(
+                        conversation_id=conversation_id,
+                        content=content,
+                        hint=hint,
+                        user=user,
+                        is_admin=await has_global_scope(user, self.db),
+                    )
+
             if conversation.customer_id and role == "user":
                 from app.models.customer import CustomerConfig
                 from app.services.subscription_gate import (
@@ -162,6 +231,11 @@ class ChatService:
                 if channel is not None:
                     ensure_channel_subscription_active(channel)
         else:
+            if user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Authentication required to create a conversation",
+                )
             import uuid
             conversation = Conversation(
                 id=str(uuid.uuid4()),
@@ -212,14 +286,53 @@ class ChatService:
 
         # Only user messages should trigger the bot engine.
         if role == "user":
-            await event_bus.publish(
-                "message_created",
-                message=message,
-                conversation=conversation,
-                user=user,
-            )
+            await self._run_bot_pipeline(message, conversation, user)
 
         return MessageResponse.model_validate(message)
+
+    async def _run_bot_pipeline(
+        self,
+        message: Message,
+        conversation: Conversation,
+        user: User | None,
+    ) -> None:
+        """Run the bot pipeline synchronously and surface hard failures.
+
+        Awaiting the publish guarantees every handler (the bot engine) has
+        finished — including its final commit — before this method returns,
+        so callers can rely on the persisted conversation state immediately
+        after the HTTP response.
+        """
+        timeout = max(0.1, float(settings.chat_process_timeout_seconds))
+        try:
+            await asyncio.wait_for(
+                event_bus.publish(
+                    "message_created",
+                    message=message,
+                    conversation=conversation,
+                    user=user,
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI 处理超时（{int(timeout)}s），请检查模型配置或稍后重试",
+            )
+
+        # A bot is expected to answer every user message. If the pipeline ran
+        # but no assistant reply was persisted (engine crash, no subscribers),
+        # surface a 502 instead of a silent success.
+        if not event_bus.has_subscribers("message_created"):
+            return
+        from app.bot.reply_persist import find_assistant_reply_after
+
+        reply = await find_assistant_reply_after(self.db, conversation.id, message)
+        if reply is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="AI 服务未返回有效响应，请检查模型配置或稍后重试",
+            )
 
     async def _handle_skill_create_slash(
         self,
@@ -527,13 +640,7 @@ class ChatService:
             )
             cfg = cfg_result.scalar_one_or_none()
         if cfg is None:
-            default_result = await self.db.execute(
-                select(AIConfig)
-                .where(AIConfig.is_default == True)
-                .order_by(AIConfig.updated_at.desc())
-                .limit(1)
-            )
-            cfg = default_result.scalars().first()
+            cfg = await get_platform_default_ai_config(self.db)
 
         if cfg is None:
             return None
@@ -636,10 +743,19 @@ class ChatService:
         """Create a new conversation for an authenticated user."""
         import uuid
         from app.models.customer import CustomerConfig
-        from app.models.group import GroupMember
 
         resolved_customer_id = customer_id
-        resolved_ai_config_id = ai_config_id
+        resolved_ai_config_id = None
+        if ai_config_id:
+            accessible_config = await get_accessible_ai_config(
+                self.db, ai_config_id, user_id
+            )
+            if accessible_config is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="AI config not found",
+                )
+            resolved_ai_config_id = accessible_config.id
         if customer_id:
             result = await self.db.execute(
                 select(CustomerConfig).where(
@@ -659,7 +775,7 @@ class ChatService:
             )
 
             ensure_channel_subscription_active(channel)
-            resolved_ai_config_id = channel.ai_config_id or ai_config_id
+            resolved_ai_config_id = channel.ai_config_id or resolved_ai_config_id
         if scope_type == "group":
             if not scope_id:
                 raise HTTPException(

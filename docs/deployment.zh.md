@@ -76,12 +76,17 @@ make docker-up
 
 ```bash
 # 1. 创建生产环境变量
-cp ops/docker/.env.example ops/docker/.env.production
+cp ops/docker/.env.production.example ops/docker/.env.production
 # 编辑 .env.production，配置生产环境参数
 
 # 2. 启动生产服务
 docker compose -f ops/docker/docker-compose.prod.yml --env-file ops/docker/.env.production up -d
 ```
+
+> **旧版本升级安全提示：** 早期的频道租赁流程可能把平台或模板的 AI
+> 密钥复制到租户配置中。新版首次以生产模式启动时会清除能够确认的复制项；
+> 由于旧接口可能已经返回过明文，升级后仍必须在对应供应商控制台轮换所有曾
+> 用作平台默认值或模板默认值的 API 密钥。
 
 ### Nginx 反向代理（推荐）
 

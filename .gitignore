@@ -24,6 +24,7 @@ out/
 .env.*
 !.env.example
 !**/.env.example
+!**/.env.production.example
 ops/docker/.env
 ops/deploy/.env.production.generated
 ops/scripts/gamecenter-local.env

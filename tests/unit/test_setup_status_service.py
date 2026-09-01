@@ -122,5 +122,6 @@ async def test_setup_status_admin_assistant_is_user_scoped(db_session):
     await db_session.commit()
 
     status = await get_setup_status(db_session, admin)
-    assert status.ai_ready is True
+    assert status.ai_ready is False
+    assert status.ai_config_count == 0
     assert status.has_assistant is False

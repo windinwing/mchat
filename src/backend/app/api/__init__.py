@@ -24,18 +24,9 @@ from app.api.devbridge import router as devbridge_router
 from app.api.devbridge_settings import router as devbridge_settings_router
 from app.api.publish import router as publish_router
 
-from app.core.config import settings
-
 api_router = APIRouter(prefix="/api")
 
 api_router.include_router(auth_router, prefix="/auth", tags=["Auth"])
-if settings.signup_enabled:
-    try:
-        from cloud.api.auth import router as cloud_auth_router
-
-        api_router.include_router(cloud_auth_router, prefix="/auth", tags=["Auth"])
-    except Exception:
-        pass
 api_router.include_router(chat_router, prefix="/chat", tags=["Chat"])
 api_router.include_router(speech_router, prefix="/speech", tags=["Speech"])
 api_router.include_router(agent_router, prefix="/agents", tags=["Agents"])
@@ -60,14 +51,3 @@ api_router.include_router(publish_router, prefix="/publish", tags=["Publish"])
 api_router.include_router(health_router, prefix="/health", tags=["Health"])
 api_router.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])
 api_router.include_router(wechat_public_router, prefix="/wechat", tags=["WeChat"])
-
-# Cloud admin APIs (templates, orders)
-try:
-    from cloud.api.admin_templates import router as admin_templates_router
-    from cloud.api.admin_orders import router as admin_orders_router
-    from cloud.api.admin_subscriptions import router as admin_subscriptions_router
-    api_router.include_router(admin_templates_router)
-    api_router.include_router(admin_orders_router)
-    api_router.include_router(admin_subscriptions_router)
-except Exception:
-    pass

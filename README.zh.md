@@ -214,10 +214,9 @@ make docker-up-lite
 - `make dev` **必须 Node.js 20+**（Tailwind/Vite 6）
 - MySQL 默认宿主机端口 **3307**，账号 `mchat` / `mchat123`
 - `make dev` 若 5173 被 Docker 前端占用，会自动 stop 前端/后端容器（保留 MySQL）
-- 远程部署：`MCHAT_DEPLOY_REMOTE=user@host make deploy-core`（或 `deploy-cloud`）
+- 远程部署：`MCHAT_DEPLOY_REMOTE=user@host make deploy-core`
 
 ```bash
-make cloud       # Cloud 本地开发（cloud.main + 方案市场 / 门户）
 make test        # 运行测试
 make lint        # 代码检查
 
@@ -229,9 +228,7 @@ source scripts/env.sh && mchat run
 | 命令 | 后端 | 管理后台「模板」 | 门户 / 方案市场 |
 |------|------|------------------|-----------------|
 | `make dev` | `app.main:app` | 无 | 无 |
-| `make cloud` | `cloud.main:app` | 有 | 有 |
 | `make deploy-core` | Core（需 `MCHAT_DEPLOY_REMOTE`） | 无 | 无 |
-| `make deploy-cloud` | Cloud（需 `MCHAT_DEPLOY_REMOTE`） | 有 | 有 |
 
 # 后端: http://localhost:3001  (/docs 为 Swagger)
 # 前端: http://localhost:5173

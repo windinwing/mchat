@@ -1,3 +1,4 @@
+import stat
 import zipfile
 from pathlib import Path
 
@@ -35,3 +36,51 @@ def test_safe_zip_layout(tmp_path):
 
     _safe_extract_zip(zpath, extract)
     assert (extract / "model" / "config.json").is_file()
+
+
+@pytest.mark.parametrize(
+    "member_name",
+    ["../escaped", "model/../../escaped", "model\\..\\escaped", "/tmp/escaped", "C:/escaped"],
+)
+def test_safe_zip_rejects_unsafe_paths(tmp_path, member_name):
+    zpath = tmp_path / "unsafe.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("model/config.json", "{}")
+        zf.writestr(member_name, "escaped")
+
+    from app.services.embedding_model_service import _safe_extract_zip
+
+    with pytest.raises(ValueError, match="路径"):
+        _safe_extract_zip(zpath, tmp_path / "out")
+    assert not (tmp_path / "escaped").exists()
+
+
+def test_safe_zip_rejects_symbolic_link(tmp_path):
+    zpath = tmp_path / "symlink.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("model/config.json", "{}")
+        link = zipfile.ZipInfo("model/link")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        zf.writestr(link, "../../escaped")
+
+    from app.services.embedding_model_service import _safe_extract_zip
+
+    with pytest.raises(ValueError, match="符号链接"):
+        _safe_extract_zip(zpath, tmp_path / "out")
+
+
+def test_safe_zip_rejects_symbolic_link_destination(tmp_path):
+    zpath = tmp_path / "model.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("model/config.json", "{}")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    destination = tmp_path / "out"
+    destination.symlink_to(outside, target_is_directory=True)
+
+    from app.services.embedding_model_service import _safe_extract_zip
+
+    with pytest.raises(ValueError, match="解压目录"):
+        _safe_extract_zip(zpath, destination)
+    assert not (outside / "model" / "config.json").exists()

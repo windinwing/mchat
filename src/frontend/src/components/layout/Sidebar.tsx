@@ -30,6 +30,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth'
+import { isCloudEdition } from '@/lib/edition'
 
 interface NavItem {
   path: string
@@ -130,7 +131,13 @@ export function Sidebar({ onClose, onCollapseChange }: SidebarProps) {
   const { t } = useTranslation()
   const user = useAuthStore((s) => s.user)
   const [collapsed, setCollapsed] = useState(false)
-  const navGroups = user?.role === 'admin' ? adminNavGroups : agentNavGroups
+  const navGroups = useMemo(
+    () =>
+      user?.role === 'admin'
+        ? adminNavGroups.filter((group) => isCloudEdition || group.titleKey !== 'navGroup.business')
+        : agentNavGroups,
+    [user?.role],
+  )
 
   // Collapse state per group (persisted)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {

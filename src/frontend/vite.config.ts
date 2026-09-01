@@ -1,17 +1,41 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-const edition = process.env.VITE_MCHAT_EDITION || 'core'
-const isCloud = edition === 'cloud'
+const backendProxyTarget = process.env.VITE_BACKEND_PROXY_TARGET || 'http://localhost:3001'
+const backendWebSocketTarget = backendProxyTarget.replace(/^http/, 'ws')
+
+const cloudOnlyModules = [
+  '/src/main-portal.tsx',
+  '/src/AppPortal.tsx',
+  '/src/routes-portal.tsx',
+  '/src/pages/portal/',
+  '/src/pages/admin/TemplateManagerPage.tsx',
+  '/src/pages/admin/AdminOrdersPage.tsx',
+  '/src/pages/admin/AdminSubscriptionsPage.tsx',
+  '/src/lib/portalApi.ts',
+  '/src/components/portal/',
+]
+
+function coreBoundaryPlugin(): Plugin {
+  return {
+    name: 'mchat-core-boundary',
+    generateBundle() {
+      const leaked = [...this.getModuleIds()]
+        .map((id) => id.split('?', 1)[0].replaceAll('\\', '/'))
+        .filter((id) => cloudOnlyModules.some((segment) => id.includes(segment)))
+      if (leaked.length > 0) {
+        this.error(`Core build imported Cloud-only modules:\n${leaked.sort().join('\n')}`)
+      }
+    },
+  }
+}
 
 export default defineConfig({
-  plugins: [tailwindcss(), react()],
+  plugins: [coreBoundaryPlugin(), tailwindcss(), react()],
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
+    alias: [{ find: '@', replacement: path.resolve(__dirname, './src') }],
   },
   server: {
     host: process.env.VITE_DEV_HOST || '0.0.0.0',
@@ -19,19 +43,19 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: backendProxyTarget,
         changeOrigin: true,
       },
       '/uploads': {
-        target: 'http://localhost:3001',
+        target: backendProxyTarget,
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:3001',
+        target: backendWebSocketTarget,
         ws: true,
       },
       '/go': {
-        target: 'http://localhost:3001',
+        target: backendProxyTarget,
         changeOrigin: true,
       },
     },
@@ -43,7 +67,6 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         widget: path.resolve(__dirname, 'widget.html'),
         'wx-mini': path.resolve(__dirname, 'wx-mini.html'),
-        ...(isCloud ? { portal: path.resolve(__dirname, 'portal.html') } : {}),
       },
       output: {
         manualChunks: {

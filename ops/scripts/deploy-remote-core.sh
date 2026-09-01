@@ -10,27 +10,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 echo "==> Build frontend (Core edition)"
 cd "$PROJECT_DIR/src/frontend"
-INDEX_BAK="$(mktemp)"
-cp index.html "$INDEX_BAK"
-trap 'mv -f "$INDEX_BAK" index.html 2>/dev/null || true' EXIT
-cat > index.html <<'HTMLEOF'
-<!DOCTYPE html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MChat</title>
-  </head>
-  <body class="antialiased">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-HTMLEOF
-VITE_MCHAT_EDITION=core VITE_MCHAT_SIGNUP_ENABLED=true npm run build:core
-mv -f "$INDEX_BAK" index.html
-trap - EXIT
+VITE_MCHAT_SIGNUP_ENABLED=true npm run build:core
 
 echo "==> Rsync to ${REMOTE}:${REMOTE_DIR}"
 rsync -avz --delete \
@@ -58,7 +38,9 @@ if ssh "$REMOTE" "test -f ${REMOTE_DIR}/.env"; then
 else
   echo "==> Create initial .env on server"
   JWT_SECRET=$(openssl rand -hex 32)
+  ADMIN_PASSWORD=$(openssl rand -hex 18)
   ENV_FILE="$PROJECT_DIR/ops/deploy/.env.production.generated"
+  umask 077
   cat > "$ENV_FILE" <<'EOF'
 DATABASE_URL=mysql+aiomysql://mchat:CHANGE_ME@127.0.0.1:3306/mchat
 
@@ -67,7 +49,10 @@ JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=10080
 
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
+ADMIN_PASSWORD=__ADMIN_PASSWORD__
+ENVIRONMENT=production
+SHOW_BOOTSTRAP_CREDENTIALS=false
+MCHAT_SIGNUP_ENABLED=true
 
 SERVER_HOST=0.0.0.0
 SERVER_PORT=3001
@@ -83,9 +68,33 @@ MAX_UPLOAD_SIZE_MB=50
 EMBEDDING_PROVIDER=openai
 EMBEDDING_MODEL=text-embedding-3-small
 EOF
-  sed -i '' "s/__JWT_SECRET__/${JWT_SECRET}/g" "$ENV_FILE"
+  sed -i.bak \
+    -e "s/__JWT_SECRET__/${JWT_SECRET}/g" \
+    -e "s/__ADMIN_PASSWORD__/${ADMIN_PASSWORD}/g" \
+    "$ENV_FILE"
+  rm -f "$ENV_FILE.bak"
   rsync -avz "$ENV_FILE" "${REMOTE}:${REMOTE_DIR}/.env"
 fi
+
+echo "==> Enforce production security mode in server .env"
+ssh "$REMOTE" "MCHAT_ENV_FILE='${REMOTE_DIR}/.env' bash -s" <<'REMOTE_ENV'
+set -euo pipefail
+
+upsert_env() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" "$MCHAT_ENV_FILE"; then
+    sed -i "s#^${key}=.*#${key}=${value}#" "$MCHAT_ENV_FILE"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$MCHAT_ENV_FILE"
+  fi
+}
+
+upsert_env ENVIRONMENT production
+upsert_env SHOW_BOOTSTRAP_CREDENTIALS false
+upsert_env MCHAT_SIGNUP_ENABLED true
+chmod 600 "$MCHAT_ENV_FILE"
+REMOTE_ENV
 
 echo "==> Ensure GameCenter devbridge env hints on server .env"
 ssh "$REMOTE" "ENV_FILE='${REMOTE_DIR}/.env'; if [ -f \"\$ENV_FILE\" ] && ! grep -q 'GAMECENTER_BRIDGE_ENABLED' \"\$ENV_FILE\"; then cat >> \"\$ENV_FILE\" <<GCENV

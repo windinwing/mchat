@@ -40,7 +40,7 @@ fi
 
 echo ""
 echo "Next:"
-echo "  1. make dev          # Core admin (or: make cloud for portal)"
+echo "  1. make dev          # Core admin"
 echo "  2. Open http://localhost:5173/admin  (admin / admin123)"
 echo "  3. /admin/workspace  → grant container + set sidecar limits for test user"
 echo "  4. /admin/channels   → Pro plan + workspace_mode=container for user's channel"

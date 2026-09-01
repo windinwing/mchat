@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/auth'
 import { Spinner } from '@/components/ui/Spinner'
+import { isCloudEdition } from '@/lib/edition'
 
 export function Auth9235CallbackPage() {
   const { t } = useTranslation()
@@ -23,7 +24,12 @@ export function Auth9235CallbackPage() {
       return
     }
     complete9235Sso(xtk)
-      .then(() => navigate('/portal/dashboard', { replace: true }))
+      .then(() => {
+        const user = useAuthStore.getState().user
+        const destination =
+          isCloudEdition && user?.role === 'user' ? '/portal/dashboard' : '/chat'
+        navigate(destination, { replace: true })
+      })
       .catch(() => {})
   }, [params, complete9235Sso, navigate, clearError, t])
 

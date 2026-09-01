@@ -5,7 +5,6 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.middleware.auth import has_global_scope
 from app.models.ai_config import AIConfig
 from app.models.customer import CustomerConfig
 from app.models.group import GroupMember
@@ -14,6 +13,7 @@ from app.schemas.setup import SetupStatusResponse
 from app.services.llm_credentials import (
     is_ai_config_ready,
     is_usable_api_key,
+    platform_default_ai_config_predicate,
     provider_env_api_key,
 )
 
@@ -74,18 +74,13 @@ async def get_setup_status(db: AsyncSession, user: User) -> SetupStatusResponse:
             env_key_providers=env_key_providers,
         )
 
-    # Admins and agents may use any system-wide default AI config (mirrors
-    # runtime chat resolution, which falls back to a global is_default config).
+    # Admins and agents may use administrator-owned platform defaults. A
+    # regular user's personal default must not become system-wide.
     # A newly created admin/agent account therefore does not need to configure
     # its own provider before chatting.
-    is_admin = await has_global_scope(user, db)
-    if is_admin:
-        ai_query = select(AIConfig)
-    else:
-        # Agents: their own configs plus any shared system default.
-        ai_query = select(AIConfig).where(
-            (AIConfig.user_id == user.id) | (AIConfig.is_default == True)
-        )
+    ai_query = select(AIConfig).where(
+        (AIConfig.user_id == user.id) | platform_default_ai_config_predicate()
+    )
 
     ai_result = await db.execute(ai_query)
     ai_configs = list(ai_result.scalars().all())

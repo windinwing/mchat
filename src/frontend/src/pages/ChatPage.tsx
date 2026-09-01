@@ -6,11 +6,11 @@ import { LanguageSwitcher } from '@/components/common/LanguageSwitcher'
 import { AppModeSwitch } from '@/components/common/AppModeSwitch'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { AiRequestDebugPanel } from '@/components/chat/AiRequestDebugPanel'
-import { AssistantChatSidebar } from '@/components/portal/AssistantChatSidebar'
+import { AssistantChatSidebar } from '@/components/chat/AssistantChatSidebar'
 import { useChat } from '@/hooks/useChat'
 import { ChatSendOptions } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
-import { portalApi } from '@/lib/portalApi'
+import { coreChatApi } from '@/core/coreApiAdapter'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { ToastContainer } from '@/components/ui/Toast'
@@ -174,7 +174,7 @@ export function ChatPage() {
       } else if (channelId) {
         conv =
           isPortalUser && isCloudEdition
-            ? await portalApi.resumeChannelChat(channelId, {
+            ? await coreChatApi.resumeChannelChat(channelId, {
                 title: t('portal.newChatTitle', 'New chat'),
                 forceNew: true,
               })

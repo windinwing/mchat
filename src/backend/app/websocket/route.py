@@ -1,17 +1,22 @@
 """WebSocket route for real-time chat."""
 
 import json
-from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
-from app.middleware.auth import has_global_scope
 from app.models.conversation import Conversation
 from app.models.user import User
+from app.services.chat_service import ChatService
 from app.websocket import ws_manager
 
 router = APIRouter()
@@ -54,32 +59,16 @@ async def _check_subscribe_permission(
         if conv is None:
             return False, "NOT_FOUND"
 
-        if user is not None:
-            if await has_global_scope(user, db):
-                return True, ""
-            if conv.user_id == user.id:
-                return True, ""
-            if conv.scope_type == "group" and conv.scope_id:
-                from app.models.group import GroupMember
-
-                member_result = await db.execute(
-                    select(GroupMember).where(
-                        GroupMember.group_id == conv.scope_id,
-                        GroupMember.user_id == user.id,
-                    )
-                )
-                if member_result.scalar_one_or_none() is not None:
-                    return True, ""
-            return False, "ACCESS_DENIED"
-
-        if conv.visitor_id and visitor_token and conv.visitor_id == visitor_token:
+        service = ChatService(db)
+        if await service.can_access_conversation(
+            conv,
+            user=user,
+            visitor_token=visitor_token,
+        ):
             return True, ""
-        if conv.visitor_id and not visitor_token:
+        if user is None and conv.visitor_id and not visitor_token:
             return False, "MISSING_VISITOR_TOKEN"
-        if conv.visitor_id and visitor_token and conv.visitor_id != visitor_token:
-            return False, "ACCESS_DENIED"
-
-        return True, ""
+        return False, "ACCESS_DENIED"
 
 
 @router.websocket("/ws")
@@ -107,6 +96,7 @@ async def websocket_endpoint(
 
     await websocket.accept()
     current_conversation: str | None = None
+    current_visitor_token: str | None = None
 
     try:
         while True:
@@ -124,7 +114,7 @@ async def websocket_endpoint(
             elif msg_type == "subscribe":
                 conv_id = data.get("conversation_id") or data.get("conversationId")
                 if conv_id:
-                    visitor_token = data.get("visitor_token")
+                    visitor_token = data.get("visitor_token") or data.get("visitorToken")
                     allowed, error_code = await _check_subscribe_permission(
                         conv_id, user, visitor_token
                     )
@@ -144,27 +134,45 @@ async def websocket_endpoint(
                     ws_manager._conversation_connections[conv_id].append(websocket)
                     ws_manager._ws_conversation[websocket] = conv_id
                     current_conversation = conv_id
+                    current_visitor_token = visitor_token
                     logger.debug(f"WebSocket subscribed to conversation {conv_id}")
                     await websocket.send_json({"type": "subscribed", "conversation_id": conv_id})
 
             elif msg_type == "unsubscribe":
                 ws_manager.disconnect(websocket)
                 current_conversation = None
+                current_visitor_token = None
 
             elif msg_type == "chat:message":
                 conv_id = data.get("conversationId") or data.get("conversation_id")
                 content = data.get("content", "")
                 if conv_id and content:
                     try:
-                        from app.services.chat_service import ChatService
                         async with async_session_factory() as db:
                             chat_service = ChatService(db)
+                            visitor_token = data.get("visitor_token") or data.get(
+                                "visitorToken"
+                            )
+                            if not visitor_token and conv_id == current_conversation:
+                                visitor_token = current_visitor_token
                             await chat_service.send_message(
                                 conversation_id=conv_id,
                                 content=content,
                                 role="user",
                                 user=user,
+                                visitor_token=visitor_token,
                             )
+                    except HTTPException as e:
+                        detail = e.detail if isinstance(e.detail, str) else str(e.detail)
+                        error_code = {
+                            status.HTTP_403_FORBIDDEN: "ACCESS_DENIED",
+                            status.HTTP_404_NOT_FOUND: "NOT_FOUND",
+                        }.get(e.status_code, "SEND_FAILED")
+                        await websocket.send_json({
+                            "type": "error",
+                            "code": error_code,
+                            "message": detail,
+                        })
                     except Exception as e:
                         logger.error(f"WebSocket chat:message error: {e}")
                         await websocket.send_json({

@@ -15,6 +15,12 @@ from app.schemas.agent import (
     CustomerConfigResponse,
     AIConfigResponse,
 )
+from app.services.llm_credentials import (
+    ensure_llm_endpoint_allowed,
+    get_accessible_ai_config,
+    is_platform_default_ai_config,
+    platform_default_ai_config_predicate,
+)
 
 
 class AgentService:
@@ -22,6 +28,26 @@ class AgentService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    @staticmethod
+    def _ai_config_response(
+        config: AIConfig, *, shared: bool = False
+    ) -> AIConfigResponse:
+        """Build a public response without copying the write-only API key."""
+        response = AIConfigResponse.model_validate(config)
+        return response.model_copy(
+            update={
+                "api_key": "",
+                "has_api_key": bool((config.api_key or "").strip()),
+                "shared": shared,
+            }
+        )
+
+    async def get_ai_config_record(
+        self, config_id: str, user_id: str
+    ) -> AIConfig | None:
+        """Get an owned or platform-default config for internal credential use."""
+        return await get_accessible_ai_config(self.db, config_id, user_id)
 
     async def _owner_container_policy(self, user_id: str) -> bool | None:
         user = await self.db.get(User, user_id)
@@ -68,6 +94,12 @@ class AgentService:
         self, user_id: str, data: AIConfigCreate
     ) -> AIConfigResponse:
         """Create a new AI configuration."""
+        await ensure_llm_endpoint_allowed(
+            self.db,
+            user_id=user_id,
+            provider=data.provider,
+            api_base=data.api_base,
+        )
         # If setting as default, unset other defaults
         if data.is_default:
             await self._unset_default_ai_configs(user_id)
@@ -87,18 +119,16 @@ class AgentService:
         self.db.add(config)
         await self.db.flush()
         await self.db.refresh(config)
-        return AIConfigResponse.model_validate(config)
+        return self._ai_config_response(config)
 
     async def list_ai_configs(
         self, user_id: str
     ) -> list[AIConfigResponse]:
         """List a user's own AI configs plus shared system defaults.
 
-        A config owned by another account but marked ``is_default`` is treated
-        as a system-wide default and surfaced to every admin/agent as a shared,
-        read-only entry. This matches runtime chat resolution (which already
-        falls back to any ``is_default`` config globally) so the workbench and
-        setup guide reflect what the account can actually use.
+        A default owned by an administrator is treated as a system-wide
+        default and surfaced to every admin/agent as a shared, read-only entry.
+        Other users' defaults remain private to their owners.
         """
         result = await self.db.execute(
             select(AIConfig)
@@ -112,7 +142,7 @@ class AgentService:
         shared_result = await self.db.execute(
             select(AIConfig)
             .where(
-                AIConfig.is_default == True,
+                platform_default_ai_config_predicate(),
                 AIConfig.user_id != user_id,
             )
             .order_by(AIConfig.updated_at.desc())
@@ -122,12 +152,10 @@ class AgentService:
         ]
 
         responses: list[AIConfigResponse] = [
-            AIConfigResponse.model_validate(c) for c in own_configs
+            self._ai_config_response(c) for c in own_configs
         ]
         for c in shared_configs:
-            resp = AIConfigResponse.model_validate(c)
-            resp.shared = True
-            responses.append(resp)
+            responses.append(self._ai_config_response(c, shared=True))
         return responses
 
     async def get_ai_config(
@@ -135,22 +163,17 @@ class AgentService:
     ) -> AIConfigResponse | None:
         """Get a specific AI config.
 
-        Reads are allowed for the owner, or for a shared system default
-        (``is_default`` config owned by another account). The latter is returned
-        with ``shared=True`` so the workbench can render it read-only.
+        Reads are allowed for the owner, or for an administrator-owned shared
+        system default. The latter is returned with ``shared=True`` so the
+        workbench can render it read-only.
         """
-        result = await self.db.execute(
-            select(AIConfig).where(AIConfig.id == config_id)
-        )
-        config = result.scalar_one_or_none()
+        config = await self.get_ai_config_record(config_id, user_id)
         if config is None:
             return None
-        is_shared = config.user_id != user_id and bool(config.is_default)
-        if config.user_id != user_id and not is_shared:
-            return None
-        resp = AIConfigResponse.model_validate(config)
-        resp.shared = is_shared
-        return resp
+        return self._ai_config_response(
+            config,
+            shared=config.user_id != user_id,
+        )
 
     async def update_ai_config(
         self, config_id: str, user_id: str, data: AIConfigUpdate, is_admin: bool = False
@@ -168,17 +191,49 @@ class AgentService:
         config = result.scalar_one_or_none()
         if config is None:
             return None
-        is_shared_default = (
-            config.user_id != user_id and bool(config.is_default)
+        is_shared_default = config.user_id != user_id and (
+            await is_platform_default_ai_config(self.db, config)
         )
         if config.user_id != user_id and not (is_admin and is_shared_default):
             return None
 
         update_data = data.model_dump(exclude_unset=True)
 
-        # Keep existing key when the client omits or sends an empty api_key
-        if "api_key" in update_data and not (update_data.get("api_key") or "").strip():
-            update_data.pop("api_key")
+        submitted_key = (update_data.get("api_key") or "").strip()
+        has_fresh_key = bool(
+            submitted_key and not set(submitted_key) <= {"*", "•"}
+        )
+        next_provider = update_data.get("provider", config.provider)
+        next_api_base = update_data.get("api_base", config.api_base)
+        routing_changed = (
+            (next_provider or "").strip().lower()
+            != (config.provider or "").strip().lower()
+            or (next_api_base or "").strip().rstrip("/").lower()
+            != (config.api_base or "").strip().rstrip("/").lower()
+        )
+        if routing_changed and not has_fresh_key:
+            from fastapi import HTTPException, status
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "A new API key is required when changing the AI provider "
+                    "or API base"
+                ),
+            )
+
+        await ensure_llm_endpoint_allowed(
+            self.db,
+            user_id=config.user_id,
+            provider=next_provider,
+            api_base=next_api_base,
+        )
+
+        # Keep the existing key when a client omits it, leaves it blank, or
+        # echoes a legacy masked placeholder.
+        if "api_key" in update_data:
+            if not submitted_key or set(submitted_key) <= {"*", "•"}:
+                update_data.pop("api_key")
 
         # If setting as default, unset other defaults for this config's owner.
         # For a shared default edited by an admin, that owner is the config's
@@ -194,7 +249,10 @@ class AgentService:
 
         await self.db.flush()
         await self.db.refresh(config)
-        return AIConfigResponse.model_validate(config)
+        return self._ai_config_response(
+            config,
+            shared=config.user_id != user_id,
+        )
 
     async def delete_ai_config(
         self, config_id: str, user_id: str, is_admin: bool = False
@@ -210,8 +268,8 @@ class AgentService:
         config = result.scalar_one_or_none()
         if config is None:
             return False
-        is_shared_default = (
-            config.user_id != user_id and bool(config.is_default)
+        is_shared_default = config.user_id != user_id and (
+            await is_platform_default_ai_config(self.db, config)
         )
         if config.user_id != user_id and not (is_admin and is_shared_default):
             return False
@@ -242,6 +300,15 @@ class AgentService:
         skill_ids = await filter_tenant_skill_ids(
             self.db, user_id, data.skill_ids
         )
+        if data.ai_config_id and await get_accessible_ai_config(
+            self.db, data.ai_config_id, user_id
+        ) is None:
+            from fastapi import HTTPException, status
+
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="AI config not found",
+            )
         await self._assert_workspace_mode_allowed(user_id, data.workspace_mode)
         config = CustomerConfig(
             name=data.name,
@@ -320,6 +387,15 @@ class AgentService:
         from app.services.skill_filter import filter_tenant_skill_ids
 
         update_data = data.model_dump(exclude_unset=True)
+        if update_data.get("ai_config_id") and await get_accessible_ai_config(
+            self.db, update_data["ai_config_id"], user_id
+        ) is None:
+            from fastapi import HTTPException, status
+
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="AI config not found",
+            )
         next_mode = update_data.get("workspace_mode", config.workspace_mode)
         await self._assert_workspace_mode_allowed(
             user_id,

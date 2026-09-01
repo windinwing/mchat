@@ -89,7 +89,7 @@ async def upload_chat_attachment(
 @router.post("/send", response_model=MessageResponse)
 async def send_message(
     request: MessageCreate,
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Send a message and get AI response."""

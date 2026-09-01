@@ -270,7 +270,10 @@ class AnthropicProvider(LLMProvider):
     def __init__(self, ai_config: AIConfig) -> None:
         from anthropic import AsyncAnthropic
 
-        client_kwargs = {"api_key": ai_config.api_key}
+        base = resolve_llm_base_url(ai_config.provider, ai_config.api_base)
+        if not base:
+            raise ValueError("An explicit API base is required for Anthropic")
+        client_kwargs = {"api_key": ai_config.api_key, "base_url": base}
         self.client = AsyncAnthropic(**client_kwargs)
         self.model = ai_config.model
 

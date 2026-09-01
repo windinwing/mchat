@@ -4,14 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import io
 import re
-import shutil
 import sys
-import tempfile
 import urllib.error
 import urllib.request
-import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -264,51 +260,41 @@ def _safe_skill_folder_name(raw: str) -> str:
 
 
 def _download_bytes(url: str) -> bytes:
+    from app.skill.zip_utils import SKILL_ZIP_MAX_ARCHIVE_BYTES
+
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "mchat-cli/1.0"},
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
-        return resp.read()
+        content_length = resp.headers.get("Content-Length")
+        if content_length:
+            try:
+                if int(content_length) > SKILL_ZIP_MAX_ARCHIVE_BYTES:
+                    raise RuntimeError("skill zip exceeds compressed size limit")
+            except ValueError:
+                pass
+
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = resp.read(64 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > SKILL_ZIP_MAX_ARCHIVE_BYTES:
+                raise RuntimeError("skill zip exceeds compressed size limit")
+            chunks.append(chunk)
+        return b"".join(chunks)
 
 
 def _extract_skill_zip_to(content: bytes, target_dir: Path) -> None:
+    from app.skill.zip_utils import install_skill_zip_atomic
+
     try:
-        zf = zipfile.ZipFile(io.BytesIO(content))
-    except zipfile.BadZipFile as e:
-        raise RuntimeError("downloaded file is not a valid zip") from e
-
-    names = [n for n in zf.namelist() if n and not n.endswith("/")]
-    skill_md = next((n for n in names if Path(n).name.lower() == "skill.md"), None)
-    if not skill_md:
-        raise RuntimeError("zip does not contain SKILL.md")
-
-    prefix = ""
-    parts = skill_md.replace("\\", "/").split("/")
-    if len(parts) > 1:
-        prefix = "/".join(parts[:-1]) + "/"
-
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.TemporaryDirectory(prefix="mchat-skill-") as tmp:
-        tmp_dir = Path(tmp)
-        zf.extractall(tmp_dir)
-        src_root = tmp_dir / prefix if prefix else tmp_dir
-        if not src_root.exists():
-            src_root = tmp_dir
-        for child in src_root.iterdir():
-            dest = target_dir / child.name
-            if dest.exists():
-                if dest.is_dir():
-                    shutil.rmtree(dest)
-                else:
-                    dest.unlink()
-            if child.is_dir():
-                shutil.copytree(child, dest)
-            else:
-                shutil.copy2(child, dest)
+        install_skill_zip_atomic(content, target_dir)
+    except ValueError as e:
+        raise RuntimeError(str(e)) from e
 
 
 async def _install_skill_from_source(source: str, folder_hint: str | None = None) -> None:
@@ -330,7 +316,7 @@ async def _install_skill_from_source(source: str, folder_hint: str | None = None
             content = _download_bytes(url)
             if content:
                 break
-        except (urllib.error.URLError, urllib.error.HTTPError) as e:
+        except (urllib.error.URLError, urllib.error.HTTPError, RuntimeError) as e:
             last_error = e
             continue
 
@@ -338,7 +324,6 @@ async def _install_skill_from_source(source: str, folder_hint: str | None = None
         raise RuntimeError(f"failed to download skill: {last_error}")
 
     target = Path("skills") / slug
-    target.mkdir(parents=True, exist_ok=True)
     _extract_skill_zip_to(content, target)
 
 

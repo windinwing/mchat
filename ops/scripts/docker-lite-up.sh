@@ -28,20 +28,31 @@ echo "Synced src/backend/.env"
 echo "Starting MySQL..."
 docker_compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d mysql
 
+mysql_ready=0
 for _ in $(seq 1 30); do
-  docker_compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T mysql \
-    mysqladmin ping -h localhost -u root -p"$MYSQL_ROOT_PASSWORD" --silent 2>/dev/null && break
+  if docker_compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T mysql \
+    mysqladmin ping -h localhost -u root -p"$MYSQL_ROOT_PASSWORD" --silent 2>/dev/null; then
+    mysql_ready=1
+    break
+  fi
   sleep 2
 done
 
-if mysql_auth_ok; then
-  echo "MySQL credentials OK"
-else
-  echo "MySQL password mismatch; recreating volume..."
-  docker_compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down -v
-  docker_compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d mysql
-  for _ in $(seq 1 30); do mysql_auth_ok && break; sleep 2; done
+if [[ "$mysql_ready" != "1" ]]; then
+  echo "ERROR: MySQL did not become ready; existing volumes were left untouched." >&2
+  echo "Inspect: docker logs mchat-mysql" >&2
+  echo "If the database can be discarded, reset it explicitly:" >&2
+  echo "  make db-docker-reset-lite && make docker-up-lite" >&2
+  exit 1
 fi
+
+if ! mysql_auth_ok; then
+  echo "ERROR: MySQL rejected the configured application credentials; existing volumes were left untouched." >&2
+  echo "Align MYSQL_USER/MYSQL_PASSWORD with the existing database, or explicitly discard it with:" >&2
+  echo "  make db-docker-reset-lite && make docker-up-lite" >&2
+  exit 1
+fi
+echo "MySQL credentials OK"
 
 echo "Building and starting backend + frontend..."
 docker_compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build

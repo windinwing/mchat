@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import api from '@/lib/api'
+import api, { ApiError } from '@/lib/api'
 import { normalizeMessageMedia } from '@/lib/mediaUrl'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
@@ -54,7 +54,7 @@ function scheduleStreamSafetyTimeout(
       conversation_id: conversationId,
       content: s.streamingContent,
     })
-  }, 45000)
+  }, 150000)
 }
 
 function dedupeMessages(messages: Message[]): Message[] {
@@ -377,11 +377,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } catch (apiErr: any) {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
-      set((state) => ({
-        error: apiErr.message,
-        isStreaming: false,
-        messages: state.messages.filter((m) => m.id !== tempId),
-      }))
+      const isServerSide = apiErr instanceof ApiError && apiErr.status >= 500
+      if (isServerSide) {
+        // 502/504: the user message was persisted server-side but the AI
+        // pipeline failed or timed out. Keep the user message, stop the
+        // fake stream, and resync to show the persisted assistant error
+        // (if any).
+        set({ error: apiErr.message, isStreaming: false })
+        void get().syncMessagesFromServer(conversationId)
+      } else {
+        // Client-side / 4xx failure: the message was not saved — roll back
+        // the optimistic temp message.
+        set((state) => ({
+          error: apiErr.message,
+          isStreaming: false,
+          messages: state.messages.filter((m) => m.id !== tempId),
+        }))
+      }
     }
   },
 

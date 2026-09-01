@@ -27,6 +27,10 @@ class EventBus:
                 h for h in self._subscribers[event] if h is not handler
             ]
 
+    def has_subscribers(self, event: str) -> bool:
+        """Return True if at least one handler is subscribed to the event."""
+        return bool(self._subscribers.get(event))
+
     async def publish(self, event: str, **data: Any) -> None:
         """Publish an event, calling all subscribed handlers concurrently."""
         handlers = self._subscribers.get(event, [])

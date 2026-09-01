@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { toast } from '@/components/ui/Toast'
-import { WorkflowEntitlementBanner } from '@/components/portal/WorkflowEntitlementBanner'
+import { WorkflowEntitlementBanner } from '@/components/core/WorkflowEntitlementBanner'
 import { cn } from '@/lib/utils'
 
 interface WorkflowTemplateItem {
@@ -102,7 +102,7 @@ export function WorkflowCenterPage() {
     })
   }, [items, search, category])
 
-  const useTemplate = async (tpl: WorkflowTemplateItem) => {
+  const createFromTemplate = async (tpl: WorkflowTemplateItem) => {
     setCreatingId(tpl.id)
     try {
       const wf = await api.post<{ id: string }>(`/workflows/from-template/${tpl.id}`, {
@@ -287,7 +287,7 @@ export function WorkflowCenterPage() {
                 <Button
                   size="sm"
                   isLoading={creatingId === tpl.id}
-                  onClick={() => useTemplate(tpl)}
+                  onClick={() => createFromTemplate(tpl)}
                 >
                   {t('workflows.useTemplate')}
                 </Button>

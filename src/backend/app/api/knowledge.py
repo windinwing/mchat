@@ -41,7 +41,7 @@ router = APIRouter()
 
 @router.get("/embedding-models", response_model=list[EmbeddingModelResponse])
 async def list_embedding_models(
-    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """List uploaded local embedding models."""
@@ -101,7 +101,7 @@ async def create_knowledge_base(
 @router.get("/bases", response_model=list[KnowledgeBaseResponse])
 async def list_knowledge_bases(
     group_id: str | None = None,
-    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """List all knowledge bases for current user."""
@@ -112,7 +112,7 @@ async def list_knowledge_bases(
 @router.get("/bases/{kb_id}", response_model=KnowledgeBaseResponse)
 async def get_knowledge_base(
     kb_id: str,
-    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a specific knowledge base."""
@@ -155,7 +155,7 @@ class KbTokenizerFileContent(BaseModel):
 @router.get("/bases/{kb_id}/tokenizer/user_dict")
 async def read_kb_user_dict(
     kb_id: str,
-    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Read per-knowledge-base user dictionary file."""
@@ -235,7 +235,7 @@ async def delete_knowledge_base(
 async def list_documents(
     kb_id: str,
     folder_id: str | None = None,
-    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """List all documents in a knowledge base, optionally filtered by folder."""
@@ -281,7 +281,7 @@ async def delete_document(
 @router.post("/search", response_model=SearchResponse)
 async def search_documents(
     request: SearchRequest,
-    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Search documents using semantic search."""
@@ -350,7 +350,7 @@ async def import_url(
 )
 async def list_folders(
     kb_id: str,
-    admin: User = Depends(require_permission(Permission.KNOWLEDGE_WRITE)),
+    admin: User = Depends(require_permission(Permission.KNOWLEDGE_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """List all folders in a knowledge base (flat; client builds the tree)."""

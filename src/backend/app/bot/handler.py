@@ -5,10 +5,12 @@ from loguru import logger
 from sqlalchemy import select
 
 from app.bot.engine import process_message
-from app.bot.patent_links import inject_action_links, linkify_patent_ids, patent_link_settings_from_skills
+from app.bot.patent_links import linkify_patent_ids
 from app.bot.reply_persist import ensure_assistant_reply_persisted, persist_assistant_reply
 from app.services.llm_credentials import (
     ensure_ai_config_api_key,
+    ensure_ai_config_endpoint_allowed,
+    get_platform_default_ai_config,
     is_local_provider,
     is_usable_api_key,
 )
@@ -101,23 +103,7 @@ async def on_message_created(
                 ai_config = await _load_ai_config(conv.ai_config_id)
 
             if ai_config is None:
-                cfg_result = await db.execute(
-                    select(AIConfig)
-                    .where(AIConfig.is_default == True)
-                    .order_by(AIConfig.updated_at.desc())
-                    .limit(1)
-                )
-                ai_config = cfg_result.scalars().first()
-
-            if ai_config is None:
-                cfg_result = await db.execute(
-                    select(AIConfig).where(AIConfig.api_key != "").limit(1)
-                )
-                ai_config = cfg_result.scalar_one_or_none()
-
-            if ai_config is None:
-                cfg_result = await db.execute(select(AIConfig).limit(1))
-                ai_config = cfg_result.scalar_one_or_none()
+                ai_config = await get_platform_default_ai_config(db)
 
             if ai_config is None:
                 error_msg = (
@@ -146,6 +132,7 @@ async def on_message_created(
                 return
 
             ai_config = await ensure_ai_config_api_key(db, ai_config)
+            await ensure_ai_config_endpoint_allowed(db, ai_config)
             if not is_local_provider(ai_config.provider) and not is_usable_api_key(
                 ai_config.api_key
             ):

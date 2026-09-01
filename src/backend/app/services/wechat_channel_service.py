@@ -573,7 +573,7 @@ async def _process_text_message(
     except Exception as e:
         logger.warning(f"WeChat channel workflow trigger failed: {e}")
 
-    ai_config = await _resolve_ai_config(db, customer)
+    ai_config = await channel_resolve_ai_config(db, customer)
 
     if ai_config is None:
         return "未配置 AI 模型，请在管理后台设置默认模型或绑定客服 Agent 的模型。"

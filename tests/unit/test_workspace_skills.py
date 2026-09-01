@@ -49,6 +49,51 @@ def test_execute_skill_script_run(tmp_path):
     assert out == {"query": "hello"}
 
 
+def test_execute_skill_script_isolates_same_named_modules(tmp_path):
+    """A skill's top-level modules must not shadow another skill's.
+
+    Regression: two skills shipping their own ``narrative.py`` collided in
+    sys.modules when executed in the same process — the second skill's
+    ``from narrative import ...`` resolved to the first skill's module.
+    """
+    skill_a = tmp_path / "skill-a"
+    skill_a.mkdir()
+    (skill_a / "narrative.py").write_text(
+        "def build_report_narrative():\n    return 'a'\n",
+        encoding="utf-8",
+    )
+    (skill_a / "main.py").write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parent))\n"
+        "from narrative import build_report_narrative\n"
+        "def run(**_):\n"
+        "    return {'narrative': build_report_narrative()}\n",
+        encoding="utf-8",
+    )
+
+    skill_b = tmp_path / "skill-b"
+    skill_b.mkdir()
+    (skill_b / "narrative.py").write_text(
+        "def build_narrative():\n    return 'b'\n",
+        encoding="utf-8",
+    )
+    (skill_b / "main.py").write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parent))\n"
+        "from narrative import build_narrative\n"
+        "def run(**_):\n"
+        "    return {'narrative': build_narrative()}\n",
+        encoding="utf-8",
+    )
+
+    out_a = execute_skill_script(skill_a / "main.py", {})
+    assert out_a == {"narrative": "a"}
+    out_b = execute_skill_script(skill_b / "main.py", {})
+    assert out_b == {"narrative": "b"}
+
+
 def test_deploy_runner_script(tenant_env):
     ctx = build_workspace_context("user-1")
     path = deploy_runner_script(ctx.tenant_root)

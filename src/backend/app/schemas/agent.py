@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 _AUTO_REPLY_CHANNELS = {"widget", "wechat", "admin"}
 
@@ -90,12 +90,20 @@ class AIConfigResponse(BaseModel):
     is_default: bool
     created_at: datetime
     updated_at: datetime
-    api_key: str  # Return full key for admin panel display
+    # Kept as an empty string for backwards-compatible clients. API keys are
+    # write-only and must never be returned by an API response.
+    api_key: str = ""
+    has_api_key: bool = False
     # True when this config is a system-wide default owned by another account
     # and surfaced to the current admin/agent as a shared (read-only) config.
     shared: bool = False
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("api_key")
+    def redact_api_key(self, _value: str) -> str:
+        """Defense in depth: API keys are write-only in every serialization."""
+        return ""
 
 
 class CustomerConfigCreate(BaseModel):

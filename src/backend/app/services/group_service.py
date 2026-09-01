@@ -19,6 +19,7 @@ from app.schemas.group import (
     GroupResponse,
     GroupUpdateRequest,
 )
+from app.services.llm_credentials import get_accessible_ai_config
 
 
 def resolve_devbridge_project_allowlists(group: Group) -> dict[str, list[str]] | None:
@@ -40,7 +41,7 @@ def resolve_devbridge_project_allowlists(group: Group) -> dict[str, list[str]] |
 
 
 def _group_response(group: Group, **extra) -> GroupResponse:
-    return GroupResponse(
+    payload = dict(
         id=group.id,
         name=group.name,
         description=group.description,
@@ -51,8 +52,9 @@ def _group_response(group: Group, **extra) -> GroupResponse:
         created_at=group.created_at,
         updated_at=group.updated_at,
         member_count=len(group.members or []),
-        **extra,
     )
+    payload.update(extra)
+    return GroupResponse(**payload)
 
 
 def _member_response(member: GroupMember, user: User | None = None) -> GroupMemberResponse:
@@ -146,6 +148,10 @@ class GroupService:
         return [_group_response(group) for group in groups]
 
     async def create_group(self, actor_id: str, data: GroupCreateRequest) -> GroupResponse:
+        if data.ai_config_id and await get_accessible_ai_config(
+            self.db, data.ai_config_id, actor_id
+        ) is None:
+            raise HTTPException(status_code=404, detail="AI config not found")
         group = Group(
             name=data.name.strip(),
             description=(data.description or "").strip() or None,
@@ -162,7 +168,12 @@ class GroupService:
         await self.db.refresh(group)
         return _group_response(group, current_user_role="owner", member_count=1)
 
-    async def update_group(self, group_id: str, data: GroupUpdateRequest) -> GroupResponse:
+    async def update_group(
+        self,
+        group_id: str,
+        actor_id: str,
+        data: GroupUpdateRequest,
+    ) -> GroupResponse:
         group = await self.db.get(Group, group_id)
         if group is None:
             raise HTTPException(status_code=404, detail="Group not found")
@@ -174,6 +185,10 @@ class GroupService:
         if "default_skill_ids" in fields:
             group.default_skill_ids = fields["default_skill_ids"]
         if "ai_config_id" in fields:
+            if fields["ai_config_id"] and await get_accessible_ai_config(
+                self.db, fields["ai_config_id"], actor_id
+            ) is None:
+                raise HTTPException(status_code=404, detail="AI config not found")
             group.ai_config_id = fields["ai_config_id"] or None
         if "devbridge_project_allowlists" in fields:
             group.devbridge_project_allowlists = fields["devbridge_project_allowlists"]

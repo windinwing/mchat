@@ -32,7 +32,12 @@ def test_tool_result_display_text_outbound_assets():
 
 @pytest.mark.asyncio
 async def test_process_message_no_ai_config(db_session):
-    conversation = SimpleNamespace(id="conv-1", contact_info=None)
+    conversation = SimpleNamespace(
+        id="conv-1",
+        contact_info=None,
+        scope_type="personal",
+        scope_id=None,
+    )
     message = SimpleNamespace(
         id="msg-1",
         content="hi",
@@ -60,7 +65,12 @@ async def test_process_message_no_ai_config(db_session):
 
 @pytest.mark.asyncio
 async def test_process_message_missing_api_key(db_session):
-    conversation = SimpleNamespace(id="conv-1", contact_info=None)
+    conversation = SimpleNamespace(
+        id="conv-1",
+        contact_info=None,
+        scope_type="personal",
+        scope_id=None,
+    )
     message = SimpleNamespace(
         id="msg-1",
         content="hello",
@@ -70,6 +80,8 @@ async def test_process_message_missing_api_key(db_session):
     ai_config = SimpleNamespace(
         id="cfg-1",
         user_id="user-1",
+        provider="openai",
+        model="gpt-4o-mini",
         api_key="",
         system_prompt="You are helpful.",
         is_default=True,

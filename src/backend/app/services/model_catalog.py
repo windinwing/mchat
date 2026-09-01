@@ -130,6 +130,8 @@ async def _list_openai_compatible(params: ConnectionParams) -> list[str]:
     from app.services.llm_credentials import is_local_provider
 
     base = _resolve_base_url(params.provider, params.api_base)
+    if not base:
+        raise ValueError("An explicit API base is required for this provider")
     key = params.api_key or (
         params.provider if is_local_provider(params.provider) else "not-needed"
     )
@@ -145,7 +147,10 @@ async def _list_openai_compatible(params: ConnectionParams) -> list[str]:
 async def _list_anthropic(params: ConnectionParams) -> list[str]:
     from anthropic import AsyncAnthropic
 
-    client = AsyncAnthropic(api_key=params.api_key)
+    base = _resolve_base_url(params.provider, params.api_base)
+    if not base:
+        raise ValueError("An explicit API base is required for this provider")
+    client = AsyncAnthropic(api_key=params.api_key, base_url=base)
     page = await client.models.list()
     ids = sorted({m.id for m in page.data if getattr(m, "id", None)})
     return ids or list(STATIC_MODELS["anthropic"])
@@ -181,15 +186,15 @@ async def test_connection(
 
     raw_model = model or STATIC_MODELS.get(params.provider, ["test"])[0]
     probe_model = normalize_model_id(params.provider, raw_model)
-    from app.services.llm_credentials import resolve_api_key
-
     cfg = AIConfig(
         id="probe",
         user_id="probe",
         name="probe",
         provider=params.provider,
         model=probe_model,
-        api_key=resolve_api_key(params.provider, params.api_key),
+        # Connection probes only use an explicitly supplied key. Stored-key
+        # fallback is resolved by the API layer together with its trusted base.
+        api_key=(params.api_key or "").strip(),
         api_base=params.api_base or _resolve_base_url(params.provider, None),
         system_prompt=None,
         temperature=0,

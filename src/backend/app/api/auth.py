@@ -1,6 +1,6 @@
 """Auth API router."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -31,19 +31,28 @@ router = APIRouter()
 
 
 @router.get("/bootstrap", response_model=BootstrapResponse)
-async def bootstrap_hint() -> BootstrapResponse:
+async def bootstrap_hint(request: Request) -> BootstrapResponse:
     """Return default admin credentials hint when enabled (self-hosted dev).
 
     Also reports runtime edition flags (signup/cloud) so the frontend can show
     the correct login UI even when built with the wrong VITE_MCHAT_EDITION flag.
     """
-    show = settings.show_bootstrap_credentials
+    # Defense in depth: production never returns a password even if the
+    # visibility flag is accidentally enabled outside the normal startup path.
+    is_production = (
+        (settings.environment or "development").strip().lower() == "production"
+    )
+    show = settings.show_bootstrap_credentials and not is_production
     return BootstrapResponse(
         username=settings.admin_username,
         password=settings.admin_password if show else None,
         show_credentials=show,
-        signup_enabled=settings.signup_enabled,
-        cloud_edition=settings.cloud_mode,
+        signup_enabled=bool(
+            getattr(request.app.state, "mchat_signup_enabled", settings.signup_enabled)
+        ),
+        cloud_edition=bool(
+            getattr(request.app.state, "mchat_cloud_mode", settings.cloud_mode)
+        ),
     )
 
 

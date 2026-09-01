@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     sms_workflow_alert_enabled: bool = False
     chat_debug_log_enabled: bool = False
     chat_debug_extra_data_enabled: bool = False
+    # Max seconds to wait for the bot pipeline (AI generation + persistence)
+    # before /chat/send returns 502. Keep below the nginx 180s proxy timeout.
+    chat_process_timeout_seconds: float = 120.0
     notification_skills_enabled: bool = False
     notification_skill_allowlist: list[str] | None = None
 

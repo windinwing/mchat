@@ -181,7 +181,7 @@
 | POST | `/agents/ai-configs/models` | 拉取模型列表 |
 | POST | `/agents/ai-configs/test` | 测试 API 连接 |
 
-**AIConfig 对象:**
+**AIConfig 创建/更新请求:**
 ```json
 {
   "name": "GPT-4 客服",
@@ -195,6 +195,9 @@
   "is_default": true
 }
 ```
+
+API Key 为只写字段。创建、列表、详情和更新响应中的 `api_key` 固定为
+空字符串，并通过 `has_api_key` 表示是否已配置；更新时留空可保留现有 Key。
 
 ### 客户配置
 

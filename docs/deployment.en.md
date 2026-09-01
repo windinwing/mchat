@@ -76,12 +76,18 @@ Default administrator account (configured in `.env`):
 
 ```bash
 # 1. Create production env file
-cp ops/docker/.env.example ops/docker/.env.production
+cp ops/docker/.env.production.example ops/docker/.env.production
 # Edit .env.production with production values
 
 # 2. Start production services
 docker compose -f ops/docker/docker-compose.prod.yml --env-file ops/docker/.env.production up -d
 ```
+
+> **Security note for upgrades:** Older channel-rental versions may have copied
+> platform or template AI keys into tenant configs. The first production startup
+> removes copies it can identify, but an older API may already have returned the
+> plaintext. Rotate every provider key that was previously used as a platform or
+> template default after upgrading.
 
 ### Nginx reverse proxy (recommended)
 

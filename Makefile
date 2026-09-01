@@ -50,7 +50,7 @@ dev: ## Start Core dev servers (app.main — no portal/templates API)
 dev-worker: ## Start Core dev servers + worker (worker default disabled otherwise)
 	@MCHAT_DEV_WITH_WORKER=1 bash ops/scripts/dev-start.sh
 
-dev-stop: ## Stop processes on ports 3001 and 5173
+dev-stop: ## Stop Core dev ports (MCHAT_BACKEND_PORT/MCHAT_FRONTEND_PORT)
 	@bash ops/scripts/dev-stop.sh
 
 dev-db: ## Start local dev MySQL (Docker)
@@ -120,8 +120,8 @@ test-cov: ## Run tests with coverage report
 	$(WITH_VENV) python -m pytest ../../tests/ -v --cov=app --cov-report=term-missing
 
 lint: ## Run linters
-	cd $(BACKEND_DIR) && ruff check app/ 2>/dev/null || echo "ruff not installed"
-	cd src/frontend && npm run lint 2>/dev/null || echo "ESLint not configured"
+	$(WITH_VENV) ruff check --select E9,F63,F7,F82 app/ ../../tests/
+	cd src/frontend && npm run lint
 
 fmt: ## Format code
 	cd $(BACKEND_DIR) && ruff format app/ 2>/dev/null || echo "ruff not installed"

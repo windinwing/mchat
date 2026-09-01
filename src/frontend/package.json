@@ -9,8 +9,7 @@
   "scripts": {
     "dev": "npx vite",
     "build": "tsc -b && vite build",
-    "build:core": "tsc -p tsconfig.core.json && vite build",
-    "build:cloud": "tsc -b && vite build",
+    "build:core": "tsc -p tsconfig.core.json && VITE_MCHAT_EDITION=core vite build",
     "preview": "vite preview",
     "lint": "eslint ."
   },
@@ -43,6 +42,7 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^4.4.1",
     "eslint": "^9.24.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^16.4.0",
     "tailwindcss": "^4.1.4",
     "typescript": "^5.8.3",

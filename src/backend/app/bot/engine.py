@@ -15,7 +15,6 @@ from app.bot.messages import (
     build_tool_result_message,
     sanitize_history_messages,
 )
-from app.utils.chat_upload import attachment_prompt_text
 from app.bot.provider import create_provider
 from app.bot.patent_links import inject_action_links, linkify_patent_ids, patent_link_settings_from_skills
 from app.bot.patent_search_followup import (
@@ -43,6 +42,10 @@ from app.models.conversation import Conversation
 from app.models.customer import CustomerConfig
 from app.models.group import GroupMemoryEntry
 from app.models.knowledge import KnowledgeBase
+from app.services.llm_credentials import (
+    ensure_ai_config_endpoint_allowed,
+    get_platform_default_ai_config,
+)
 from app.models.message import Message
 from app.models.skill import Skill
 from app.utils.outbound_assets import (
@@ -443,33 +446,31 @@ async def process_message(
     """Process a user message through the bot pipeline."""
     try:
         if ai_config is None:
-            result = await db_session.execute(
-                select(AIConfig)
-                .where(AIConfig.is_default == True)
-                .order_by(AIConfig.updated_at.desc())
-                .limit(1)
-            )
-            ai_config = result.scalars().first()
+            ai_config = await get_platform_default_ai_config(db_session)
 
         if ai_config is None:
             yield "Error: No AI configuration available. Please configure an AI provider first."
             return
 
-        if not (ai_config.api_key or "").strip():
-            from app.services.llm_credentials import (
-                ensure_ai_config_api_key,
-                is_local_provider,
-                is_usable_api_key,
-            )
+        from app.services.llm_credentials import (
+            ensure_ai_config_api_key,
+            is_local_provider,
+            is_usable_api_key,
+        )
 
-            if not is_local_provider(ai_config.provider):
-                ai_config = await ensure_ai_config_api_key(db_session, ai_config)
-                if not is_usable_api_key(ai_config.api_key):
-                    yield (
-                        "Error: 未配置有效的 AI API 密钥。请在管理后台「模型工作台」填写 API Key，"
-                        "或在 .env 设置 DEEPSEEK_API_KEY / MOONSHOT_API_KEY。"
-                    )
-                    return
+        if not is_local_provider(ai_config.provider):
+            # Resolve empty *and placeholder/invalid* keys. Checking only for
+            # an empty string would skip a valid environment/platform fallback
+            # when the DB contains values such as "your-api-key" or "********".
+            ai_config = await ensure_ai_config_api_key(db_session, ai_config)
+            if not is_usable_api_key(ai_config.api_key):
+                yield (
+                    "Error: 未配置有效的 AI API 密钥。请在管理后台「模型工作台」填写 API Key，"
+                    "或在 .env 设置 DEEPSEEK_API_KEY / MOONSHOT_API_KEY。"
+                )
+                return
+
+        await ensure_ai_config_endpoint_allowed(db_session, ai_config)
 
         system_prompt = ai_config.system_prompt or "You are a helpful AI assistant."
         channel_extra = (

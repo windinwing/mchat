@@ -20,19 +20,27 @@ ln -sf "$DEPLOY_DIR/.env" src/backend/.env
 echo "==> Database migrate"
 cd src/backend
 set -a && source .env && set +a
+echo "==> Validate production security settings"
+python -c "from app.application import _validate_production_security; _validate_production_security()"
 python -m app.cli db migrate
 cd "$DEPLOY_DIR"
 
-echo "==> systemd user service"
+echo "==> systemd user service (Core: app.main:app)"
 mkdir -p ~/.config/systemd/user
-# 生产环境用 cloud.main（mchat-cloud-backend）；停掉并禁用 dev 的 app.main 服务，
-# 避免两者抢同一 3001 端口（dev 服务保留 service 文件但不启用）。
-cp ops/deploy/mchat-cloud-backend.service ~/.config/systemd/user/mchat-cloud-backend.service
+# Core and Cloud bind the same port. A Core deploy must stop the Cloud unit,
+# then install and restart only the app.main service.
+systemctl --user disable --now mchat-cloud-backend.service 2>/dev/null || true
+pkill -f "uvicorn cloud.main:app" 2>/dev/null || true
+cp ops/deploy/mchat-backend.service ~/.config/systemd/user/mchat-backend.service
 systemctl --user daemon-reload
-systemctl --user disable --now mchat-backend.service 2>/dev/null || true
-pkill -f "uvicorn app.main:app" 2>/dev/null || true
-systemctl --user enable mchat-cloud-backend.service
-systemctl --user restart mchat-cloud-backend.service
+systemctl --user enable mchat-backend.service
+systemctl --user restart mchat-backend.service
+sleep 2
+if ! systemctl --user is-active mchat-backend.service >/dev/null 2>&1; then
+  echo "ERROR: mchat-backend failed to start. Recent logs:"
+  journalctl --user -u mchat-backend.service -n 15 --no-pager || true
+  exit 1
+fi
 
 if command -v loginctl >/dev/null 2>&1; then
   loginctl enable-linger "$USER" 2>/dev/null || true
@@ -50,9 +58,21 @@ docker run -d --name mchat-frontend --restart unless-stopped \
 
 sleep 3
 echo "==> Health check"
-curl -sf http://127.0.0.1:3001/api/health && echo " backend OK" || echo " backend FAILED"
-curl -sf -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5180/ | grep -q 200 && echo " frontend OK" || echo " frontend check"
+if curl -sf http://127.0.0.1:3001/api/health >/dev/null; then
+  echo " backend OK"
+else
+  echo "ERROR: backend health check failed" >&2
+  systemctl --user status mchat-backend.service --no-pager -l || true
+  exit 1
+fi
+if curl -sf -o /dev/null http://127.0.0.1:5180/; then
+  echo " frontend OK"
+else
+  echo "ERROR: frontend health check failed" >&2
+  docker logs --tail 30 mchat-frontend 2>/dev/null || true
+  exit 1
+fi
 
-systemctl --user status mchat-cloud-backend.service --no-pager -l || true
+systemctl --user status mchat-backend.service --no-pager -l || true
 echo ""
 echo "Done. Check your server URL for /admin and /docs"

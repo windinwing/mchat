@@ -15,6 +15,7 @@ from app.models.ai_config import AIConfig
 from app.models.customer import CustomerConfig
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.services.llm_credentials import get_platform_default_ai_config
 from app.services.maintenance_gate import ensure_public_api_available
 from app.services.subscription_gate import ensure_channel_subscription_active
 from app.utils.request import extract_client_ip
@@ -54,11 +55,13 @@ def _session_expired(conversation: Conversation, ttl_hours: int) -> bool:
 
 
 def _visitor_matches(conversation: Conversation, visitor_token: str | None) -> bool:
-    if not visitor_token:
-        return False
-    if not conversation.visitor_id:
-        return True
-    return conversation.visitor_id == visitor_token
+    token = (visitor_token or "").strip()
+    return bool(
+        token
+        and conversation.user_id is None
+        and conversation.visitor_id
+        and conversation.visitor_id == token
+    )
 
 
 def _can_resume_widget_conversation(
@@ -163,13 +166,7 @@ async def prepare_widget_chat(
         ai_config = result.scalar_one_or_none()
 
     if ai_config is None:
-        result = await db.execute(
-            select(AIConfig)
-            .where(AIConfig.is_default == True)
-            .order_by(AIConfig.updated_at.desc())
-            .limit(1)
-        )
-        ai_config = result.scalars().first()
+        ai_config = await get_platform_default_ai_config(db)
 
     return WidgetChatContext(
         customer=customer,

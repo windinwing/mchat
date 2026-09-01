@@ -7,7 +7,11 @@ from starlette.requests import Request
 
 from app.models.conversation import Conversation
 from app.models.customer import CustomerConfig
-from app.services.widget_chat_service import prepare_widget_chat, widget_contact_info
+from app.services.widget_chat_service import (
+    _can_resume_widget_conversation,
+    prepare_widget_chat,
+    widget_contact_info,
+)
 from app.utils.chat_upload import validate_chat_attachment
 
 
@@ -60,3 +64,42 @@ async def test_prepare_widget_chat_updates_existing_conversation_timestamps(db_s
 def test_validate_chat_attachment_allows_common_video_types():
     validate_chat_attachment('demo.mp4', 'video/mp4', 1024)
     validate_chat_attachment('demo.webm', 'video/webm', 1024)
+
+
+@pytest.mark.parametrize(
+    "conversation",
+    [
+        Conversation(
+            user_id="victim",
+            visitor_id=None,
+            customer_id="customer-1",
+            status="active",
+        ),
+        Conversation(
+            user_id=None,
+            visitor_id=None,
+            customer_id="customer-1",
+            status="active",
+        ),
+        Conversation(
+            user_id=None,
+            visitor_id="real-token",
+            customer_id="customer-1",
+            status="active",
+        ),
+    ],
+)
+def test_widget_cannot_resume_nonvisitor_or_wrong_token_conversation(conversation):
+    customer = CustomerConfig(
+        id="customer-1",
+        name="Support",
+        user_id="owner",
+        enabled=True,
+    )
+
+    assert not _can_resume_widget_conversation(
+        conversation,
+        customer.id,
+        customer,
+        "attacker-token",
+    )

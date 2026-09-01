@@ -7,6 +7,7 @@ import inspect
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -139,6 +140,34 @@ def _dispatch_namespace(skill_dir: Path, main_module: Any, args: dict[str, Any])
     return _dispatch_cli(skill_dir, main_module, args)
 
 
+def _purge_foreign_skill_modules(skill_dir: Path) -> None:
+    """Drop sys.modules entries that don't belong to the skill being executed.
+
+    Skills are executed in-process and many ship top-level modules with generic
+    names (``narrative.py``, ``io_utils.py``, ``excel_export.py``...). The first
+    skill to run caches those names in ``sys.modules``; a later skill that does
+    ``from narrative import ...`` then resolves to the stale module from the
+    other skill dir (e.g. ``cannot import name 'build_report_narrative'``).
+    Before loading a skill, evict cached modules whose file lives outside the
+    skill dir so the skill's own ``sys.path.insert`` wins.
+    """
+    skill_dir = skill_dir.resolve()
+    stale = [
+        name
+        for path in skill_dir.iterdir()
+        if path.is_file() and path.suffix == ".py"
+        for name in (path.stem,)
+        if (mod := sys.modules.get(name)) is not None
+        and (mod_file := getattr(mod, "__file__", None)) is not None
+        and Path(mod_file).resolve() != skill_dir / path.name
+    ]
+    for name in stale:
+        sys.modules.pop(name, None)
+
+
+_SKILL_MODULE_LOCK = threading.Lock()
+
+
 def execute_skill_script(script_path: Path, args: dict[str, Any]) -> Any:
     """Run main.py/tool.py entry and return JSON-serializable result.
 
@@ -150,11 +179,15 @@ def execute_skill_script(script_path: Path, args: dict[str, Any]) -> Any:
     """
     script_path = script_path.resolve()
     skill_dir = script_path.parent
-    spec = importlib.util.spec_from_file_location("skill_entry", script_path)
-    if spec is None or spec.loader is None:
-        return {"error": f"Failed to load skill script: {script_path}"}
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Module loading mutates global sys.modules/sys.path; serialize it so
+    # concurrent skill executions can't stomp each other's module cache.
+    with _SKILL_MODULE_LOCK:
+        _purge_foreign_skill_modules(skill_dir)
+        spec = importlib.util.spec_from_file_location("skill_entry", script_path)
+        if spec is None or spec.loader is None:
+            return {"error": f"Failed to load skill script: {script_path}"}
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
 
     if hasattr(module, "run"):
         run_fn = module.run

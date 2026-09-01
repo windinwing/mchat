@@ -37,6 +37,7 @@ interface AIConfig {
   provider: string
   model: string
   api_key: string
+  has_api_key: boolean
   api_base: string | null
   system_prompt: string | null
   temperature: number
@@ -191,11 +192,16 @@ export function ModelProviderWorkbench() {
       delete (payload as any).id
       delete (payload as any).created_at
       delete (payload as any).updated_at
+      delete (payload as any).has_api_key
+      delete (payload as any).shared
+      if (!payload.api_key?.trim()) {
+        delete payload.api_key
+      }
       const updated = await api.put<AIConfig>(
         `/agents/ai-configs/${selectedId}`,
         payload,
       )
-      setDraft({ ...draft, ...updated, api_key: updated.api_key || draft.api_key })
+      setDraft({ ...draft, ...updated, api_key: '' })
       setConfigs((prev) =>
         prev.map((c) => (c.id === selectedId ? { ...c, ...updated } : c)),
       )
@@ -480,6 +486,7 @@ export function ModelProviderWorkbench() {
                   onChange={(e) =>
                     setDraft({ ...draft, api_key: e.target.value })
                   }
+                  placeholder={draft.has_api_key ? t('portal.apiKeyKeepHint') : undefined}
                   autoComplete="off"
                 />
                 <div>
@@ -563,7 +570,7 @@ export function ModelProviderWorkbench() {
                           >
                             {t('common.apply')}
                           </Button>
-                          {!enabled && (
+                          {!enabled && (!!draft.api_key?.trim() || isLocalProvider(draft.provider || '')) && (
                             <Button
                               size="sm"
                               variant="ghost"

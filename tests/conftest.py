@@ -30,7 +30,7 @@ from sqlalchemy.pool import NullPool
 
 from app.core.database import Base, get_db
 from app.core.config import settings as app_settings
-from app.main import create_app
+from app.application import create_app
 
 test_engine = create_async_engine(
     TEST_DATABASE_URL,

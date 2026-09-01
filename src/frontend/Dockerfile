@@ -6,8 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install dependencies
-RUN npm install
+# Install exactly the locked dependency graph
+RUN npm ci
 
 # Copy source code
 COPY . .
